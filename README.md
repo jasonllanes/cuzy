@@ -34,3 +34,19 @@ for playing with friends; tighten the policies before anything more serious.
 Art credits: Sunnyside World, Super Retro World Character Pack (Gif, Noiracide, Romi), the ENEMY pack
 and the Apocalypse pack. See `public/assets/retro/LICENCE.txt` and check each pack's licence
 before making the repository public.
+
+
+## Credits
+
+Cuzy uses art by these creators. Please visit their pages and support them (the same list is on the in-game About page).
+
+- **Super Retro World: Character Pack**: Gif (@gif_not_jif), Noiracide (@Noiracide) and Romi (@DessRomaric): https://gif-superretroworld.itch.io/character-pack
+- **Sunnyside World**: Daniel Diggle: https://danieldiggle.itch.io/sunnyside
+- **Tiny Farm RPG: Asset Pack [16x16]** (free version): Emanuelle (emanuelledev): https://emanuelledev.itch.io/farm-rpg
+- **Modern tiles (free)**, characters and interiors: LimeZu (author not fully confirmed for this exact free pack): https://limezu.itch.io
+- **Post-Apocalypse Pixel Art Asset Pack**: TheLazyStone (free for non-commercial use): https://thelazystone.itch.io/post-apocalyptic-pixel-art-asset-pack
+- **Basic monster and undead sprites**: Frostwindz (named in the pack's license; exact page not found): https://frostwindz.itch.io
+- **Free Pixel Art Weapon Icons**: medievalmore: https://medievalmore.itch.io/free-weapon-icons
+- Fonts: Pixelify Sans (Stefie Justprince) and Nunito (Vernon Adams, Jacques Le Bailly, Manvel Shmavonyan), via Google Fonts.
+
+The art belongs to its creators and is used under their free licenses; if you fork this project, check each pack's license before sharing the files.

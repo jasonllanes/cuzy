@@ -829,3 +829,115 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .invite-actions { display: flex; gap: 6px; }
 .invite-timer { position: absolute; left: 0; bottom: 0; height: 4px; width: 100%; background: var(--rose); transform-origin: left; animation: invite-drain linear forwards; }
 @keyframes invite-drain { to { transform: scaleX(0); } }
+
+.online-sub { font: 700 0.8rem var(--pixel); color: var(--ink-soft); margin-top: 4px; }
+.online-row.room { background: #fff3df; }
+.online-note { margin: 2px 0 0; font-size: 0.72rem; }
+
+.room-pause { z-index: 40; background: rgba(40, 28, 22, 0.55); }
+.room-pause .trophy { font-size: 2.6rem; }
+
+/* ---------- swords, the chest at home, and the shop tabs ---------- */
+.shop-tabs { display: flex; gap: 8px; margin: 4px 0 12px; }
+.shop-tab { font: 700 0.95rem var(--pixel); padding: 6px 14px; border: 3px solid var(--wood); border-radius: 12px; background: #fff; color: var(--ink); cursor: pointer; }
+.shop-tab.on { background: var(--rose); color: #fff; border-color: var(--rose); }
+.wicon { display: inline-block; width: 64px; height: 64px; flex: none; background-size: 64px 64px; background-repeat: no-repeat; image-rendering: pixelated; }
+.wicon.sm { width: 32px; height: 32px; background-size: 32px 32px; }
+.weapon-skill { cursor: pointer; display: grid; place-items: center; }
+.sword-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.sword-card { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; background: #fff; border: 3px solid var(--wood); border-radius: 14px; padding: 8px 12px; }
+.sword-card.is-equipped { border-color: var(--rose); background: #fff0f3; }
+.sword-info h3 { margin: 0; font: 700 1rem var(--pixel); }
+.sword-info h3 small { color: var(--rose); }
+.sword-info p { margin: 2px 0; font-size: 0.82rem; }
+.sword-blurb { color: var(--ink-soft); font-style: italic; }
+@media (max-width: 900px) { .sword-grid { grid-template-columns: 1fr; } }
+.store-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.store-grid { display: grid; grid-template-columns: repeat(auto-fill, 56px); gap: 6px; }
+.panel.storage { padding: 16px 20px 18px; width: min(760px, 94vw); max-height: 90vh; overflow-y: auto; }
+@media (max-width: 700px) { .store-cols { grid-template-columns: 1fr; } }
+.fx-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--wood); vertical-align: -1px; }
+
+/* ---------- weather and clock, top centre ---------- */
+.weather-chip { top: 6px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 4px 16px; font: 700 0.95rem var(--pixel); color: var(--ink); background: var(--paper); border: 3px solid var(--wood); border-radius: 999px; pointer-events: none; white-space: nowrap; z-index: 5; }
+.weather-chip small { color: var(--ink-soft); font-weight: 400; }
+.wc-sep { color: var(--ink-soft); }
+.wave-hud { top: 52px; }
+.wave-hud.with-room { top: 110px; }
+.room-panel { top: 50px; }
+
+/* ---------- quantity picker ---------- */
+.qty-overlay { z-index: 60; }
+.qty-card { padding: 16px 20px; width: min(340px, 92vw); display: grid; gap: 10px; }
+.qty-head { display: flex; align-items: center; gap: 12px; }
+.qty-head h3 { margin: 0; font: 700 1.1rem var(--pixel); color: var(--rose); }
+.qty-head small { color: var(--ink-soft); }
+.qty-row { display: flex; gap: 6px; align-items: center; }
+.qty-row input[type='number'] { width: 90px; }
+.qty-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.hot-slot[draggable='true'] { cursor: grab; }
+
+/* ---------- chat feed (bottom left) and commands ---------- */
+.chat-log { left: 14px; bottom: 124px; z-index: 7; pointer-events: none; }
+.chat-log.open { pointer-events: auto; }
+.chat-line { white-space: pre-wrap; animation: chatfade 14s forwards; }
+.chat-log.open .chat-line { animation: none; opacity: 1; }
+.chat-line.system { background: rgba(232, 244, 255, 0.92); font-weight: 700; }
+@keyframes chatfade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.chat-box { display: grid; gap: 4px; }
+.chat-hints { display: grid; gap: 2px; background: rgba(255, 250, 240, 0.95); border: 3px solid var(--wood); border-radius: 12px; padding: 6px 8px; font-size: 0.8rem; max-height: 220px; overflow-y: auto; }
+.chat-hints button { all: unset; cursor: pointer; display: flex; gap: 8px; padding: 1px 4px; border-radius: 6px; }
+.chat-hints button:hover { background: #ffe9ee; }
+.chat-hints code { font-weight: 800; color: var(--rose); min-width: 108px; }
+.chat-hints span { color: var(--ink-soft); }
+.chat-note { background: rgba(255, 250, 240, 0.9); border-radius: 8px; padding: 2px 8px; color: var(--ink-soft); width: fit-content; }
+
+/* ---------- teams as columns of slots ---------- */
+.team-cols { display: grid; gap: 10px; margin: 8px 0 12px; }
+.team-col { border: 3px solid var(--team); border-radius: 14px; background: color-mix(in srgb, var(--team) 10%, #fffaf0); padding: 8px; display: grid; gap: 8px; align-content: start; }
+.team-col h4 { margin: 0; font: 700 1rem var(--pixel); color: var(--team); display: flex; justify-content: space-between; align-items: center; }
+.team-col h4 small { color: var(--ink-soft); font-weight: 400; }
+.team-slot { min-height: 96px; border-radius: 12px; border: 3px dashed color-mix(in srgb, var(--team) 55%, #fff); display: grid; place-items: center; text-align: center; padding: 4px; background: rgba(255, 255, 255, 0.55); font: inherit; color: var(--ink-soft); position: relative; }
+button.team-slot { cursor: pointer; }
+button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
+.team-slot.filled { border-style: solid; background: #fff; color: var(--ink); }
+.team-slot.me { box-shadow: 0 0 0 3px var(--team); }
+.team-slot b { font: 700 0.85rem var(--pixel); display: block; }
+.team-slot small { display: block; font-size: 0.72rem; color: var(--ink-soft); }
+
+.meter.xp .meter-fill { background: #a78bfa; }
+.meter.xp.low { animation: none; }
+.meter.xp.low .meter-fill { background: #a78bfa; }
+.lvl-chip { display: inline-flex; align-items: center; gap: 8px; font: 700 0.9rem var(--pixel); color: #6b4fc9; background: #efe8ff; border: 3px solid #b9a5f5; border-radius: 999px; padding: 2px 12px; }
+.lvl-chip i { display: inline-block; width: 70px; height: 8px; border-radius: 999px; background: #d9ceff; overflow: hidden; }
+.lvl-chip i b { display: block; height: 100%; background: #8a6cf0; }
+
+.room-settings-card { padding: 16px 20px 18px; width: min(760px, 94vw); max-height: 90vh; overflow-y: auto; }
+
+.map-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 4px 0 6px; }
+.map-card { text-align: left; align-items: flex-start; }
+@media (max-width: 560px) { .map-grid { grid-template-columns: 1fr; } }
+
+/* ---------- main menu, about and credits ---------- */
+.home-card { max-width: 560px; }
+.home-menu { display: grid; gap: 10px; margin-top: 10px; }
+.home-btn { display: grid; gap: 2px; text-align: left; padding: 12px 18px; border: 3px solid var(--wood); border-radius: 16px; background: #fff; color: var(--ink); cursor: pointer; font-family: var(--body); transition: transform 0.1s, background 0.1s; }
+.home-btn b { font: 700 1.25rem var(--pixel); }
+.home-btn small { color: var(--ink-soft); font-size: 0.8rem; }
+.home-btn:hover { transform: translateY(-2px); background: #fff6f0; }
+.home-btn.play { background: #e4f6e4; border-color: #6fae6a; }
+.home-btn.play b { color: #3d8a47; }
+.home-btn.exit { background: transparent; border-style: dashed; text-align: center; }
+.page-title { margin: 8px 0 4px; font: 700 1.5rem var(--pixel); color: var(--rose); }
+.menu-back { display: block; margin: 0 auto 6px; font: 700 0.85rem var(--pixel); color: var(--ink-soft); background: none; border: none; cursor: pointer; text-decoration: underline dashed; }
+.about-page { max-height: 70vh; overflow-y: auto; padding-right: 6px; }
+.credits { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 8px; }
+.credit { display: grid; gap: 1px; background: #fff; border: 3px solid var(--wood); border-radius: 12px; padding: 8px 12px; font-size: 0.85rem; }
+.credit b { font: 700 0.95rem var(--pixel); }
+.credit-by { color: var(--rose); font-weight: 800; }
+.credit a, .tools a { color: #3b7bd9; word-break: break-all; }
+.credit small { color: var(--ink-soft); }
+.credit-check.page, .credit-check.file { color: #3d8a47; }
+.credit-check.guess { color: #b46a00; }
+.credit-note { font-style: italic; }
+.tools { gap: 4px; font-size: 0.85rem; }

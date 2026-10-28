@@ -35,6 +35,7 @@ export default function MonsterIcon({ type, size = 32 }) {
         backgroundImage: `url(${base}assets/${file}.png)`,
         backgroundSize: `${sheetW * scale}px ${fh * scale}px`,
         backgroundPosition: '0 0',
+        filter: def.tint || undefined,
       }}
     />
   );

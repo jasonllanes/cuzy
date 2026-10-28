@@ -5,10 +5,10 @@ export const SLOTS = 9; // the hotbar is the whole bag for now
 export const emptyInventory = () => Array(SLOTS).fill(null);
 
 // Restores a saved array, dropping anything unknown (e.g. items removed in an update).
-export function sanitize(saved) {
-  const inv = emptyInventory();
+export function sanitize(saved, slots = SLOTS) {
+  const inv = Array(slots).fill(null);
   if (!Array.isArray(saved)) return inv;
-  saved.slice(0, SLOTS).forEach((s, i) => {
+  saved.slice(0, slots).forEach((s, i) => {
     if (s && ITEMS[s.id] && s.qty > 0) inv[i] = { id: s.id, qty: Math.min(s.qty, ITEMS[s.id].stack) };
   });
   return inv;

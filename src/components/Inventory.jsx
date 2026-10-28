@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { ITEMS, breaksOnImpact, consumeVerb, isConsumable, throwDamage } from '../game/items';
 import ItemIcon from './ItemIcon';
+import { hp100 } from '../game/stats';
 
 export function Effects({ def }) {
   return (
     <div className="effects">
-      {def.heal > 0 && <span className="effect heal">❤️ +{def.heal} HP</span>}
+      {def.heal > 0 && <span className="effect heal">❤️ +{hp100(def.heal)} HP</span>}
       {def.energy > 0 && <span className="effect energy">⚡ +{Math.round(def.energy * 100)}% Stamina</span>}
       <span className="effect throw">🎯 Throw · {throwDamage(def)} dmg{breaksOnImpact(def) ? ' · splats' : ''}</span>
     </div>

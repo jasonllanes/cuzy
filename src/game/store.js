@@ -21,7 +21,7 @@ let timer = 0;
 export function rawClient() {
   if (!cloudOn) return Promise.resolve(null);
   basePromise ||= import('@supabase/supabase-js')
-    .then(({ createClient }) => createClient(URL, KEY, { realtime: { params: { eventsPerSecond: 20 } } }))
+    .then(({ createClient }) => createClient(URL, KEY, { realtime: { params: { eventsPerSecond: 40 }, worker: typeof Worker !== 'undefined' } }))
     .catch((err) => {
       console.warn('[cuzy] could not load Supabase:', err.message || err);
       return null;

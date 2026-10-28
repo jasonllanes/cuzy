@@ -1,6 +1,7 @@
 import { CHUNK, CHUNK_PX, T, WATER, GRASS } from './world';
 import { GROUND_DIRT, GROUND_GRASS } from './apoc';
 import { hash2 } from './rng';
+import { frostPixels } from './assets';
 
 // Quadrant table for the 4x4-style grass autotile in the pack.
 // Each entry is [cellX, cellY] in tiles; the quadrant offset is added separately.
@@ -34,13 +35,48 @@ function drawAuto(ctx, sheet, dx, dy, x, y, mask) {
   quad(ctx, sheet, Q.br, s, e, mask(x + 1, y + 1), dx, dy);
 }
 
+// The warehouse map: poured concrete with seams, oil stains, hazard lines, and the odd crack
+function renderDepotFloor(world, canvas, ctx, chunk) {
+  const tones = ['#8e9096', '#868990', '#92949a', '#898b92'];
+  for (let ty = 0; ty < CHUNK; ty++) {
+    for (let tx = 0; tx < CHUNK; tx++) {
+      const x = chunk.cx * CHUNK + tx;
+      const y = chunk.cy * CHUNK + ty;
+      const h = hash2(x, y, world.seed + 95);
+      ctx.fillStyle = tones[Math.floor(h * tones.length)];
+      ctx.fillRect(tx * T, ty * T, T, T);
+      // slab seams every 4 tiles
+      ctx.fillStyle = 'rgba(40,42,50,0.35)';
+      if (x % 4 === 0) ctx.fillRect(tx * T, ty * T, 1, T);
+      if (y % 4 === 0) ctx.fillRect(tx * T, ty * T, T, 1);
+      // a yellow safety lane every 12 tiles
+      if (y % 12 === 5) {
+        ctx.fillStyle = 'rgba(230,190,40,0.75)';
+        ctx.fillRect(tx * T, ty * T + 6, T, 2);
+      }
+      if (h < 0.05) {
+        ctx.fillStyle = 'rgba(30,30,40,0.3)'; // oil
+        ctx.fillRect(tx * T + 3, ty * T + 4, 10, 7);
+        ctx.fillRect(tx * T + 5, ty * T + 3, 6, 9);
+      } else if (h < 0.1) {
+        ctx.fillStyle = 'rgba(40,42,50,0.5)'; // a crack
+        ctx.fillRect(tx * T + 2, ty * T + 5, 5, 1);
+        ctx.fillRect(tx * T + 6, ty * T + 6, 4, 1);
+        ctx.fillRect(tx * T + 9, ty * T + 7, 4, 1);
+      }
+    }
+  }
+  return canvas;
+}
+
 // Survival: every tile is a 16px square cut from the Apocalypse ground tileset
 function renderApocChunk(world, img, chunk) {
   const canvas = document.createElement('canvas');
   canvas.width = CHUNK_PX;
   canvas.height = CHUNK_PX;
   const ctx = canvas.getContext('2d');
-  const sheet = img['apoc/bg'];
+  const sheet = img[`apoc/${world.mapInfo?.ground === 'concrete' ? 'bg' : world.mapInfo?.ground || 'bg'}`];
+  if (world.depot) return renderDepotFloor(world, canvas, ctx, chunk);
   for (let ty = 0; ty < CHUNK; ty++) {
     for (let tx = 0; tx < CHUNK; tx++) {
       const x = chunk.cx * CHUNK + tx;
@@ -48,6 +84,25 @@ function renderApocChunk(world, img, chunk) {
       const cells = world.type(x, y) === GRASS ? GROUND_GRASS : GROUND_DIRT;
       const [cx, cy] = cells[Math.floor(hash2(x, y, world.seed + 95) * cells.length)];
       ctx.drawImage(sheet, cx * 16, cy * 16, 16, 16, tx * T, ty * T, 16, 16);
+    }
+  }
+  if (world.frost) {
+    // snow over everything: a pale wash, frozen mud where the ground is bare, and a sprinkling of drifts
+    frostPixels(ctx, CHUNK_PX, CHUNK_PX, 0.88);
+    for (let ty = 0; ty < CHUNK; ty++) {
+      for (let tx = 0; tx < CHUNK; tx++) {
+        const x = chunk.cx * CHUNK + tx;
+        const y = chunk.cy * CHUNK + ty;
+        if (world.type(x, y) !== GRASS) {
+          ctx.fillStyle = 'rgba(105,140,195,0.34)';
+          ctx.fillRect(tx * T, ty * T, T, T);
+        }
+        const h = hash2(x, y, world.seed + 96);
+        if (h < 0.3) {
+          ctx.fillStyle = h < 0.1 ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.55)';
+          ctx.fillRect(tx * T + Math.floor(h * 90) % 11, ty * T + Math.floor(h * 400) % 12, 3 + (Math.floor(h * 50) % 3), 2);
+        }
+      }
     }
   }
   const ox = chunk.cx * CHUNK_PX;
@@ -59,7 +114,72 @@ function renderApocChunk(world, img, chunk) {
   return canvas;
 }
 
+// The floor and walls of the dungeon you are in. Only the dungeon you are in has any; the rest is black.
+function renderDungeonFloor(world, canvas, ctx, chunk) {
+  ctx.fillStyle = '#0b090e';
+  ctx.fillRect(0, 0, CHUNK_PX, CHUNK_PX);
+  const az = world.activeZone;
+  if (!az || az.rx !== chunk.zone.rx || az.ry !== chunk.zone.ry) return canvas;
+  const L = world.dungeonLayout(az.rx, az.ry);
+  const pal = {
+    crypt: { floor: ['#555a6e', '#5b6076', '#50556a', '#5f647a'], seam: 'rgba(20,22,34,0.35)', wall: '#2b2d3d', top: '#454860', hi: '#5d6079' },
+    cave: { floor: ['#6b5a46', '#725f4a', '#645441', '#6e5c47'], seam: 'rgba(30,20,12,0.3)', wall: '#2f2620', top: '#4a3d31', hi: '#5c4c3d' },
+    ruin: { floor: ['#9a7448', '#a07a4e', '#946d42', '#a47e52'], seam: 'rgba(60,35,15,0.4)', wall: '#4a3020', top: '#6e4a2c', hi: '#8a6038' },
+  }[L.kind];
+  for (let ty = 0; ty < CHUNK; ty++) {
+    for (let tx = 0; tx < CHUNK; tx++) {
+      const wx = chunk.cx * CHUNK + tx;
+      const wy = chunk.cy * CHUNK + ty;
+      const lx = wx - L.ox;
+      const ly = wy - L.oy;
+      const h = hash2(wx, wy, world.seed + 97);
+      if (L.isFloor(lx, ly)) {
+        ctx.fillStyle = pal.floor[Math.floor(h * pal.floor.length)];
+        ctx.fillRect(tx * T, ty * T, T, T);
+        ctx.fillStyle = pal.seam;
+        if (L.kind === 'ruin') ctx.fillRect(tx * T, ty * T + 15, T, 1);
+        else {
+          ctx.fillRect(tx * T, ty * T, T, 1);
+          ctx.fillRect(tx * T, ty * T, 1, T);
+        }
+        if (h < 0.06) {
+          ctx.fillStyle = 'rgba(235,230,215,0.8)'; // bones
+          ctx.fillRect(tx * T + 4, ty * T + 6, 5, 1);
+          ctx.fillRect(tx * T + 6, ty * T + 4, 1, 5);
+          ctx.fillRect(tx * T + 10, ty * T + 9, 3, 1);
+        } else if (h < 0.1) {
+          ctx.fillStyle = pal.seam;
+          ctx.fillRect(tx * T + 3, ty * T + 5, 6, 1);
+          ctx.fillRect(tx * T + 8, ty * T + 6, 4, 1);
+        }
+      } else if (L.isWall(lx, ly)) {
+        ctx.fillStyle = pal.wall;
+        ctx.fillRect(tx * T, ty * T, T, T);
+        ctx.fillStyle = pal.top;
+        ctx.fillRect(tx * T, ty * T, T, T - 3);
+        ctx.fillStyle = pal.hi;
+        ctx.fillRect(tx * T, ty * T, T, 2);
+        if (L.kind !== 'cave') {
+          ctx.fillStyle = pal.wall;
+          ctx.fillRect(tx * T, ty * T + 7, T, 1);
+          ctx.fillRect(tx * T + ((wy % 2) ? 4 : 10), ty * T, 1, 7);
+        } else if (h < 0.4) {
+          ctx.fillStyle = pal.hi;
+          ctx.fillRect(tx * T + 3 + Math.floor(h * 20), ty * T + 5, 4, 3);
+        }
+      }
+    }
+  }
+  return canvas;
+}
+
 export function renderChunk(world, img, chunk) {
+  if (chunk.zone) {
+    const c = document.createElement('canvas');
+    c.width = CHUNK_PX;
+    c.height = CHUNK_PX;
+    return renderDungeonFloor(world, c, c.getContext('2d'), chunk);
+  }
   if (world.apoc) return renderApocChunk(world, img, chunk);
   const canvas = document.createElement('canvas');
   canvas.width = CHUNK_PX;

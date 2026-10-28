@@ -5,8 +5,10 @@ import { MAX_LEVEL } from './upgrades';
 
 const PREP_FIRST = 20; // seconds to get ready before wave 1
 const PREP_BETWEEN = 14;
+const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
+const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
 const MAX_ALIVE = 45;
-const SNAPSHOT_EVERY = 0.1;
+const SNAPSHOT_EVERY = 0.125; // Wave Defense and Survival snapshots per second to the room: a few less keeps busy rooms under Supabase's message limit
 const HOUSE_SOFTNESS = 0.35; // the house shrugs off hits better than a single barricade does
 export const BARRICADE_RECT = (b) => ({ x: b.x - 8, y: b.y - 14, w: 16, h: 16 });
 
@@ -74,6 +76,9 @@ export class WaveSim {
     this.queue = [];
     this.spawnT = 0;
     this.spawnGap = 1;
+    this.fightT = 0; // how long this wave has been going
+    this.surged = false;
+    this.enraged = false;
     this.baseMax = this.diff.baseHp;
     this.baseHp = this.baseMax;
     this.snapT = 0;
@@ -173,6 +178,8 @@ export class WaveSim {
       return;
     }
     // fight: trickle monsters in, then wait for the last one to fall
+    this.fightT += dt;
+    if (this.theme === 'apoc') this.survivalPressure();
     this.spawnT -= dt;
     if (this.queue.length && this.spawnT <= 0 && this.monsters.filter((m) => m.state !== 'dead').length < MAX_ALIVE) {
       if (this.spawnMonster(this.queue[this.queue.length - 1])) this.queue.pop();
@@ -185,10 +192,16 @@ export class WaveSim {
     this.wave++;
     this.queue = waveList(this.wave, this.diff, this.theme);
     this.waveTotal = this.queue.length;
-    this.spawnGap = Math.min(2, Math.max(0.3, (16 + this.wave * 2) / this.queue.length));
+    this.spawnGap = this.theme === 'apoc'
+      ? Math.min(1.6, Math.max(0.22, (12 + this.wave * 1.5) / this.queue.length)) // Survival: they pour in faster
+      : Math.min(2, Math.max(0.3, (16 + this.wave * 2) / this.queue.length));
     this.spawnT = 0;
+    this.fightT = 0;
+    this.surged = false;
+    this.enraged = false;
     this.phase = 'fight';
-    this.emit({ type: 'start', wave: this.wave, boss: this.wave === TOTAL_WAVES });
+    const bosses = this.queue.filter((t) => MONSTERS[t].boss).length;
+    this.emit({ type: 'start', wave: this.wave, boss: this.wave === TOTAL_WAVES, bosses });
   }
 
   finishWave() {
@@ -198,25 +211,43 @@ export class WaveSim {
       return;
     }
     this.phase = 'prep';
-    this.timer = PREP_BETWEEN;
+    this.timer = this.theme === 'apoc' ? PREP_BETWEEN_APOC : PREP_BETWEEN;
     // the builders patch things up between waves
     for (const b of this.barricades) b.hp = Math.min(b.max, b.hp + b.max * 0.35);
     this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.1);
     this.emit({ type: 'cleared', wave: this.wave });
   }
 
-  spawnMonster(type) {
+  // Survival only: halfway through a wave a pack of runners comes in from one side, and a wave that drags on
+  // sends the survivors into a frenzy.
+  survivalPressure() {
+    if (!this.surged && this.wave >= 3 && this.queue.length <= this.waveTotal / 2) {
+      this.surged = true;
+      const ang = Math.random() * Math.PI * 2;
+      const n = Math.min(10, 2 + this.wave);
+      for (let i = 0; i < n; i++) this.spawnMonster('z_runner', ang + (Math.random() - 0.5) * 0.5, true);
+      this.emit({ type: 'surge', n, dir: ['east', 'south', 'west', 'north'][Math.round(((ang / (Math.PI * 2)) % 1) * 4 + 4) % 4] });
+    }
+    if (!this.enraged && this.fightT > ENRAGE_AFTER) {
+      this.enraged = true;
+      this.emit({ type: 'enrage' });
+    }
+  }
+
+  spawnMonster(type, angle = null, extra = false) {
     const def = MONSTERS[type];
     const flyer = def.kind === 'fly' || def.fly;
     for (let i = 0; i < 12; i++) {
-      const ang = Math.random() * Math.PI * 2;
+      const ang = angle ?? Math.random() * Math.PI * 2;
       const r = 210 + Math.random() * 50;
       const x = this.center.x + Math.cos(ang) * r;
       const y = this.center.y + Math.sin(ang) * r;
       if (!flyer && this.world.isBlocked(x - 4, y - 3, 8, 3)) continue;
-      const hp = Math.max(1, Math.round(def.hp * this.diff.hp));
+      // in Survival every wave is a little tougher and quicker than the last
+      const apoc = this.theme === 'apoc';
+      const hp = Math.max(1, Math.round(def.hp * this.diff.hp * (apoc ? 1 + 0.06 * (this.wave - 1) : 1)));
       this.monsters.push({
-        id: this.nextId++, type, x, y, hp, max: hp, face: 1, state: 'walk', t: 0, anim: Math.random() * 4,
+        sp: apoc ? 1 + 0.03 * (this.wave - 1) : 1, id: this.nextId++, type, x, y, hp, max: hp, face: 1, state: 'walk', t: 0, anim: Math.random() * 4,
         cd: 0.5 + Math.random(), atk: 0, kx: 0, ky: 0, stuck: 0, dirv: 0,
       });
       return true;
@@ -246,7 +277,7 @@ export class WaveSim {
     }
 
     const players = this.g.waveTargets().filter((p) => !p.hidden);
-    const speed = def.speed * (def.scale ? 1 : 1);
+    const speed = def.speed * (m.sp || 1) * (this.enraged ? 1.25 : 1);
     const scale = def.scale || 1;
     const reach = 8 + scale * 5;
 

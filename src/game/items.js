@@ -17,7 +17,7 @@ export const ITEMS = {
   jam: { name: 'Berry Jam', desc: "Somebody's grandma made this.", icon: single('jar_02', 10, 13), stack: 10, heal: 1.5 },
   milk: { name: 'Fresh Milk', desc: 'Still a little bit warm. Smooth and refreshing.', icon: single('milk', 10, 12), stack: 10, heal: 0.5, energy: 0.5 },
   egg: { name: 'Soft Egg', desc: 'Laid this morning, probably.', icon: single('egg', 10, 11), stack: 10, heal: 1, throw: 1 },
-  coin: { name: 'Lucky Coin', desc: 'Warm to the touch. Always lands on its good side.', icon: single('coin', 8, 7), stack: 99, throw: 1 },
+  coin: { name: 'Lucky Coin', desc: 'Warm to the touch. Always lands on its good side.', icon: single('coin', 8, 7), stack: 9999, throw: 1 },
   gold: { name: 'Gold Nugget', desc: 'Heavier than it looks. Great for throwing.', icon: single('ore_gold', 10, 10), stack: 30, throw: 2 },
   gem: { name: 'Blue Gemstone', desc: 'Twinkles even in the dark. Hits hard when thrown.', icon: single('ore_bluestone', 10, 10), stack: 30, throw: 3 },
   rock: { name: 'Smooth Rock', desc: 'A good, honest throwing rock.', icon: single('rock', 10, 10), stack: 20, throw: 2 },
@@ -32,7 +32,7 @@ export const ITEMS = {
   soup: { name: 'Canned Soup', desc: 'Still a little bit warm somehow.', icon: apocIcon('icon_soup'), stack: 10, heal: 1, energy: 0.4 },
   medkit: { name: 'First Aid Kit', desc: 'The good stuff. Heals a lot.', icon: apocIcon('icon_medkit'), stack: 5, heal: 3.5 },
   // Free Roam supplies: they live in the two quick slots (Z / X), not in the backpack
-  hppack: { name: 'HP Pack', desc: 'Bandages, a tonic and a tiny pillow. Restores 3 hearts. Press Z.', icon: apocIcon('icon_medkit'), stack: 9, heal: 3 },
+  hppack: { name: 'HP Pack', desc: 'Bandages, a tonic and a tiny pillow. Restores 50 HP. Press Z.', icon: apocIcon('icon_medkit'), stack: 9, heal: 3 },
   soupcan: { name: 'Soup Can', desc: 'A warm can of soup. Restores 60% stamina. Press X.', icon: apocIcon('icon_soup'), stack: 9, energy: 0.6 },
   seeds: { name: 'Mystery Seeds', desc: 'Who knows what they will grow into?', icon: single('seeds_generic', 11, 10), stack: 50 },
 };

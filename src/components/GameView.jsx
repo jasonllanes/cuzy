@@ -14,6 +14,13 @@ import AudioSettings from './AudioSettings';
 import Hotbar from './Hotbar';
 import SupplyBar from './SupplyBar';
 import ShopPanel from './ShopPanel';
+import StoragePanel from './StoragePanel';
+import QtyPicker from './QtyPicker';
+import RoomSettings, { Switch } from './RoomSettings';
+import { COMMANDS } from '../game/commands';
+import { hp100 } from '../game/stats';
+import { mapNameOf } from '../game/maps';
+import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
 import { RECALL_CD, SHIELD_CD } from '../game/combat';
 import { setTheme } from '../game/items';
@@ -111,7 +118,7 @@ function Meter({ icon, label, value, tone, text }) {
   );
 }
 
-export default function GameView({ assets, profile, net, session, onExit, onRoundWon }) {
+export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom }) {
   const canvasRef = useRef(null);
   const miniRef = useRef(null);
   const gameRef = useRef(null);
@@ -131,6 +138,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [intro, setIntro] = useState(() => (new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
   const introRef = useRef(intro);
   const [mapOpen, setMapOpen] = useState(false);
+  const [roomPause, setRoomPause] = useState(null); // set while the host has the room paused: { by }
+  const [hostId, setHostId] = useState(session?.host ?? null);
+  const [live, setLive] = useState(session?.room || null); // the room's settings as they are now (the host can change some during a round)
+  const [roomSetOpen, setRoomSetOpen] = useState(false);
+  const roomSetRef = useRef(false);
+  const [solo, setSolo] = useState(() => ({ allowMelee: true, allowThrow: true, target: 10 })); // the rules of a game against computer rivals
   const [onlineOpen, setOnlineOpen] = useState(false); // the "players online" list
   const [onlineCount, setOnlineCount] = useState(() => net.online?.length || 0);
   const [muted, setMuted] = useState(sfx.muted);
@@ -147,6 +160,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const guideRef = useRef(false);
   const [upgOpen, setUpgOpen] = useState(false);
   const upgRef = useRef(false);
+  const [storeOpen, setStoreOpen] = useState(false); // the chest at home
+  const storeRef = useRef(false);
+  const [box, setBox] = useState(() => Array(27).fill(null));
+  const [qty, setQty] = useState(null); // asking how many to drop or move: { kind, side, i, max, id }
+  const [chatText, setChatText] = useState('');
   const [inventory, setInventory] = useState(emptyInventory);
   const inventoryRef = useRef(inventory);
   const [selected, setSelected] = useState(0);
@@ -173,7 +191,26 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       if (m.t === 'peer_join') {
         setPeers((p) => [...p.filter((x) => x.id !== m.player.id), m.player]);
         pushToast(`${m.player.name} joined the room!`);
+      } else if (m.t === 'settings' && m.room) {
+        setLive((prev) => {
+          // tell everybody what the host just changed
+          const said = [];
+          if (prev) {
+            if (prev.allowMelee !== m.room.allowMelee) said.push(`melee is ${m.room.allowMelee ? 'on' : 'off'}`);
+            if (prev.allowThrow !== m.room.allowThrow) said.push(`throwing is ${m.room.allowThrow ? 'on' : 'off'}`);
+            if (prev.allowCheats !== m.room.allowCheats && (prev.allowCheats !== undefined || m.room.allowCheats)) said.push(`cheats are ${m.room.allowCheats ? 'allowed' : 'off'}`);
+            if (prev.allowLate !== m.room.allowLate) said.push(`late join is ${m.room.allowLate ? 'on' : 'off'}`);
+            if (prev.target !== m.room.target) said.push(`the target is now ${m.room.target}`);
+            if (prev.max !== m.room.max) said.push(`max players is ${m.room.max}`);
+            if (prev.streakMonsters !== m.room.streakMonsters && prev.streakMonsters !== undefined) said.push(`monster streaks are ${m.room.streakMonsters ? 'on' : 'off'}`);
+          }
+          if (said.length) pushToast(`⚙️ The host changed the room: ${said.join(', ')}.`);
+          return m.room;
+        });
+      } else if (m.t === 'paused') {
+        setRoomPause(m.on ? { by: m.by } : null);
       } else if (m.t === 'peer_leave') {
+        if (m.host != null) setHostId(m.host);
         setPeers((p) => p.filter((x) => x.id !== m.id));
         pushToast(`${m.name} left the room.`);
         // the host runs the monsters, so the defence cannot go on without them
@@ -216,6 +253,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       onHud: setHud,
       onAnnounce: (a) => setBanners([{ ...a, id: Math.random() }]),
       onInventory: setInventory,
+      onStorage: setBox,
+      onOpenStorage: () => setStoreOpen(true),
       // the wheel hops over empty slots, as long as there is something to land on
       onHotbarScroll: (dir) =>
         setSelected((s) => {
@@ -241,9 +280,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     mapRef.current = mapOpen;
     pausedRef.current = paused;
     guideRef.current = guideOpen;
-    upgRef.current = upgOpen;
+    upgRef.current = upgOpen || storeOpen || !!qty || roomSetOpen;
+    roomSetRef.current = roomSetOpen;
+    storeRef.current = storeOpen;
     chatRef.current = chatOpen;
-  }, [mapOpen, paused, guideOpen, upgOpen, chatOpen]);
+  }, [mapOpen, paused, guideOpen, upgOpen, storeOpen, qty, roomSetOpen, chatOpen]);
 
   // keep the latest backpack handy, and move on when the selected slot just ran out
   useEffect(() => {
@@ -280,6 +321,33 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     return () => clearTimeout(t);
   }, [intro]);
 
+  // finished or skipped the scene, but still waiting for the go: ask again now and then, so one lost message can't strand us
+  useEffect(() => {
+    if (intro !== 'wait' || !session) return undefined;
+    const t = setInterval(() => net.send({ t: 'ready' }), 2500);
+    return () => clearInterval(t);
+  }, [intro]);
+
+  // keep the game in step with the room's pause
+  useEffect(() => {
+    gameRef.current?.setRoomPaused(!!roomPause);
+  }, [roomPause]);
+
+  // P / the Pause button: alone it opens the pause menu; in a room the host pauses everybody, and the others are told why not
+  const isHost = !!session && hostId === session.you;
+  const togglePause = () => {
+    if (introRef.current === 'play' || introRef.current === 'wait') return;
+    if (!session) {
+      setPaused((p) => !p);
+    } else if (isHost) {
+      net.send({ t: 'pause', on: !roomPause });
+    } else {
+      pushToast(roomPause ? `${roomPause.by} paused the game; they will resume it.` : 'Only the host can pause the room. Esc opens your menu, but the game keeps going for everyone.');
+    }
+  };
+  const pauseRef = useRef(togglePause);
+  pauseRef.current = togglePause;
+
   const finishIntro = () => {
     if (session) {
       net.send({ t: 'ready' });
@@ -290,8 +358,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   };
 
   useEffect(() => {
-    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || onlineOpen;
-  }, [paused, mapOpen, guideOpen, upgOpen, onlineOpen]);
+    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || storeOpen || !!qty || onlineOpen;
+    gameRef.current?.setStorageOpen(storeOpen);
+  }, [paused, mapOpen, guideOpen, upgOpen, storeOpen, qty, onlineOpen]);
 
   // how many others are online, for the button
   useEffect(() => {
@@ -308,7 +377,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         return;
       }
       const modal = mapRef.current || pausedRef.current || guideRef.current || upgRef.current;
-      if (e.code === 'Enter' && !modal && session) {
+      if (e.code === 'Enter' && !modal) {
         e.preventDefault();
         setChatOpen(true);
         return;
@@ -329,13 +398,17 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       } else if (e.code === 'Tab' || e.code === 'KeyU') {
         // Tab opens the shop (Upgrades in Wave Defense and Survival)
         e.preventDefault();
-        if (!e.repeat && !mapRef.current && !pausedRef.current && !guideRef.current) setUpgOpen((o) => !o);
+        if (!e.repeat && !mapRef.current && !pausedRef.current && !guideRef.current && !storeRef.current) setUpgOpen((o) => !o);
       } else if (e.code === 'KeyM') {
         if (!e.repeat && !upgRef.current && !pausedRef.current && !guideRef.current) setMapOpen((o) => !o);
       } else if (e.code === 'KeyG' && !mapRef.current && !pausedRef.current && !upgRef.current) {
         setGuideOpen((o) => !o);
+      } else if (e.code === 'KeyP' && !e.repeat && (!modal || (pausedRef.current && !session))) {
+        pauseRef.current();
       } else if (e.code === 'Escape') {
-        if (upgRef.current) setUpgOpen(false);
+        if (roomSetRef.current) setRoomSetOpen(false);
+        else if (storeRef.current) setStoreOpen(false);
+        else if (upgRef.current) setUpgOpen(false);
         else if (guideRef.current) setGuideOpen(false);
         else if (mapRef.current) setMapOpen(false);
         else setPaused((p) => !p);
@@ -345,14 +418,25 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     return () => window.removeEventListener('keydown', onKey);
   }, [session, waves]);
 
+  const addLog = (name, text, extra = {}) => setChatLog((l) => [...l.slice(-5), { id: Math.random(), name, text, ...extra }]);
   const sendChat = (e) => {
     e.preventDefault();
     const text = new FormData(e.currentTarget).get('msg').toString().trim();
     setChatOpen(false);
+    setChatText('');
     if (!text) return;
+    if (text.startsWith('-')) {
+      // a command: it only ever runs on your own game
+      if (/^-clear\b/i.test(text)) setChatLog([]);
+      else addLog('⚙️', gameRef.current?.command(text) || '', { system: true });
+      return;
+    }
     gameRef.current?.sendChat(text);
-    setChatLog((l) => [...l.slice(-4), { id: Math.random(), name: profile.name, text, mine: true }]);
+    addLog(profile.name, text, { mine: true });
   };
+  const cheatsOn = !!gameRef.current?.cheats;
+  const typed = chatText.trim().split(/\s+/)[0].toLowerCase();
+  const hints = chatOpen && cheatsOn && (chatText === '' || chatText.startsWith('-')) ? COMMANDS.filter((c) => `-${c.name}`.startsWith(typed) || chatText === '') : [];
 
   return (
     <div className="game">
@@ -370,26 +454,46 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           onVisit={(id) => gameRef.current?.teleportToPeer(id)}
         />
       )}
-      {session && (
-        <div className="hud chat-log">
-          {chatLog.map((m) => (
-            <div key={m.id} className={`chat-line ${m.mine ? 'mine' : ''} ${m.name === '⚔️' ? 'system' : ''}`}><b>{m.name}</b> {m.text}</div>
-          ))}
-          {chatOpen && (
+      <div className={`hud chat-log ${chatOpen ? 'open' : ''}`}>
+        {chatLog.map((m) => (
+          <div key={m.id} className={`chat-line ${m.mine ? 'mine' : ''} ${m.name === '⚔️' || m.system ? 'system' : ''}`}><b>{m.name}</b> {m.text}</div>
+        ))}
+        {chatOpen && (
+          <div className="chat-box">
+            {hints.length > 0 && (
+              <div className="chat-hints" aria-label="Commands">
+                <b>Commands</b>
+                {hints.map((c) => (
+                  <button key={c.name} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => setChatText(`${c.usage.split(' ')[0]} `)}>
+                    <code>{c.usage}</code> <span>{c.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!cheatsOn && <small className="chat-note">Cheats are off{session ? ' in this room' : ''}. Type a message and press Enter.</small>}
             <form onSubmit={sendChat}>
-              <input name="msg" autoFocus maxLength={80} placeholder="Say something nice… (Enter to send, Esc to cancel)" autoComplete="off" />
+              <input
+                name="msg"
+                autoFocus
+                maxLength={80}
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+                placeholder={cheatsOn ? 'Say something, or type a command like -gold 100 (Enter to send, Esc to cancel)' : 'Say something nice… (Enter to send, Esc to cancel)'}
+                autoComplete="off"
+              />
             </form>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <div className="hud hud-left-col">
         <div className="hud-left panel small">
           <div className="hud-name">{profile.name}</div>
-          <div className="hud-line">🌱 seed <b>{profile.seed}</b></div>
+          <div className="hud-line">🗺️ <b>{mapNameOf(profile.seed)}</b></div>
           <div className="hud-line">📍 {hud.tx}, {hud.ty}</div>
           <div className="hud-line">{dayIcon(hud.hour)} Day {hud.day} · {formatClock(hud.hour)}</div>
-          <Meter icon="❤️" label="HP" value={hud.hp / hud.maxHp} tone="hp" text={`${Math.max(0, Math.round(hud.hp * 10) / 10)}/${hud.maxHp}`} />
+          <Meter icon="❤️" label="HP" value={hud.hp / hud.maxHp} tone="hp" text={`${Math.max(0, hp100(hud.hp))}/${hp100(hud.maxHp)}`} />
+          <Meter icon="⭐" label={`Level ${hud.level || 1}`} value={(hud.xp || 0) / (hud.xpNeed || 40)} tone="xp" text={`Lv ${hud.level || 1}`} />
           <Meter icon="⚡" label="Stamina" value={hud.stamina} tone="stam" text={`${Math.round(hud.stamina * (hud.stats?.staminaTotal || 100))}/${hud.stats?.staminaTotal || 100}`} />
           {hud.mount && (
             <Meter icon="💗" label={`${hud.mount.type === 'cow' ? 'Cow' : 'Chicken'} HP`} value={hud.mount.hp / hud.mount.maxHp} tone="hp" text={`${Math.max(0, Math.round(hud.mount.hp * 10) / 10)}/${hud.mount.maxHp}`} />
@@ -429,14 +533,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
         {pvp && (
           <div className="scoreboard panel small">
-            <div className="score-title">{session.room.winBy === 'monsters' ? '👹' : '⚔️'} First to {session.room.target} {session.room.winBy === 'monsters' ? 'monster ' : ''}kills</div>
+            <div className="score-title">{session.room.winBy === 'monsters' ? '👹' : '⚔️'} First to {(live || session.room).target} {session.room.winBy === 'monsters' ? 'monster ' : ''}kills</div>
             {session.room.teams > 0 && TEAMS.slice(0, session.room.teams).map((t, i) => {
               const total = scores.filter((s) => s.team === i).reduce((n, s) => n + s.kills, 0);
               return (
                 <div key={t.name} className="score-row team-row" style={{ '--team': t.color }}>
                   <span>{t.icon} {t.name} team</span>
                   <b>{total}</b>
-                  <i style={{ width: `${Math.min(100, (total / session.room.target) * 100)}%` }} />
+                  <i style={{ width: `${Math.min(100, (total / (live || session.room).target) * 100)}%` }} />
                 </div>
               );
             })}
@@ -444,7 +548,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               <div key={s.id} className={`score-row ${s.id === session.you ? 'me' : ''}`} style={s.team !== null && s.team !== undefined && TEAMS[s.team] ? { borderLeft: `4px solid ${TEAMS[s.team].color}` } : undefined}>
                 <span>{s.name}</span>
                 <b>{s.kills}</b>
-                <i style={{ width: `${Math.min(100, (s.kills / session.room.target) * 100)}%` }} />
+                <i style={{ width: `${Math.min(100, (s.kills / (live || session.room).target) * 100)}%` }} />
               </div>
             ))}
           </div>
@@ -463,6 +567,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <button className="btn small-btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
         <button className="btn small-btn" onClick={() => setMapOpen(true)}>🗺️ Map <kbd>M</kbd></button>
         <button className="btn small-btn" onClick={() => setOnlineOpen(true)} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
+        {((session && isHost) || (!session && mode === 'free')) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
+        <button className="btn small-btn" onClick={() => pauseRef.current()} title={session ? 'The host pauses the game for everyone' : 'Pause the game'}>⏸ Pause <kbd>P</kbd></button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu</button>
       </div>
 
@@ -470,7 +576,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <span className="stamina-label">{hud.exhausted ? 'Catching breath…' : 'Stamina'}</span>
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
-      <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click throw · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · E eat · Tab shop · M map · G guide</div>
+      <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · E eat · Tab shop · M map · G guide</div>
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -526,6 +632,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <span className="skill-num">{inventory.reduce((n, s) => n + (s && s.id === 'barricade' ? s.qty : 0), 0)}</span>
           </button>
         )}
+        {!waves && hud.weapons && (
+          <button className="skill weapon-skill" onClick={() => setUpgOpen(true)} title={`${weaponById(hud.weapons.equipped).name}: change swords in the shop (Tab)`}>
+            <span className="wicon sm" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(weaponById(hud.weapons.equipped))}.png)` }} />
+          </button>
+        )}
         <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? 'Hold left click, then release to use your sword skill' : 'Sword skill: buy the Dash or the Spiral Sword in the shop (Tab)'}>
           <span className="skill-icon">{hud.activeSkill === 'spiral' ? '🌀' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? 'hold click' : 'locked'}</small>
@@ -534,10 +645,16 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       </div>
       {waves && (
         <div className={`hud throw-meter ${hud.tLocked ? 'locked' : ''}`}>
-          <span>{hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
+          <span>{survival ? (hud.tLocked ? '🔫 Reloading…' : '🔫 Pistol') : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
           <div className="throw-track"><div className="throw-fill" style={{ width: `${hud.tEnergy * 100}%` }} /></div>
         </div>
       )}
+      <div className="hud weather-chip" title="Sky and time">
+        {hud.dungeon ? <span>🕳️ {hud.dungeon}</span> : hud.weather && !hud.weather.indoors ? <span>{hud.weather.icon} {hud.weather.name}</span> : <span>🏠 Indoors</span>}
+        <span className="wc-sep">·</span>
+        <b>{formatClock(hud.hour)}</b>
+        <small>Day {hud.day}</small>
+      </div>
       {waves && hud.wave && <WaveHud w={hud.wave} difficulty={difficulty} withRoom={!!session} survival={survival} />}
       {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && (
         <div className="overlay">
@@ -571,7 +688,19 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <span>{banner.sub}</span>
         </div>
       )}
-      <Hotbar slots={inventory} selected={selected} onSelect={setSelected} onUse={(i) => gameRef.current?.useItem(i)} />
+      <Hotbar
+        slots={inventory}
+        selected={selected}
+        onSelect={setSelected}
+        onUse={(i) => gameRef.current?.useItem(i)}
+        onMove={(a, b) => gameRef.current?.moveItem(a, b)}
+        onDropOut={(i) => {
+          const s = inventory[i];
+          if (!s) return;
+          if (s.qty > 1) setQty({ kind: 'drop', side: 'inv', i, max: s.qty, id: s.id });
+          else gameRef.current?.dropItem('inv', i, 1);
+        }}
+      />
       {hud.celeb && (
         <div className="winner-banner">
           <div className="winner-card panel">
@@ -584,6 +713,53 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       {upgOpen && (waves
         ? <UpgradePanel hud={hud} game={gameRef.current} survival={survival} onClose={() => setUpgOpen(false)} />
         : <ShopPanel hud={hud} game={gameRef.current} onClose={() => setUpgOpen(false)} />)}
+      {storeOpen && <StoragePanel inventory={inventory} box={box} game={gameRef.current} onAsk={setQty} onClose={() => setStoreOpen(false)} />}
+      {roomSetOpen && !session && (
+        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setRoomSetOpen(false)}>
+          <div className="panel room-settings-card">
+            <header className="inv-head">
+              <h2>⚙️ Game rules</h2>
+              <button className="btn small-btn" onClick={() => setRoomSetOpen(false)} aria-label="Close">✕</button>
+            </header>
+            <section className="settings-panel">
+              <div className="set-grid">
+                <Switch label="Allow melee" hint="Sword, dash and spiral" on={solo.allowMelee} onChange={(v) => { setSolo((s) => ({ ...s, allowMelee: v })); if (gameRef.current) gameRef.current.rules = { ...gameRef.current.rules, melee: v }; }} />
+                <Switch label="Allow throwing" hint="Right-click throws" on={solo.allowThrow} onChange={(v) => { setSolo((s) => ({ ...s, allowThrow: v })); if (gameRef.current) gameRef.current.rules = { ...gameRef.current.rules, throw: v }; }} />
+                {!!profile.bots && (
+                  <div className="set-row wide">
+                    <div className="set-label"><b>Reach {solo.target} kills to win</b><small>Drag to change</small></div>
+                    <input type="range" min={1} max={50} value={solo.target} onChange={(e) => { const n = Number(e.target.value); setSolo((s) => ({ ...s, target: n })); if (gameRef.current?.bots) gameRef.current.bots.target = n; }} />
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+      {roomSetOpen && session && live && (
+        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setRoomSetOpen(false)}>
+          <div className="panel room-settings-card">
+            <header className="inv-head">
+              <h2>⚙️ Room settings</h2>
+              <button className="btn small-btn" onClick={() => setRoomSetOpen(false)} aria-label="Close">✕</button>
+            </header>
+            <RoomSettings room={live} count={peers.length} editable={isHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+          </div>
+        </div>
+      )}
+      {qty && (
+        <QtyPicker
+          id={qty.id}
+          max={qty.max}
+          verb={qty.kind === 'drop' ? 'Drop' : 'Move'}
+          onCancel={() => setQty(null)}
+          onConfirm={(n) => {
+            if (qty.kind === 'drop') gameRef.current?.dropItem(qty.side, qty.i, n);
+            else gameRef.current?.storeMove(qty.side, qty.i, n);
+            setQty(null);
+          }}
+        />
+      )}
       {guideOpen && <Guide onClose={() => setGuideOpen(false)} />}
       {onlineOpen && (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOnlineOpen(false)}>
@@ -592,7 +768,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               <h2>🌐 Players online</h2>
               <button className="btn small-btn" onClick={() => setOnlineOpen(false)} aria-label="Close">✕</button>
             </header>
-            <OnlinePlayers net={net} assets={assets} />
+            <OnlinePlayers net={net} assets={assets} onJoinRoom={(code) => { setOnlineOpen(false); onJoinRoom?.(code); }} />
           </div>
         </div>
       )}
@@ -607,11 +783,24 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {intro === 'out' && <div className="intro-fade" />}
 
+      {roomPause && (
+        <div className="overlay room-pause" role="alertdialog" aria-label="Game paused">
+          <div className="panel pause-card">
+            <div className="trophy">⏸</div>
+            <h2>Game paused</h2>
+            <p className="hint">{isHost ? 'Everyone is waiting for you.' : `${roomPause.by} paused the game for everyone. It carries on when they resume.`}</p>
+            {isHost && <button className="btn go" onClick={() => net.send({ t: 'pause', on: false })}>▶ Resume for everyone</button>}
+          </div>
+        </div>
+      )}
+
       {paused && (
         <div className="overlay">
           <div className="panel pause-card">
             <h2>Taking a breather</h2>
-            <p className="hint">Your progress is saved for this seed.</p>
+            <p className="hint">{session ? 'The room keeps going while you are in this menu.' : 'The game is paused. Your progress is saved for this map.'}</p>
+            {isHost && !roomPause && <button className="btn" onClick={() => { net.send({ t: 'pause', on: true }); setPaused(false); }}>⏸ Pause the game for everyone</button>}
+            {((session && isHost) || (!session && mode === 'free')) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
             <h3 className="settings-h">⚙ Settings</h3>
             <AudioSettings />
             <button className="btn go" onClick={() => setPaused(false)}>Keep exploring</button>

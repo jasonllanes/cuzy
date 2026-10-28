@@ -12,6 +12,7 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
       <div className="panel upgrades">
         <header className="inv-head">
           <h2>⬆ Upgrades</h2>
+          <span className="lvl-chip" title="Character level: kill monsters and players for XP">⭐ Lv {hud.level || 1} <i><b style={{ width: `${Math.min(100, ((hud.xp || 0) / (hud.xpNeed || 40)) * 100)}%` }} /></i> {hud.xp || 0}/{hud.xpNeed || 40} XP</span>
           <span className="coin-chip big">🪙 {hud.coins}</span>
           <button className="btn small-btn" onClick={onClose} aria-label="Close upgrades">✕</button>
         </header>
@@ -24,10 +25,10 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
             const bus = u.id === 'house' && survival;
             return (
               <div className="upg-row" key={u.id}>
-                <div className="upg-icon">{bus ? '🚌' : u.icon}</div>
+                <div className="upg-icon">{bus ? '🚌' : survival && u.survIcon ? u.survIcon : u.icon}</div>
                 <div className="upg-info">
-                  <h3>{bus ? 'Upgrade the bus' : u.name}</h3>
-                  <p>{bus ? '+30% bus health per level (arriving already repaired) and room for more survivors to defend it. Shared by everyone.' : u.desc}</p>
+                  <h3>{bus ? 'Upgrade the bus' : survival && u.survName ? u.survName : u.name}</h3>
+                  <p>{bus ? '+30% bus health per level (arriving already repaired) and room for more survivors to defend it. Shared by everyone.' : survival && u.survDesc ? u.survDesc : u.desc}</p>
                   {u.id === 'house' && <p className="upg-now">Team room: <b>{teamCap(level)}</b>{!maxed && <> → <b>{teamCap(level + 1)}</b></>} {survival ? 'survivors' : 'helpers'}</p>}
                   <div className="pips" aria-label={`Level ${level} of ${MAX_LEVEL}`}>
                     {Array.from({ length: MAX_LEVEL }, (_, i) => <i key={i} className={i < level ? 'on' : ''} />)}

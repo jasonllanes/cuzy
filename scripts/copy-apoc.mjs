@@ -70,9 +70,64 @@ const FILES = {
   cardboard: 'Objects/Cardboard_1.png',
   hydrant: 'Objects/Hydrant_1_red.png',
   stopsign: 'Objects/Stop-sign_Side_3.png',
-  // ground tiles
+  // ground tiles (the same layout in every colour)
   bg: 'Tiles/Background_Green_TileSet.png',
+  bg_yellow: 'Tiles/Background_Bleak-Yellow_TileSet.png',
+  bg_dark: 'Tiles/Background_Dark-Green_TileSet.png',
+  // the pistol you carry, one picture per way it faces (6 frames each), and its pickup icon
+  gun_down: 'Character/Guns/Pistol/Pistol_down_idle-and-run-Sheet6.png',
+  gun_up: 'Character/Guns/Pistol/Pistol_up_idle-and-run-Sheet6.png',
+  gun_side: 'Character/Guns/Pistol/Pistol_side_idle-and-run-Sheet6.png',
+  gun_left: 'Character/Guns/Pistol/Pistol_side-left_idle-and-run-Sheet6.png',
+  icon_pistol: 'Objects/Pickable/Pistol.png',
+  // more wrecks, crates and street furniture for the bigger maps
+  cont_gray_v: 'Objects/Container/Container_1_Gray_Vertical.png',
+  cont_green_v: 'Objects/Container/Container_9_Green_Vertical.png',
+  cont_green_h: 'Objects/Container/Container_11_Green_Horizontal.png',
+  cont_red_h: 'Objects/Container/Container_7_Red_Horizontal.png',
+  car_gray: 'Objects/Vehicles/Normal/Car_1/Car_1_Gray.png',
+  car_orange: 'Objects/Vehicles/Normal/Car_1/Car_1_Orange.png',
+  car_green: 'Objects/Vehicles/Normal/Car_4/Car_4_Green.png',
+  car_yellow: 'Objects/Vehicles/Normal/Car_4/Car_4_Yellow.png',
+  car_scrap: 'Objects/Vehicles/Normal/Car_6_Scrap/Car_6_Gray_Scrap.png',
+  car_flipped: 'Objects/Vehicles/Normal/Car_2_Upsidedown/Car_2_Red_Upsidedown.png',
+  truck_blue: 'Objects/Vehicles/Normal/Car_7_Truck/Car_7_Blue_Truck.png',
+  truck_orange: 'Objects/Vehicles/Normal/Car_7_Truck/Car_7_Orange_Truck.png',
+  van_green: 'Objects/Vehicles/Normal/Car_3_Van/Car_3_Light-Green_Van.png',
+  tractor: 'Objects/Vehicles/Rust/Car_5_Rust_Tractor/Car_5_Rust_Tractor_Side.png',
+  moto: 'Objects/Vehicles/Normal/Car_9_Motorcycle/Car_9_Red_Motorcycle_Side.png',
+  barrel_blue: 'Objects/Barrel_blue_1.png',
+  barrel_red2: 'Objects/Barrel_red_2.png',
+  bin2: 'Objects/Garbage-Bin_3.png',
+  trash_can: 'Objects/Trash-can_1.png',
+  trash_bag: 'Objects/Trash-bag_1.png',
+  tires: 'Objects/Tire_1.png',
+  cone: 'Objects/Traffic-cone.png',
+  bench: 'Objects/Bench_1_down.png',
+  bench_side: 'Objects/Bench_3_side.png',
+  streetlight: 'Objects/Street-Light_1_Side.png',
+  streetlight_up: 'Objects/Street-Light_2_Up.png',
+  pallet2: 'Objects/Pallet_2.png',
+  cardboard2: 'Objects/Cardboard_2.png',
+  metal_plates: 'Objects/Metal-Plates.png',
+  iron_beam: 'Objects/Iron-beam.png',
+  brick_debris: 'Objects/Gray-brick_Debris.png',
+  hvac: 'Objects/Buildings/HVAC.png',
+  wall_ruin: 'Objects/Buildings/Destroyed-wall_not-corner.png',
+  wall_ruin_corner: 'Objects/Buildings/Destroyed-wall_corner.png',
+  brick_lying: 'Objects/Buildings/Brick-wall_1_Lying.png',
+  door_metal: 'Objects/Buildings/Door_4_Metal.png',
+  hatch: 'Objects/Buildings/Hatch_1_Closed.png',
+  ammo_green: 'Objects/Pickable/Ammo-crate_Green.png',
+  ammo_red: 'Objects/Pickable/Ammo-crate_Red.png',
+  manhole: 'Objects/Manhole.png',
 };
+
+// the three other tree colours: the same trees, painted for other maps (keys like tree_big__orange)
+const TREE_FILES = { tree_spruce: 'Tree_1_Spruce', tree_normal: 'Tree_3_Normal', tree_big: 'Tree_5_Big', tree_pine: 'Tree_6_Big-pine', tree_birch: 'Tree_7_Birch', tree_oak: 'Tree_9_Small-oak', tree_small: 'Tree_10_Small-oak', bush1: 'Bush_1', bush2: 'Bush_2' };
+for (const [variant, folder, tag] of [['orange', 'Orange', 'Orange'], ['yellow', 'Bleak-Yellow', 'Bleak-Yellow'], ['dark', 'Dark-Green', 'Dark-Green']]) {
+  for (const [key, base] of Object.entries(TREE_FILES)) FILES[`${key}__${variant}`] = `Objects/Nature/${folder}/${base}_${tag}.png`;
+}
 
 // zombies: walking in four directions, and a death in the two sideways ones
 const ZOMBIES = {

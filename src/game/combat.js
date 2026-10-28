@@ -5,6 +5,8 @@ import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
 import { MONSTERS } from './monsters';
 import { SUPPLY_CAP } from './upgrades';
+import { swingTime, weaponById, weaponIconFile } from './weapons';
+import { HP_PER_HEART, HP_PER_UPGRADE, hp100, maxHearts, monsterXp, XP } from './stats';
 
 // Skeleton camps: three guards that chase you, but give up beyond LEASH and walk home to heal
 const CAMP_WAKE = 300; // the camp stirs when you come this close
@@ -41,7 +43,7 @@ const BLOOD = ['#d6293f', '#a31d33'];
 const SPLAT_TONE = {
   berry: '#e0405f', leek: '#5fbf4a', tuber: '#c8a05a', mushroom_red: '#d9453d', mushroom_blue: '#4a8fe0',
   acorn: '#9a6a3a', honey: '#f0b323', jam: '#a02a5a', milk: '#f4f1e8', egg: '#f2cd4a', coin: '#f2c94c',
-  gold: '#f2c94c', gem: '#4fa8ff', rock: '#a8a39a', mug: '#c9a27a', wool: '#efe2cc', truffle: '#5a4636',
+  bullet: '#b3243a', gold: '#f2c94c', gem: '#4fa8ff', rock: '#a8a39a', mug: '#c9a27a', wool: '#efe2cc', truffle: '#5a4636',
   seeds: '#7fc75a', bandage: '#ece4d2', canned: '#c4c8cf', soup: '#e08a3a', medkit: '#e84a4a', hppack: '#e84a4a', soupcan: '#e08a3a',
 };
 export const splatTone = (id) => SPLAT_TONE[id] || '#cfc7b6';
@@ -63,6 +65,12 @@ export const SPIN_COOLDOWN = 1.4;
 const THROW_COST_FREE = 0.11;
 const THROW_COST_ITEM = 0.16;
 const THROW_REGEN = 0.32;
+// Survival: right click fires the pistol. The throw meter doubles as the magazine, and refills while you let go.
+const GUN_COST = 0.1; // ten shots from full
+const GUN_REGEN = 0.2;
+const GUN_RATE = 0.27; // seconds between shots
+const BULLET_SPEED = 340;
+const BULLET_LIFE = 0.55; // about 12 tiles
 const THROW_UNLOCK = 0.35; // once empty, wait until it refills this far
 export const RECALL_TIME = 2.5;
 export const RECALL_CD = 20;
@@ -98,6 +106,7 @@ const bodyY = (m) => {
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
+
 export class Combat {
   constructor(game, img, kills = 0) {
     this.g = game;
@@ -119,6 +128,8 @@ export class Combat {
     this.hitColor = null; // set while a thrown item lands, so its splash takes the item's colour
     this.swing = null;
     this.swingCd = 0;
+    this.dots = []; // burning targets
+    this.bolts = []; // chain lightning arcs, for show
     this.throwCd = 0;
     this.hold = null; // {t} while the left button is down
     this.dash = null;
@@ -146,7 +157,7 @@ export class Combat {
 
   // Max health grows with the Max health upgrade (Free Roam only); `gain` hearts arrive full
   refreshMaxHp(fill = false, gain = 0) {
-    this.maxHp = MAX_HP + (this.g.wave ? 0 : this.up('health'));
+    this.maxHp = maxHearts(this.g.wave ? 0 : this.up('health'), this.g.level || 1);
     this.hp = fill ? this.maxHp : Math.min(this.maxHp, this.hp + gain);
   }
 
@@ -156,8 +167,18 @@ export class Combat {
     return this.g.upgrades?.[id] || 0;
   }
 
+  // Free Roam's equipped sword (Survival keeps its bat, so there is none)
+  weapon() {
+    return this.g.wave ? null : weaponById(this.g.weapons?.equipped);
+  }
+
   meleeDmg() {
-    return SWORD_DMG + this.up('melee') * (this.g.wave ? 1 : 0.4);
+    return SWORD_DMG + (this.weapon()?.dmg || 0) + this.up('melee') * (this.g.wave ? 1 : 0.4);
+  }
+
+  swingCooldown() {
+    const w = this.weapon();
+    return w ? swingTime(w, this.up('atkspd')) : 0.42;
   }
 
   // what a dash covers and hits for at a given charge (0..1), with upgrades
@@ -241,11 +262,12 @@ export class Combat {
     }
     if (this.swingCd > 0) return;
     const a = this.aim();
-    this.swing = { t: 0, a, hit: false };
+    const w = this.weapon();
+    this.swing = { t: 0, a, hit: false, w: w?.id };
     sfx.play('swing');
-    this.swingCd = 0.42;
+    this.swingCd = this.swingCooldown();
     this.revealT = 1.5;
-    this.g.mp?.net.send({ t: 'fx', kind: 'swing', a });
+    this.g.mp?.net.send({ t: 'fx', kind: 'swing', a, w: w?.id });
     this.faceAim(a);
   }
 
@@ -485,6 +507,10 @@ export class Combat {
     const stack = inv[slot];
     const def = stack && ITEMS[stack.id];
     const ammo = def && def.throw !== undefined && !def.heal && !def.energy && !def.wave;
+    if (this.g.world.apoc && !ammo) {
+      this.shootGun();
+      return;
+    }
     const id = ammo ? stack.id : 'rock';
     const dmg = (ammo ? throwDamage(def) : 1) + this.throwBonus();
     const a = this.aim();
@@ -511,6 +537,60 @@ export class Combat {
     this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: id, x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
     this.throwCd = 0.2;
     this.faceAim(a);
+  }
+
+  // Survival: the pistol. Bullets fly fast and straight, and hit like the throwing items do.
+  shootGun() {
+    if (this.throwCd > 0) return;
+    if (this.tLocked) {
+      this.throwCd = 0.25;
+      return;
+    }
+    const a = this.aim();
+    const [cx, cy] = this.center();
+    this.tEnergy -= GUN_COST;
+    if (this.tEnergy <= 0.001) {
+      this.tEnergy = 0;
+      this.tLocked = true; // out of bullets: reloads on its own
+    }
+    this.revealT = 1.5;
+    const shot = {
+      x: cx + Math.cos(a) * 12, y: cy + Math.sin(a) * 12,
+      vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED,
+      id: 'bullet', dmg: 2 + this.throwBonus(), life: BULLET_LIFE, rot: 0, free: true,
+    };
+    this.projectiles.push(shot);
+    this.muzzleT = 0.07;
+    this.muzzleA = a;
+    sfx.play('gun', 0.8);
+    this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
+    this.throwCd = GUN_RATE;
+    this.faceAim(a);
+  }
+
+  // the pistol in your hand, turned the way you are aiming, and the flash when it fires
+  drawGun(ctx, x, y) {
+    if (this.g.dead) return;
+    const a = this.aim();
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const key = Math.abs(c) >= Math.abs(s) ? (c > 0 ? 'side' : 'left') : s > 0 ? 'down' : 'up';
+    const sheet = this.img[`apoc/gun_${key}`];
+    if (!sheet) return;
+    const fw = key === 'side' || key === 'left' ? 8 : 5;
+    const f = this.g.player.moving ? Math.floor(this.g.animT * 10) % 6 : 0;
+    const ox = key === 'side' ? 1 : key === 'left' ? -9 : -2;
+    const oy = key === 'down' ? -11 : key === 'up' ? -17 : -12;
+    ctx.drawImage(sheet, f * fw, 0, fw, sheet.height, Math.round(x + ox), Math.round(y + oy), fw, sheet.height);
+    if (this.muzzleT > 0) {
+      const [cx, cy] = this.center();
+      const mx = cx + Math.cos(this.muzzleA) * 14;
+      const my = cy + Math.sin(this.muzzleA) * 14;
+      ctx.fillStyle = '#fff6c2';
+      ctx.fillRect(Math.round(mx) - 2, Math.round(my) - 2, 4, 4);
+      ctx.fillStyle = '#ffb62e';
+      ctx.fillRect(Math.round(mx - Math.cos(this.muzzleA) * 2) - 3, Math.round(my - Math.sin(this.muzzleA) * 2) - 1, 6, 2);
+    }
   }
 
   throwSelected(slot) {
@@ -557,17 +637,19 @@ export class Combat {
     this.swingCd -= dt;
     this.throwCd -= dt;
     this.invuln -= dt;
+    if (this.god) this.invuln = Math.max(this.invuln, 1); // cheat: nothing can hurt you
     this.revealT = Math.max(0, this.revealT - dt);
-    const room = this.g.world.houseAt(this.g.player.x, this.g.player.y - 2);
+    const room = this.g.inside ? { id: 'interior' } : this.g.world.houseAt(this.g.player.x, this.g.player.y - 2);
     const wasHidden = this.hidden;
     this.insideId = room?.id ?? null;
     this.hidden = this.g.dead ? true : (!!room || this.invisT > 0) && this.revealT <= 0;
-    if (this.hidden && !wasHidden && !this.g.dead && room) this.g.onToast?.('Hiding indoors: skeletons and rivals can’t see you.');
+    if (this.hidden && !wasHidden && !this.g.dead && room && !this.g.inside) this.g.onToast?.('Hiding indoors: skeletons and rivals can’t see you.');
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.recallCd = Math.max(0, this.recallCd - dt);
     this.updateRecall(dt);
     if (this.g.wave) {
-      this.tEnergy = Math.min(1, this.tEnergy + THROW_REGEN * dt);
+      this.tEnergy = Math.min(1, this.tEnergy + (this.g.world.apoc ? GUN_REGEN : THROW_REGEN) * dt);
+      this.muzzleT = Math.max(0, (this.muzzleT || 0) - dt);
       if (this.tLocked && this.tEnergy >= THROW_UNLOCK) this.tLocked = false;
     }
     this.shieldT = Math.max(0, this.shieldT - dt);
@@ -588,8 +670,11 @@ export class Combat {
       if (this.swing.t >= 0.24) this.swing = null;
     }
 
-    if (!this.g.wave) {
-      // skeletons roam the free world only
+    this.updateDots(dt);
+    this.bolts = this.bolts.filter((b) => (b.t += dt) < 0.22);
+
+    if (!this.g.wave && !this.g.inside && !this.g.dungeon) {
+      // skeletons roam the free world only (and never come into your house, or follow you underground)
       this.updateSpawns(dt);
       this.updateCamps(dt);
       this.updateWilds(dt);
@@ -643,6 +728,58 @@ export class Combat {
     }
   }
 
+  // ---------- dungeons ----------
+
+  // The monsters that wait in one room of a dungeon, woken when you get close. The last room holds the guardian.
+  spawnDungeonRoom(L, room, kind, tier, last) {
+    const { world } = this.g;
+    const pick = () => {
+      for (let k = 0; k < 24; k++) {
+        const tx = room.x + 1 + Math.floor(Math.random() * (room.w - 2));
+        const ty = room.y + 1 + Math.floor(Math.random() * (room.h - 2));
+        const x = (L.ox + tx) * 16 + 8;
+        const y = (L.oy + ty) * 16 + 10;
+        if (!world.isBlocked(x - 4, y - 4, 8, 4)) return [x, y];
+      }
+      return null;
+    };
+    const skel = (hp, elite = false) => {
+      const pt = pick();
+      if (!pt) return;
+      this.skeletons.push({
+        id: this.nextId++, x: pt[0], y: pt[1], hp, elite, state: 'idle', stateT: 0, anim: Math.random() * 3, face: 1,
+        cd: 0.8, didHit: false, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0,
+      });
+    };
+    const wild = (type) => {
+      const pt = pick();
+      if (!pt) return;
+      const def = MONSTERS[type];
+      const hp = Math.round(def.hp * (1 + 0.3 * (tier - 1)));
+      this.wilds.push({
+        id: `w${this.nextId++}`, wild: true, type, x: pt[0], y: pt[1], hp, max: hp, state: 'move', t: 0,
+        anim: Math.random() * 3, face: 1, atk: 0, cd: 0.8, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0, phase: Math.random() * 6,
+      });
+    };
+    const n = 2 + tier + Math.floor(room.i / 2);
+    if (kind === 'crypt') {
+      for (let i = 0; i < n + (last ? 2 : 0); i++) skel(3 + (tier - 1));
+      if (last) skel(14 + 4 * tier, true); // the crypt keeper
+    } else if (kind === 'cave') {
+      const pool = ['jelly', 'redcap', 'hand', 'bat', ...(tier > 1 ? ['hound', 'scarab', 'eye', 'slime'] : []), ...(tier > 2 ? ['grimlock', 'myconid', 'ghoul', 'ghastly'] : [])];
+      for (let i = 0; i < n; i++) wild(pool[Math.floor(Math.random() * pool.length)]);
+      if (last) wild(['ogre', 'stonetroll', 'ettin'][tier - 1]); // the cave's brute
+    } else {
+      const pool = ['jelly', 'hand', 'redcap'];
+      for (let i = 0; i < n - 1; i++) wild(pool[Math.floor(Math.random() * pool.length)]);
+      if (last) {
+        wild('cadaver');
+        wild('cadaver');
+      }
+    }
+    if (last) this.g.onToast?.('Something big stirs in the dark…');
+  }
+
   // ---------- wild monsters ----------
 
   updateWilds(dt) {
@@ -687,7 +824,7 @@ export class Combat {
     const dist = Math.hypot(dx, dy) || 1;
     w.anim += dt;
     if (w.state === 'dead') return (w.t += dt) < 0.5;
-    if (dist > 430) return false;
+    if (dist > (this.g.dungeon ? 3000 : 430)) return false;
     const flyer = def.kind === 'fly';
     const step = (mx, my) => {
       if (flyer) {
@@ -748,7 +885,7 @@ export class Combat {
       w.state = 'dead';
       w.t = 0;
       this.kills++;
-      this.g.monsterKill(def.name);
+      this.g.monsterKill(def.name, monsterXp(def.hp, def.boss));
       for (const [id, chance, min, max] of WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1));
@@ -814,7 +951,7 @@ export class Combat {
       s.stateT += dt;
       return s.stateT < 1.6;
     }
-    if (dist > (s.camp ? 650 : 430)) {
+    if (dist > (this.g.dungeon ? 3000 : s.camp ? 650 : 430)) {
       // out of sight and out of mind: the camp resets, fully healed, for the next visit
       if (s.camp) {
         const st = this.camps.get(s.camp);
@@ -902,22 +1039,117 @@ export class Combat {
     return true;
   }
 
+  // where a target's body is, whatever kind it is
+  bodyOf(kind, t) {
+    return kind === 'mon' ? [t.x, bodyY(t)] : [t.x, t.y - 8];
+  }
+
+  alive(kind, t) {
+    if (kind === 'rem') return this.g.remotes.has(t.id) && !t.hidden;
+    return t.state !== 'dead';
+  }
+
+  // one hit from a sword, a flame tick or a lightning arc
+  applyHit(kind, t, dmg, cx, cy, kb = 110) {
+    if (kind === 'skel') this.damageSkeleton(t, dmg, cx, cy, kb);
+    else if (kind === 'mon') this.hitMonster(t, dmg, cx, cy, kb);
+    else this.hitRemote(t, dmg);
+  }
+
+  // a flame tick: hurts without staggering, unless it finishes the target off
+  dotHit(kind, t, dmg) {
+    if (kind === 'rem') {
+      this.hitRemote(t, dmg);
+      return;
+    }
+    if (t.hp - dmg <= 0) {
+      this.applyHit(kind, t, dmg, t.x, t.y, 0);
+      return;
+    }
+    t.hp -= dmg;
+    const [x, y] = this.bodyOf(kind, t);
+    this.floaters.push({ x, y: y - 14, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff9a3c', t: 0 });
+  }
+
+  updateDots(dt) {
+    if (!this.dots.length) return;
+    this.dots = this.dots.filter((d) => {
+      if (!this.alive(d.kind, d.t)) return false;
+      d.wait -= dt;
+      if (d.wait <= 0) {
+        d.wait += 0.5;
+        this.dotHit(d.kind, d.t, d.dmg);
+        d.ticks--;
+      }
+      return d.ticks > 0;
+    });
+  }
+
+  // what a swing does to one target, with the sword's effect
+  strike(kind, t, w, cx, cy, struck) {
+    const eff = w?.effect || 'none';
+    let dmg = this.meleeDmg();
+    const [bx, by] = this.bodyOf(kind, t);
+    if (eff === 'crit' && Math.random() < 0.25) {
+      dmg *= 2;
+      this.floaters.push({ x: bx, y: by - 22, text: 'CRIT!', color: '#ffc94d', t: 0 });
+    }
+    this.applyHit(kind, t, dmg, cx, cy, eff === 'knock' ? 300 : 110);
+    struck.push({ kind, t, dmg });
+    if (eff === 'burn' && !this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 3, wait: 0.5, dmg: 0.6 + (w.dmg || 0) * 0.15 });
+    if (eff === 'vamp' && this.hp < this.maxHp) {
+      this.hp = Math.min(this.maxHp, this.hp + 0.3);
+      const p = this.g.player;
+      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${hp100(0.3)}`, color: '#ff5d7a', t: 0 });
+    }
+  }
+
+  // Chain lightning: every target that was hit sends an arc to the nearest other one
+  chain(struck, cx, cy) {
+    const pool = [];
+    for (const s of this.skeletons) if (s.state !== 'dead') pool.push(['skel', s]);
+    for (const m of this.monstersNear(cx, cy, 160)) pool.push(['mon', m]);
+    if (this.g.fight) for (const r of this.g.remotes.values()) if (!r.hidden) pool.push(['rem', r]);
+    const hitAlready = new Set(struck.map((s) => s.t));
+    for (const st of struck) {
+      const [ax, ay] = this.bodyOf(st.kind, st.t);
+      let best = null;
+      let bd = 62;
+      for (const [kind, t] of pool) {
+        if (hitAlready.has(t)) continue;
+        const [bx, by] = this.bodyOf(kind, t);
+        const d = Math.hypot(bx - ax, by - ay);
+        if (d < bd) {
+          bd = d;
+          best = [kind, t, bx, by];
+        }
+      }
+      if (!best) continue;
+      hitAlready.add(best[1]);
+      this.applyHit(best[0], best[1], Math.max(0.5, st.dmg * 0.5), ax, ay, 90);
+      this.bolts.push({ x1: ax, y1: ay, x2: best[2], y2: best[3], t: 0, seed: Math.random() * 9 });
+    }
+  }
+
   swordHit(a) {
+    const w = this.weapon();
+    const eff = w?.effect || 'none';
+    const arc = eff === 'cleave' ? 2.1 : 1.3; // half the angle the blade covers
+    const reach = w ? w.reach : SWORD_REACH;
     const [cx, cy] = this.center();
+    const struck = [];
     for (const s of this.skeletons) {
       if (s.state === 'dead') continue;
       const sx = s.x - cx;
       const sy = s.y - 8 - cy;
       const d = Math.hypot(sx, sy);
-      if (d <= SWORD_REACH && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < 1.3)) {
-        this.damageSkeleton(s, this.meleeDmg(), cx, cy);
-      }
+      if (d <= reach && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc)) this.strike('skel', s, w, cx, cy, struck);
     }
-    for (const m of this.monstersNear(cx, cy, this.meleeReach())) {
+    for (const m of this.monstersNear(cx, cy, this.meleeReach() + (reach - SWORD_REACH))) {
       const sc = MONSTERS[m.type].scale || 1;
       const sx = m.x - cx;
       const sy = bodyY(m) - cy;
-      if (Math.hypot(sx, sy) < 12 + 4 * sc || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < 1.3) this.hitMonster(m, this.meleeDmg(), cx, cy);
+      if (Math.hypot(sx, sy) < 12 + 4 * sc || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc) this.strike('mon', m, w, cx, cy, struck);
     }
     if (this.g.fight) {
       for (const r of this.g.remotes.values()) {
@@ -925,9 +1157,10 @@ export class Combat {
         const sx = r.x - cx;
         const sy = r.y - 8 - cy;
         const d = Math.hypot(sx, sy);
-        if (d <= SWORD_REACH && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < 1.3)) this.hitRemote(r, this.meleeDmg());
+        if (d <= reach && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc)) this.strike('rem', r, w, cx, cy, struck);
       }
     }
+    if (eff === 'shock' && struck.length) this.chain(struck, cx, cy);
   }
 
   // ---------- wave monsters ----------
@@ -963,7 +1196,7 @@ export class Combat {
       s.stateT = 0;
       s.anim = 0;
       this.kills++;
-      this.g.monsterKill('Skeleton');
+      this.g.monsterKill('Skeleton', s.elite ? 60 : XP.skeleton);
       if (s.camp) {
         const st = this.camps.get(s.camp);
         if (st && ++st.killed >= 3) {
@@ -1010,7 +1243,7 @@ export class Combat {
     this.hp -= n;
     this.invuln = invuln;
     this.splat(p.x, p.y, null, 1, fromX, fromY);
-    this.floaters.push({ x: p.x, y: p.y - 34, text: `-${n} ♥`, color: '#ff5d7a', t: 0 });
+    this.floaters.push({ x: p.x, y: p.y - 34, text: `-${hp100(n)}`, color: '#ff5d7a', t: 0 });
     const ang = Math.atan2(p.y - fromY, p.x - fromX);
     for (let i = 0; i < 6; i++) {
       const nx = p.x + Math.cos(ang) * 1.5;
@@ -1154,7 +1387,8 @@ export class Combat {
           }
         }
       }
-      if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, false, true)) {
+      // bullets fly straight over the bus, so you can shoot from its roof side at whatever is on the other side
+      if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, false, true, p.id === 'bullet')) {
         if (world.type(Math.floor(p.x / 16), Math.floor(p.y / 16)) === WATER) {
           this.floaters.push({ x: p.x, y: p.y - 6, text: 'plop', color: '#5ab0d8', t: 0 });
         } else {
@@ -1182,11 +1416,36 @@ export class Combat {
   }
 
   updateDrop(d, dt) {
+    if (!!d.ins !== !!this.g.inside) return true; // things on your house floor wait there until you are in the house
     d.age += dt;
+    if (d.fly) {
+      // bursting out of a chest: up, out and down with one small bounce
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.z += d.vz * dt;
+      d.vz -= 420 * dt;
+      if (d.z <= 0) {
+        d.z = 0;
+        if (!d.bounced && d.vz < -70) {
+          d.bounced = true;
+          d.vz *= -0.4;
+          d.vx *= 0.35;
+          d.vy *= 0.35;
+        } else {
+          d.fly = false;
+          d.age = Math.max(d.age, 0.35); // a moment before it can be picked up
+        }
+      }
+      return true;
+    }
     const p = this.g.player;
     const dx = p.x - d.x;
     const dy = p.y - 4 - d.y;
     const dist = Math.hypot(dx, dy);
+    if (d.nopick > 0) {
+      d.nopick -= dt;
+      return true;
+    }
     if (d.age < 0.5) return true;
     if (d.id === 'heart') {
       // a health pickup: only taken when there is something to heal
@@ -1197,7 +1456,7 @@ export class Combat {
       }
       if (this.hp < this.maxHp && dist < 8) {
         this.hp = Math.min(this.maxHp, this.hp + 1);
-        this.floaters.push({ x: p.x, y: p.y - 34, text: '+1 ♥', color: '#ff5d7a', t: 0 });
+        this.floaters.push({ x: p.x, y: p.y - 34, text: `+${hp100(1)}`, color: '#ff5d7a', t: 0 });
         sfx.play('heal');
         return false;
       }
@@ -1218,12 +1477,13 @@ export class Combat {
       }
       return d.age < 120;
     }
-    if (dist < 30) {
+    if (dist < 30 && !d.burst) {
       d.x += (dx / dist) * 120 * dt;
       d.y += (dy / dist) * 120 * dt;
     }
-    if (dist < 7) {
+    if (dist < (d.burst ? 9 : 7)) {
       const left = addItem(this.g.inventory, d.id, d.qty);
+      if (left === 0 && d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
       if (left < d.qty) {
         this.g.emitInventory();
         this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty - left} ${ITEMS[d.id].name}`, color: '#6fae6a', t: 0 });
@@ -1242,7 +1502,7 @@ export class Combat {
     for (const w of this.wilds) list.push({ kind: 'monster', m: w, y: w.y });
     for (const p of this.projectiles) list.push({ kind: 'projectile', p, y: p.y + 6 });
     for (const p of this.remoteShots) list.push({ kind: 'projectile', p, y: p.y + 6 });
-    for (const d of this.drops) list.push({ kind: 'drop', d, y: d.y });
+    for (const d of this.drops) if (!d.ins) list.push({ kind: 'drop', d, y: d.y });
     if (this.swing) list.push({ kind: 'swing', y: this.g.player.y + 0.5 });
     if (this.spin) list.push({ kind: 'spin', y: this.g.player.y + 0.5 });
     if (this.shieldT > 0) list.push({ kind: 'shield', y: this.g.player.y + 0.6 });
@@ -1281,7 +1541,17 @@ export class Combat {
 
   drawEntity(ctx, o, t) {
     if (o.kind === 'skeleton') this.drawSkeleton(ctx, o.s);
-    else if (o.kind === 'projectile') this.drawIcon(ctx, o.p.id, o.p.x, o.p.y - 8, o.p.rot);
+    else if (o.kind === 'projectile' && o.p.id === 'bullet') {
+      // a bright tracer along the way it is flying
+      ctx.save();
+      ctx.translate(Math.round(o.p.x), Math.round(o.p.y - 8));
+      ctx.rotate(Math.atan2(o.p.vy, o.p.vx));
+      ctx.fillStyle = '#ffb62e';
+      ctx.fillRect(-9, -0.5, 4, 1);
+      ctx.fillStyle = '#fff3b0';
+      ctx.fillRect(-5, -0.7, 7, 1.4);
+      ctx.restore();
+    } else if (o.kind === 'projectile') this.drawIcon(ctx, o.p.id, o.p.x, o.p.y - 8, o.p.rot);
     else if (o.kind === 'drop') this.drawDrop(ctx, o.d, t);
     else if (o.kind === 'swing') this.drawSwing(ctx);
     else if (o.kind === 'spin') this.drawSpin(ctx);
@@ -1321,7 +1591,7 @@ export class Combat {
       ctx.fillRect(x + 3, y + 5, 1, 1);
       return;
     }
-    this.drawIcon(ctx, d.id, d.x, d.y - 4 + Math.sin(t * 4 + d.x) * 1.2);
+    this.drawIcon(ctx, d.id, d.x, d.y - 4 - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 1.2));
   }
 
   drawSkeleton(ctx, s) {
@@ -1410,20 +1680,57 @@ export class Combat {
   drawSwing(ctx) {
     const [cx, cy] = this.center();
     this.drawSwingAt(ctx, cx, cy, this.swing);
+    this.drawBolts(ctx);
+  }
+
+  // chain lightning: a jagged line from one target to the next
+  drawBolts(ctx) {
+    for (const b of this.bolts) {
+      const k = 1 - b.t / 0.22;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, k * 1.6);
+      for (const [col, wd] of [['#79c8ff', 3], ['#ffffff', 1]]) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = wd;
+        ctx.beginPath();
+        ctx.moveTo(b.x1, b.y1);
+        const n = 5;
+        for (let i = 1; i < n; i++) {
+          const f = i / n;
+          const j = Math.sin(b.seed * 7 + i * 5 + b.t * 40) * 4;
+          ctx.lineTo(b.x1 + (b.x2 - b.x1) * f + j, b.y1 + (b.y2 - b.y1) * f - j);
+        }
+        ctx.lineTo(b.x2, b.y2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   // also used for other players' swings in multiplayer
   drawSwingAt(ctx, cx, cy, sw) {
     const k = sw.t / 0.24;
-    const sweep = 1.1;
+    const w = this.g.world.apoc ? null : weaponById(sw.w);
+    // the trail is wider and longer with a higher level, and shaped by the kind of sword
+    const lvl = 1 + Math.min(1, 0.04 * ((sw.lv || this.g.level || 1) - 1));
+    const sweep = w ? (w.effect === 'cleave' ? 1.8 : w.id === 'rapier' ? 0.8 : w.effect === 'knock' ? 1.3 : 1.1) : 1.1;
+    const width = (w ? (w.effect === 'cleave' ? 4.6 : w.effect === 'knock' ? 4 : w.id === 'rapier' ? 1.9 : 3) : 3) * lvl;
+    const radius = (w ? 14 + 0.16 * w.reach : 19) * lvl;
+    const tint = w ? w.tint : '#ffffff';
     const ang = sw.a - sweep + 2 * sweep * k;
-    // trail
+    // trail: a soft coloured glow, a brighter band, and a thin white core
     ctx.save();
-    ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - k)})`;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 19, sw.a - sweep, ang);
-    ctx.stroke();
+    ctx.lineCap = 'round';
+    const fade = Math.min(1, (1 - k) * 1.3);
+    for (const [col, wd, al] of [[tint, width * 2.2, 0.4], [tint, width * 1.3, 0.85], ['#ffffff', Math.max(1, width * 0.5), 1]]) {
+      ctx.globalAlpha = al * fade;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = wd;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, sw.a - sweep, ang);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     ctx.translate(cx + Math.cos(ang) * 4, cy + Math.sin(ang) * 4);
     if (this.g.world.apoc) {
       // Survival swings a baseball bat. Its picture points up-left, handle bottom-right.
@@ -1432,7 +1739,9 @@ export class Combat {
     } else {
       // blade: the icon points up-right, so spin it by +45 degrees around the hilt
       ctx.rotate(ang + Math.PI / 4);
-      ctx.drawImage(this.img.sword, -2, -12);
+      const icon = this.img[weaponIconFile(w)];
+      const s = 0.62;
+      ctx.drawImage(icon, -3 * s, -29 * s, 32 * s, 32 * s);
     }
     ctx.restore();
   }

@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_SHOP, THROW_SHOP } from '../game/upgrades';
+import { EFFECTS, WEAPONS, swingTime, weaponIconFile } from '../game/weapons';
 import { ITEMS, throwDamage, throwRange, throwWeight } from '../game/items';
 import ItemIcon from './ItemIcon';
 
 // Free Roam shop: spend coins from chests and skeletons.
 export default function ShopPanel({ hud, game, onClose }) {
+  const [tab, setTab] = useState('goods');
   const coins = hud.coins;
   const owned = (id) => hud.supplies?.[id] || 0;
   const skills = hud.skills || {};
@@ -36,16 +39,55 @@ export default function ShopPanel({ hud, game, onClose }) {
       <div className="panel upgrades shop">
         <header className="inv-head">
           <h2>🛒 Shop</h2>
+          <span className="lvl-chip" title="Character level: kill monsters and players for XP">⭐ Lv {hud.level || 1} <i><b style={{ width: `${Math.min(100, ((hud.xp || 0) / (hud.xpNeed || 40)) * 100)}%` }} /></i> {hud.xp || 0}/{hud.xpNeed || 40} XP</span>
           <span className="coin-chip big">🪙 {coins}</span>
           <button className="btn small-btn" onClick={onClose} aria-label="Close shop">✕</button>
         </header>
         <p className="hint">Coins turn up in chests and when you defeat skeletons.</p>
+        <div className="shop-tabs" role="tablist">
+          {[['goods', '🛒 Goods'], ['swords', '⚔️ Swords']].map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={tab === id} className={`shop-tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>{label}</button>
+          ))}
+        </div>
 
-        <div className="shop-cols">
+        {tab === 'swords' && (
+          <div className="sword-shop">
+            <div className="upg-list">{upgradeRow(FREE_UPGRADES.find((u) => u.id === 'atkspd'))}</div>
+            <div className="sword-grid">
+              {WEAPONS.map((w) => {
+                const have = !!hud.weapons?.owned?.[w.id];
+                const on = hud.weapons?.equipped === w.id;
+                const atk = hud.upg?.atkspd || 0;
+                return (
+                  <div className={`sword-card ${on ? 'is-equipped' : ''}`} key={w.id}>
+                    <span className="wicon" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(w)}.png)` }} />
+                    <div className="sword-info">
+                      <h3>{w.name} {on && <small>equipped</small>}</h3>
+                      <p className="sword-blurb">{w.blurb}</p>
+                      <p className="sword-fx"><i className="fx-dot" style={{ background: w.tint }} /> <b>{EFFECTS[w.effect].name}</b>: {EFFECTS[w.effect].desc}</p>
+                      <p className="sword-stats">
+                        <span className="dmg-tag">💥 {(2 + w.dmg + 0.4 * (hud.upg?.melee || 0)).toFixed(1)} dmg</span>
+                        <span className="dmg-tag range">⏱ {swingTime(w, atk).toFixed(2)}s swing</span>
+                        <span className="dmg-tag range">📏 {(w.reach / 16).toFixed(1)} tiles</span>
+                      </p>
+                    </div>
+                    {have ? (
+                      <button className="btn go small-btn" disabled={on} onClick={() => game.buyShop('wequip', w.id)}>{on ? 'Equipped' : 'Equip'}</button>
+                    ) : (
+                      <button className="btn go small-btn" disabled={coins < w.cost} onClick={() => game.buyShop('weapon', w.id)}>🪙 {w.cost}</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {tab === 'goods' && <div className="shop-cols">
           <section className="shop-col">
             <h3 className="shop-h">⬆ Upgrades</h3>
             <div className="upg-list">
-              {FREE_UPGRADES.filter((u) => !u.needs).map((u) => upgradeRow(u))}
+              {FREE_UPGRADES.filter((u) => !u.needs && u.id !== 'atkspd').map((u) => upgradeRow(u))}
             </div>
           </section>
 
@@ -122,7 +164,7 @@ export default function ShopPanel({ hud, game, onClose }) {
               })}
             </div>
           </section>
-        </div>
+        </div>}
       </div>
     </div>
   );

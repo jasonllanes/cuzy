@@ -116,9 +116,9 @@ export class Net {
     });
   }
 
-  create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, player }) {
+  create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowCheats, player }) {
     this.wantLobby = false;
-    return this.request({ t: 'create', name, seed, max, pvp, mode, difficulty, winBy, allowLate, player });
+    return this.request({ t: 'create', name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowCheats, player });
   }
 
   join(code, player) {

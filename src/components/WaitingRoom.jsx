@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { heroById } from '../game/heroes';
-import { TEAMS, TEAM_COUNTS } from '../game/teams';
+import { TEAMS } from '../game/teams';
+import RoomSettings from './RoomSettings';
 import { inviteLink } from '../game/net';
 import SpritePreview from './SpritePreview';
 import OnlinePlayers from './OnlinePlayers';
@@ -22,67 +23,9 @@ async function copy(text) {
   }
 }
 
-// One on/off setting, drawn as a switch
-function Switch({ label, hint, on, disabled, onChange }) {
-  return (
-    <div className="set-row">
-      <div className="set-label"><b>{label}</b><small>{hint}</small></div>
-      <button type="button" role="switch" aria-checked={on} className={`switch ${on ? 'on' : ''}`} disabled={disabled} onClick={() => onChange(!on)}>
-        <i />
-      </button>
-    </div>
-  );
-}
-
-// The host's room rules. Everyone can see them; only the host can change them, and most are locked once a round is running.
-function RoomSettings({ room, count, editable, onChange }) {
-  const free = room.mode === 'free';
-  const locked = !editable || room.started;
-  const monsters = room.winBy === 'monsters';
-  return (
-    <section className="settings-panel" aria-label="Room settings">
-      <h3>⚙️ Room settings {!editable && <small>set by the host</small>}</h3>
-      <div className="set-grid">
-        <div className="set-row">
-          <div className="set-label"><b>Max players</b><small>{count} in the room now</small></div>
-          <select value={room.max} disabled={locked} onChange={(e) => onChange({ max: Number(e.target.value) })}>
-            {[2, 3, 4, 5, 6, 7, 8, 9, 10].filter((n) => n >= count).map((n) => <option key={n} value={n}>{n} players</option>)}
-          </select>
-        </div>
-        <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too, and everyone sees them' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={locked} onChange={(v) => onChange({ streakMonsters: v })} />
-        <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
-        {free && (
-          <>
-            <div className="set-row">
-              <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score. Pick your team on your card.' : 'Free for all: everyone for themselves'}</small></div>
-              <select value={room.teams || 0} disabled={locked} onChange={(e) => onChange({ teams: Number(e.target.value) })}>
-                {TEAM_COUNTS.map((n) => <option key={n} value={n}>{n ? `${n} teams` : 'Free for all'}</option>)}
-              </select>
-            </div>
-            <Switch label="Player damage" hint="Heroes can hurt each other" on={!!room.pvp} disabled={locked} onChange={(v) => onChange({ pvp: v })} />
-            <Switch label="Allow melee" hint="Sword, dash and spiral" on={room.allowMelee !== false} disabled={locked} onChange={(v) => onChange({ allowMelee: v })} />
-            <Switch label="Allow throwing" hint="Right-click throws" on={room.allowThrow !== false} disabled={locked} onChange={(v) => onChange({ allowThrow: v })} />
-            <div className="set-row">
-              <div className="set-label"><b>Win by</b><small>{room.pvp ? 'What counts towards the win' : 'Player damage is off, so monsters it is'}</small></div>
-              <div className="seg">
-                <button type="button" className={!monsters ? 'on' : ''} disabled={locked || !room.pvp} onClick={() => onChange({ winBy: 'duel', target: 10 })}>⚔️ Players</button>
-                <button type="button" className={monsters ? 'on' : ''} disabled={locked} onClick={() => onChange({ winBy: 'monsters', target: 15 })}>👹 Monsters</button>
-              </div>
-            </div>
-            <div className="set-row wide">
-              <div className="set-label"><b>Reach {room.target} {monsters ? 'monster ' : 'player '}kills to win</b><small>Drag to change</small></div>
-              <input type="range" min={1} max={50} value={Math.min(50, room.target)} disabled={locked} onChange={(e) => onChange({ target: Number(e.target.value) })} />
-            </div>
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
-
 // The room before the round: everyone who has joined, the invite code, and a Start button for the host.
 // A round that has been won sends everyone back here.
-export default function WaitingRoom({ assets, net, session, profile, onStart, onLeave }) {
+export default function WaitingRoom({ assets, net, session, profile, onStart, onLeave, onJoinRoom }) {
   const { you } = session;
   const [room, setRoom] = useState(session.room); // the host's settings, kept up to date
   const [peers, setPeers] = useState(() => [{ id: you, name: profile.name, hero: profile.hero, slot: session.slot }, ...session.players]);
@@ -147,6 +90,36 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <button type="button" className="btn small-btn" onClick={() => doCopy('link', inviteLink(room.code, lan))}>{copied === 'link' ? 'Link copied!' : '✉️ Invite link'}</button>
         </div>
 
+        {room.teams > 0 && room.mode === 'free' ? (
+          <div className="team-cols" style={{ gridTemplateColumns: `repeat(${room.teams}, minmax(0, 1fr))` }} aria-label="Teams">
+            {TEAMS.slice(0, room.teams).map((t, ti) => {
+              const members = ordered.filter((p) => teams[p.id] === ti);
+              const cap = Math.ceil(room.max / room.teams);
+              return (
+                <div className="team-col" key={t.name} style={{ '--team': t.color }}>
+                  <h4>{t.icon} {t.name} <small>{members.length}/{cap}</small></h4>
+                  {Array.from({ length: cap }, (_, k) => {
+                    const p = members[k];
+                    if (p) {
+                      const hero = heroById(p.hero);
+                      return (
+                        <div className={`team-slot filled ${p.id === you ? 'me' : ''}`} key={p.id}>
+                          <SpritePreview img={assets.img} hero={hero} active />
+                          <b>{p.id === host ? '👑 ' : ''}{p.name}{p.id === you ? ' (you)' : ''}</b>
+                        </div>
+                      );
+                    }
+                    return (
+                      <button key={`e${k}`} type="button" className="team-slot" title={`Join the ${t.name} team`} onClick={() => net.send({ t: 'team', team: ti })}>
+                        <span>＋<small>Tap to join {t.name}</small></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
         <div className="wait-grid" aria-label="Players in the room">
           {ordered.map((p) => {
             const hero = heroById(p.hero);
@@ -183,10 +156,11 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
             </div>
           ))}
         </div>
+        )}
 
         <section className="settings-panel online-section" aria-label="Players online">
           <h3>🌐 Online now <small>invite anyone who has the game open</small></h3>
-          <OnlinePlayers net={net} assets={assets} />
+          <OnlinePlayers net={net} assets={assets} onJoinRoom={onJoinRoom} />
         </section>
 
         <RoomSettings room={room} count={ordered.length} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />

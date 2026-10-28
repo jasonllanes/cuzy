@@ -17,13 +17,23 @@ const tagHeight = (hero) => (hero.kind === 'retro' ? 26 : hero.kind === 'sunny' 
 
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
+import { DOOR, ROOM, SPOTS, drawRoom, roomBlocked } from './interior';
+import { WEAPONS, emptyWeapons, sanitizeWeapons, weaponById } from './weapons';
 import { hash2, hashString } from './rng';
 import { renderChunk } from './render';
+import { frostImages } from './assets';
+import { WEATHER, weatherAt } from './weather';
+import { runCommand } from './commands';
+import { HP_PER_HEART, HP_PER_LEVEL, HP_PER_UPGRADE, MAX_CHAR_LEVEL, XP, hp100, xpNeed } from './stats';
+import { KINDS } from './dungeon';
+import { drawEntrance, drawExit, drawTorch, makeRuinHouse } from './dungeonArt';
+import { HOUSE_SPRITE } from './world';
 import { drawHero, heroById } from './heroes';
 
 // how much longer than you a mount can sprint: a chicken lasts 2x, a cow 3x as long
 export const MONSTER_TARGET = 15; // monster kills that win a "monster kills" round
 const MOUNT_POOL = { chicken: 2, cow: 3 };
+const STORAGE_SLOTS = 27;
 const MOUNT_HP = { chicken: 3, cow: 6 }; // hearts; hits that would land on a rider land on the animal instead
 
 const FOOT_W = 8;
@@ -75,11 +85,13 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onHotbarScroll }) {
+  constructor({ canvas, world, assets, hero, name = '', demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll }) {
     this.canvas = canvas;
+    this.onStorage = onStorage;
+    this.onOpenStorage = onOpenStorage;
     this.ctx = canvas.getContext('2d');
     this.world = world;
-    this.img = assets.img;
+    this.img = world.frost ? frostImages(assets.img) : assets.img; // the frozen map gets snowy sprites
     this.mbox = assets.mbox;
     this.hero = hero;
     this.name = name;
@@ -110,6 +122,17 @@ export class Game {
     this.remotes = new Map();
     this.myBubble = null;
     this.dead = null; // set while you are downed: { t, dur, by, last }
+    this.weather = { kind: 'clear', k: 1, cloud: 0.3, rain: 0, snow: 0 };
+    this.weatherForce = null; // set by the -weather cheat
+    this.level = 1; // character level
+    this.xp = 0;
+    this.cheats = !session || !!session.room?.allowCheats; // alone you may always cheat; in a room the host decides
+    this.weatherT = 0;
+    this.cloudCanvas = null;
+    this.dungeon = null; // set while you are in a crypt, cave or ruined house: { drx, dry, kind, tier, layout, out, spawned, t }
+    this.inside = null; // set while you are in your house's own room: { out: where the front door leads, sleepCd }
+    this.fade = null; // the black blink while you are teleported in or out: { t, dur, fn, done }
+    this.storageOpen = false;
     this.upgrades = emptyUpgrades(); // bought with coins in Wave Defense and Survival
     this.padState = {}; // how long you have stood on each recruit pad
     for (const p of this.mp ? session.players : []) this.addRemote(p);
@@ -196,6 +219,10 @@ export class Game {
     this.bots = !demo && !session && mode === 'free' && bots > 0 ? new Bots(this, bots, difficulty) : null;
     // Free Roam keeps its shop upgrades and quick-slot supplies with the seed's save
     if (saved?.upgrades) this.upgrades = { ...emptyUpgrades(), ...saved.upgrades };
+    this.level = Math.max(1, Math.min(MAX_CHAR_LEVEL, Math.round(saved?.level) || 1));
+    this.xp = Math.max(0, Number(saved?.xp) || 0);
+    this.weapons = sanitizeWeapons(saved?.weapons); // swords bought in the Free Roam shop
+    this.storage = sanitize(saved?.storage, STORAGE_SLOTS + 9 * (this.upgrades.chest || 0)); // the chest at home (the Chest space upgrade grows it)
     this.supplies = {
       hp: Math.min(SUPPLY_CAP, saved?.supplies?.hp || 0),
       stam: Math.min(SUPPLY_CAP, saved?.supplies?.stam || 0),
@@ -304,6 +331,10 @@ export class Game {
     };
     this.resize = this.resize.bind(this);
     this.loop = this.loop.bind(this);
+    // Free Roam starts (and resumes) indoors, in your own little room
+    const resumed = !session && saved && Number.isFinite(saved.x);
+    for (const d of saved?.houseDrops || []) if (ITEMS[d.id] && this.combat) this.combat.drops.push({ x: d.x, y: d.y, id: d.id, qty: d.qty, age: 1, ins: true, burst: true });
+    if (!tp && this.canHaveInterior() && (saved?.inside || !resumed)) this.enterHouse(true);
   }
 
   start() {
@@ -325,10 +356,13 @@ export class Game {
     this.emitInventory();
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.loop);
+    this.startBackground();
   }
 
   stop() {
     cancelAnimationFrame(this.raf);
+    this.bgWorker?.terminate();
+    if (this.bgUrl) URL.revokeObjectURL(this.bgUrl);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
@@ -348,8 +382,14 @@ export class Game {
       store.set(
         saveKey(this.world.seedStr),
         JSON.stringify({
-          x: this.player.x,
-          y: this.player.y,
+          x: this.inside ? this.inside.out.x : this.dungeon ? this.dungeon.out.x : this.player.x,
+          y: this.inside ? this.inside.out.y : this.dungeon ? this.dungeon.out.y : this.player.y,
+          inside: !!this.inside,
+          level: this.level,
+          xp: this.xp,
+          weapons: this.weapons,
+          storage: this.storage,
+          houseDrops: this.combat ? this.combat.drops.filter((d) => d.ins).slice(0, 60).map((d) => ({ id: d.id, qty: d.qty, x: d.x, y: d.y })) : [],
           collected: [...this.collected],
           treasures: this.treasures,
           foraged: this.foraged,
@@ -393,17 +433,21 @@ export class Game {
 
   // heroes start (and wake up) indoors, in the middle of their own house; Wave Defense and Survival have no cottage to be in
   homeSpawn() {
-    if (this.wave || this.world.apoc || this.demo) return this.home;
-    return { x: this.home.x, y: this.home.y - 30 };
+    return this.home;
   }
 
   // `inside` puts you in your house, otherwise you land on its doorstep
   goHome(inside = false) {
-    const p = inside ? this.homeSpawn() : this.home;
+    this.leaveDungeon(false);
+    this.inside = null;
+    this.fade = null;
+    this.storageOpen = false;
+    const p = this.home;
     this.player.x = p.x;
     this.player.y = p.y;
     this.cam.x = p.x;
     this.cam.y = p.y;
+    if (inside && this.canHaveInterior()) this.enterHouse(true);
   }
 
   // Wipes the seed's progress and puts the hero back at spawn.
@@ -415,6 +459,11 @@ export class Game {
     this.foraged = 0;
     this.bots?.reset();
     this.upgrades = emptyUpgrades();
+    this.level = 1;
+    this.xp = 0;
+    this.weapons = emptyWeapons();
+    this.storage = Array(STORAGE_SLOTS).fill(null);
+    this.emitStorage();
     this.supplies = { hp: 0, stam: 0 };
     this.skills = { shield: false, invis: false, dash: false, spiral: false, equipped: 'dash', equippedUtil: null };
     this.combat?.refreshMaxHp(true);
@@ -584,7 +633,38 @@ export class Game {
   }
 
   // you took down a skeleton or monster
-  monsterKill(name) {
+  // ---------- character level ----------
+
+  // experience from kills; enough of it levels you up (more max HP, and the swing trail grows)
+  addXp(n, quiet = false) {
+    if (!(n > 0) || this.demo || this.level >= MAX_CHAR_LEVEL) return;
+    this.xp += n;
+    if (!quiet) this.combat.floaters.push({ x: this.player.x, y: this.player.y - 44, text: `+${Math.round(n)} XP`, color: '#b38cff', t: 0 });
+    let up = 0;
+    while (this.level < MAX_CHAR_LEVEL && this.xp >= xpNeed(this.level)) {
+      this.xp -= xpNeed(this.level);
+      this.level++;
+      up++;
+    }
+    if (up) {
+      this.combat.refreshMaxHp(false, (HP_PER_LEVEL * up) / HP_PER_HEART);
+      this.combat.hp = this.combat.maxHp;
+      sfx.play('levelup');
+      this.combat.floaters.push({ x: this.player.x, y: this.player.y - 56, text: `LEVEL ${this.level}!`, color: '#ffd24a', t: 0 });
+      this.onToast?.(`⭐ Level ${this.level}! Max HP is now ${hp100(this.combat.maxHp)}, and you are fully healed.`);
+      this.save();
+    }
+  }
+
+  setLevel(n) {
+    this.level = Math.max(1, Math.min(MAX_CHAR_LEVEL, Math.round(n)));
+    this.xp = 0;
+    this.combat.refreshMaxHp(true);
+    this.save();
+  }
+
+  monsterKill(name, xp = XP.wave) {
+    this.addXp(xp);
     this.monsterKills++;
     if (this.winBy === 'monsters') {
       if (this.mp) this.mp.net.send({ t: 'mkill' });
@@ -689,6 +769,26 @@ export class Game {
 
   // ---------- being downed ----------
 
+  // A hero who is defeated by another loses a random share of their coins (never more than 70%) on the spot,
+  // for anyone to pick up. Everybody in the room sees the same pieces, and the first to grab one takes it.
+  dropCoinsOnDeath() {
+    const have = this.coinCount();
+    const share = 0.08 + 0.62 * Math.random() ** 2.2; // usually around a quarter, sometimes much less or more, never past 70%
+    const n = Math.min(Math.floor(have * 0.7), Math.floor(have * share));
+    if (n < 1) return;
+    this.spendCoins(n);
+    const pieces = Math.min(5, n);
+    for (let k = 0; k < pieces; k++) {
+      const qty = Math.floor(n / pieces) + (k < n % pieces ? 1 : 0);
+      const lid = `${this.mp?.you ?? 'me'}-${Date.now().toString(36)}${k}`;
+      const a = Math.random() * Math.PI * 2;
+      const drop = { x: this.player.x, y: this.player.y - 4, z: 8, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, vz: 110, fly: true, burst: true, id: 'coin', qty, age: 0, net: lid, nopick: 6 };
+      this.combat.drops.push(drop);
+      this.mp?.net.send({ t: 'fx', kind: 'loot', lid, x: drop.x, y: drop.y, qty });
+    }
+    this.onToast?.(`💸 You dropped ${n} coins where you fell.`);
+  }
+
   // Called when your hearts run out. You sit out a short respawn timer, watching whoever did it.
   die(by) {
     if (this.dead) return;
@@ -701,6 +801,7 @@ export class Game {
     this.mouseHeld[2] = false;
     this.player.moving = false;
     if (by?.kind === 'player' && this.remotes.get(by.id)?.bot) this.bots.credit(by.id, 'me');
+    if (by?.kind === 'player' && !this.wave) this.dropCoinsOnDeath();
     sfx.play('death');
     this.streaks.died(this.myKey());
     if (this.mp && by?.kind !== 'player') this.mp.net.send({ t: 'fell' });
@@ -799,14 +900,20 @@ export class Game {
     const c = this.combat;
     if (ev.type === 'start') {
       sfx.play('wave');
-      this.onToast?.(ev.boss ? 'FINAL WAVE! The Crushing Cyclops is coming!' : `Wave ${ev.wave} is coming!`);
+      if (this.world.apoc && ev.bosses > 0) this.onToast?.(`${ev.boss ? 'FINAL WAVE! ' : `Wave ${ev.wave}: `}${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming!`);
+      else this.onToast?.(ev.boss ? 'FINAL WAVE! The Crushing Cyclops is coming!' : `Wave ${ev.wave} is coming!`);
+    } else if (ev.type === 'surge') {
+      sfx.play('wave');
+      this.onToast?.(`🧟 A pack of ${ev.n} runners is charging in from the ${ev.dir}!`);
+    } else if (ev.type === 'enrage') {
+      this.onToast?.('🔥 The horde is getting restless: they move faster! Finish them off!');
     } else if (ev.type === 'cleared') {
-      this.onToast?.(`Wave ${ev.wave} cleared! You catch your breath (+2 ♥).`);
+      this.onToast?.(`Wave ${ev.wave} cleared! You catch your breath (+${hp100(2)} HP).`);
       c.hp = Math.min(c.maxHp, c.hp + 2);
       this.stamina = 1;
     } else if (ev.type === 'mdie') {
       c.kills++;
-      this.monsterKill(ev.name || 'Monster');
+      this.monsterKill(ev.name || 'Monster', XP.wave + (ev.boss ? 80 : 0));
       sfx.play('monsterDie', 0.6);
       for (const l of ev.loot) {
         c.drops.push({ x: ev.x + (Math.random() - 0.5) * 16, y: ev.y + (Math.random() - 0.5) * 8, id: l.id, qty: l.qty, age: 0 });
@@ -1024,7 +1131,7 @@ export class Game {
     if (kind === 'hp') {
       const healed = Math.min(c.maxHp - c.hp, item.heal);
       c.hp += healed;
-      c.floaters.push({ x: this.player.x, y: this.player.y - 34, text: `+${Math.round(healed * 10) / 10} ♥`, color: '#ff5d7a', t: 0 });
+      c.floaters.push({ x: this.player.x, y: this.player.y - 34, text: `+${hp100(healed)}`, color: '#ff5d7a', t: 0 });
     } else {
       this.stamina = Math.min(1, this.stamina + item.energy);
       if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
@@ -1053,7 +1160,11 @@ export class Game {
       if (!pay(info.cost[level], info.name)) return;
       this.upgrades[id] = level + 1;
       sfx.play('levelup');
-      if (id === 'health') this.combat.refreshMaxHp(false, 1);
+      if (id === 'health') this.combat.refreshMaxHp(false, HP_PER_UPGRADE / HP_PER_HEART);
+      if (id === 'chest') {
+        while (this.storage.length < STORAGE_SLOTS + 9 * (level + 1)) this.storage.push(null);
+        this.emitStorage();
+      }
       this.onToast?.(`${info.icon} ${info.name} is now level ${level + 1}!`);
     } else if (kind === 'supply') {
       const info = SUPPLY_SHOP.find((s) => s.id === id);
@@ -1078,6 +1189,19 @@ export class Game {
       if (!this.skills[id]) return;
       this.skills[info.sword ? 'equipped' : 'equippedUtil'] = id;
       this.onToast?.(`${info.icon} ${info.name} equipped.`);
+    } else if (kind === 'weapon') {
+      const info = WEAPONS.find((w) => w.id === id);
+      if (!info || this.weapons.owned[id]) return;
+      if (!pay(info.cost, info.name)) return;
+      this.weapons.owned[id] = true;
+      this.weapons.equipped = id;
+      sfx.play('levelup');
+      this.onToast?.(`⚔️ ${info.name} bought and equipped!`);
+    } else if (kind === 'wequip') {
+      if (!this.weapons.owned[id]) return;
+      this.weapons.equipped = id;
+      sfx.play('buy');
+      this.onToast?.(`⚔️ ${weaponById(id).name} equipped.`);
     } else if (kind === 'throw') {
       const info = THROW_SHOP.find((t) => t.item === id);
       if (!pay(info.cost, ITEMS[id].name)) return;
@@ -1186,6 +1310,7 @@ export class Game {
     ctx.fillStyle = 'rgba(30,20,30,0.28)';
     ctx.fillRect(x - 5 * sc, y - 1, 10 * sc, 2 + sc);
     ctx.save();
+    if (def.tint) ctx.filter = def.tint; // the Runner and Armored zombies share art with the others, in different colours
     if (dead) ctx.globalAlpha = Math.max(0, 1.4 - m.t * 2);
     const dx = -Math.round((fw * sc) / 2) + (m.atk > 0 && !dead ? m.face * 2 : 0);
     ctx.drawImage(sheet, frame * fw, 0, fw, fh, x + dx, y - fh * sc, fw * sc, fh * sc);
@@ -1471,6 +1596,10 @@ export class Game {
     } else if (m.t === 'peer_leave') {
       this.remotes.delete(m.id);
       delete this.teamMap[m.id];
+    } else if (m.t === 'settings' && m.room) {
+      this.cheats = !!m.room.allowCheats; // the host can switch cheats on or off
+      this.rules = { melee: m.room.allowMelee !== false, throw: m.room.allowThrow !== false };
+      if (this.mp) this.mp.streakMonsters = !!m.room.streakMonsters;
     } else if (m.t === 'teams') {
       this.teamMap = { ...m.teams };
     } else if (m.t === 'state') {
@@ -1483,12 +1612,14 @@ export class Game {
       r.moving = m.moving;
       r.hp = m.hp;
       if (m.lv) r.lv = m.lv;
+      if (m.mhp) r.max = m.mhp;
       r.mt = m.mt || '';
       r.hidden = !!m.hidden;
     } else if (m.t === 'hit') {
       this.combat.hitByPlayer(m);
     } else if (m.t === 'kill') {
       this.streaks.kill(String(m.killerId), String(m.victimId), { killer: m.killer, victim: m.victim }, m.killerId === this.mp.you);
+      if (m.killerId === this.mp.you) this.addXp(XP.player);
     } else if (m.t === 'fell') {
       this.streaks.died(String(m.id));
     } else if (m.t === 'win') {
@@ -1500,8 +1631,14 @@ export class Game {
     } else if (m.t === 'fx' && m.kind === 'shield') {
       const r = this.remotes.get(m.id);
       if (r) r.shield = SHIELD_DUR;
+    } else if (m.t === 'fx' && m.kind === 'loot') {
+      // a fallen rival's coins
+      const a = Math.random() * Math.PI * 2;
+      this.combat.drops.push({ x: m.x, y: m.y, z: 8, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, vz: 110, fly: true, burst: true, id: 'coin', qty: Math.max(1, Math.min(99999, m.qty | 0)), age: 0, net: m.lid, nopick: 0.8 });
+    } else if (m.t === 'fx' && m.kind === 'grab') {
+      this.combat.drops = this.combat.drops.filter((d) => d.net !== m.lid);
     } else if (m.t === 'fx' && m.kind === 'throw') {
-      if (ITEMS[m.item]) this.combat.remoteShots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, id: m.item, rot: 0, life: throwStats(m.item).life });
+      if (ITEMS[m.item] || m.item === 'bullet') this.combat.remoteShots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, id: m.item, rot: 0, life: m.item === 'bullet' ? 0.55 : throwStats(m.item).life });
     } else if (m.t === 'w') {
       this.wave?.onMessage(m.k, m.d, m.from);
     } else if (m.t === 'chat') {
@@ -1509,7 +1646,7 @@ export class Game {
       if (r) r.bubble = { text: m.text, t: 0 };
     } else if (m.t === 'fx' && m.kind === 'swing') {
       const r = this.remotes.get(m.id);
-      if (r) r.swing = { t: 0, a: m.a };
+      if (r) r.swing = { t: 0, a: m.a, w: m.w, lv: r.lv };
     } else if (m.t === 'fx' && m.kind === 'spin') {
       const r = this.remotes.get(m.id);
       if (r) r.spin = { t: 0, dur: m.d || 0.6, a0: m.a || 0, r: Math.min(80, m.r || 40) };
@@ -1521,7 +1658,8 @@ export class Game {
     this.mp.sendT -= dt;
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
-      this.mp.net.send({ t: 'state', x: p.x, y: p.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, lv: (this.upgrades.melee || 0) + 1, hidden: this.combat.hidden, mt: this.mount?.type || '' });
+      const at = this.inside ? this.inside.out : p; // indoors you are not in the world: friends just stop seeing you
+      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden, mt: this.mount?.type || '' });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -1550,6 +1688,16 @@ export class Game {
   teleportToPeer(id) {
     const r = this.remotes.get(id);
     if (!r) return;
+    if (r.x > 20000) {
+      this.onToast?.(`${r.name} is underground in a dungeon.`);
+      return;
+    }
+    this.leaveDungeon(false);
+    if (this.inside) {
+      this.inside = null;
+      this.fade = null;
+      this.storageOpen = false;
+    }
     this.player.x = r.x + 14;
     this.player.y = r.y + 4;
     this.cam.x = this.player.x;
@@ -1584,6 +1732,8 @@ export class Game {
 
   // 0 in full daylight, up to 1 in the dead of night
   darkness() {
+    if (this.world.depot) return 0.5;
+    if (this.dungeon) return 0.55;
     const g = skyTint(this.hour)[1];
     return Math.min(1, Math.max(0, (255 - g) / 150));
   }
@@ -1592,9 +1742,26 @@ export class Game {
     const dt = Math.min(0.05, (now - this.last) / 1000 || 0);
     this.last = now;
     this.t += dt;
+    this.step(dt);
+    this.guarded(() => this.draw());
+    this.raf = requestAnimationFrame(this.loop);
+  }
+
+  // the host paused the whole room: nothing moves for anyone (the room's day clock is held too)
+  setRoomPaused(on) {
+    if (!!on === !!this.roomPaused) return;
+    if (on) this.pausedAt = performance.now();
+    else if (this.mp && this.pausedAt) this.mp.clockAt += performance.now() - this.pausedAt;
+    this.roomPaused = !!on;
+    if (on) this.mouseHeld = { 0: false, 2: false };
+  }
+
+  // one tick of the game world (no drawing)
+  step(dt) {
+    if (this.roomPaused) return;
     if (this.frozen) {
       // the opening scene is on top: the world waits
-    } else if (!this.paused || this.mp) this.update(dt); // in a room the world carries on while you shop or read
+    } else if (!this.paused || this.mp) this.guarded(() => this.update(dt)); // in a room the world carries on while you shop or read
     else if (!this.demo) {
       // paused menus (shop, backpack...) still need fresh numbers on screen
       this.hudTimer -= dt;
@@ -1603,8 +1770,47 @@ export class Game {
         this.emitHud();
       }
     }
-    this.draw();
-    this.raf = requestAnimationFrame(this.loop);
+  }
+
+  // A browser stops requestAnimationFrame in a tab you are not looking at, and the game stopped with it: in a room that
+  // meant a player who switched tabs froze (their position stopped being sent, so friends only saw them "appear" when
+  // they came back) and could not be hurt (the short invulnerability after a hit only counts down while the game runs).
+  // A Web Worker's clock is not throttled in the background, so in a room it keeps the world ticking, without drawing.
+  startBackground() {
+    if (!this.mp || typeof Worker === 'undefined') return;
+    try {
+      this.bgUrl = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 100);'], { type: 'text/javascript' }));
+      this.bgWorker = new Worker(this.bgUrl);
+      this.bgWorker.onmessage = () => {
+        if (document.hidden) this.backgroundTick();
+      };
+    } catch {
+      /* without it the game simply pauses in the background, as before */
+    }
+  }
+
+  backgroundTick() {
+    const now = performance.now();
+    let left = Math.min(0.5, (now - this.last) / 1000 || 0);
+    this.last = now;
+    while (left > 1e-6) {
+      const dt = Math.min(0.05, left);
+      left -= dt;
+      this.t += dt;
+      this.step(dt);
+    }
+  }
+
+  // A bug in one frame should cost that frame, not freeze the whole game for everyone in the room
+  guarded(fn) {
+    try {
+      fn();
+    } catch (err) {
+      if (this.t - (this.errAt ?? -9) > 5) {
+        this.errAt = this.t;
+        console.error('[cuzy] frame error (carrying on):', err);
+      }
+    }
   }
 
   // ---------- simulation ----------
@@ -1631,12 +1837,18 @@ export class Game {
 
   update(dt) {
     const p = this.player;
+    this.updateFade(dt);
+    this.updateWeather(dt);
+    if (this.dungeon) this.updateDungeon(dt);
     if (this.demo) {
       this.cam.x += dt * 7;
       this.cam.y += Math.sin(this.t * 0.15) * dt * 4;
+    } else if (this.inside) {
+      this.moveInside(dt);
     } else {
-      let dx = this.dead || this.celeb ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
-      let dy = this.dead || this.celeb ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
+      const still = this.dead || this.celeb || this.fade;
+      let dx = still ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
+      let dy = still ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
       const dashing = !!this.combat.dash; // the dash moves the hero itself
       p.moving = dashing || dx !== 0 || dy !== 0;
       // wading is slow going, and too splashy to sprint
@@ -1692,6 +1904,11 @@ export class Game {
         this.bumpedHouse = null;
       }
       this.updateMount(dt);
+      // walking through your own front door takes you into your room
+      if (!this.fade && !this.dead && this.canHaveInterior()) {
+        const door = this.world.doorAt(p.x, p.y);
+        if (door && door.id === this.myHouseId()) this.enterHouse();
+      }
       // while downed, the camera drifts over to whoever did it
       // and when a round is won, over to the winner
       const focus = this.dead ? this.killerPoint() || { x: p.x, y: p.y } : this.celeb ? this.celebPoint() || p : p;
@@ -1700,15 +1917,18 @@ export class Game {
       this.cam.y += (focus.y - 10 - this.cam.y) * k;
     }
 
-    this.updateAnimals(dt);
+    if (!this.inside && !this.dungeon) this.updateAnimals(dt);
     if (!this.demo) {
-      if (!this.dead) this.updateInteraction();
+      if (!this.dead) {
+        if (this.inside) this.updateInsideInteraction();
+        else this.updateInteraction();
+      }
       this.updateDeath(dt);
       if (this.mouseHeld[2] && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot);
       this.updateCelebration(dt);
       this.updateWallHold(dt);
       this.combat.update(dt);
-      this.bots?.update(dt);
+      if (!this.inside && !this.dungeon) this.bots?.update(dt);
       this.wave?.update(dt);
       if (this.mp) {
         // everyone in the room reads the same clock
@@ -1745,8 +1965,15 @@ export class Game {
   emitHud() {
     const p = this.player;
     this.onHud?.({
-      tx: Math.floor(p.x / T),
-      ty: Math.floor(p.y / T),
+      tx: Math.floor((this.inside ? this.inside.out.x : this.dungeon ? this.dungeon.out.x : p.x) / T),
+      ty: Math.floor((this.inside ? this.inside.out.y : this.dungeon ? this.dungeon.out.y : p.y) / T),
+      inside: !!this.inside,
+      level: this.level,
+      xp: Math.floor(this.xp),
+      xpNeed: xpNeed(this.level),
+      dungeon: this.dungeon ? KINDS[this.dungeon.kind].name : null,
+      weather: { kind: this.weather.kind, name: WEATHER[this.weather.kind].name, icon: this.hour >= 19.5 || this.hour < 5.5 ? WEATHER[this.weather.kind].night : WEATHER[this.weather.kind].icon, indoors: !!this.weather.indoors },
+      weapons: { owned: { ...this.weapons.owned }, equipped: this.weapons.equipped },
       treasures: this.treasures,
       foraged: this.foraged,
       stamina: this.stamina,
@@ -1800,7 +2027,7 @@ export class Game {
     let best = null;
     let bestD = 22;
     for (const o of this.nearbyObjects(cx, cy)) {
-      if (!o.inter || this.collected.has(o.id)) continue;
+      if (!o.inter || this.looted(o)) continue;
       const d = Math.hypot(o.x - p.x, o.y - 4 - p.y);
       if (d < bestD) {
         bestD = d;
@@ -1817,13 +2044,14 @@ export class Game {
       this.onToast?.('Ahh, cool and fresh water! Stamina up.');
     } else if (this.interactPressed && best?.inter === 'barricade') {
       this.pickBarricade(best.id);
+    } else if (this.interactPressed && best?.inter === 'dungeon') {
+      this.enterDungeon(best);
+    } else if (this.interactPressed && best?.inter === 'dexit') {
+      this.exitDungeon();
+    } else if (this.interactPressed && best?.inter === 'chest') {
+      this.burstChest(best);
     } else if (this.interactPressed && best) {
-      const seed = this.world.seed;
-      const loot = this.world.apoc ? LOOT_APOC : undefined;
-      const drops = best.inter === 'chest'
-        ? [rollLoot(hash2(best.x, best.y, seed), hash2(best.y, best.x, seed), loot), rollLoot(hash2(best.x, 1, seed + 3), hash2(1, best.y, seed + 3), loot)]
-        : [{ item: best.forage.item, qty: 1 }];
-      // merge duplicate rolls so the space check is exact
+      const drops = [{ item: best.forage.item, qty: 1 }];
       const merged = drops.reduce((m, d) => ({ ...m, [d.item]: (m[d.item] || 0) + d.qty }), {});
       const trial = this.inventory.map((slot) => slot && { ...slot });
       const fits = Object.entries(merged).every(([id, qty]) => addItem(trial, id, qty) === 0);
@@ -1831,21 +2059,487 @@ export class Game {
         this.onToast?.('Your backpack is full!');
       } else {
         this.collected.add(best.id);
-        sfx.play(best.inter === 'chest' ? 'chest' : 'forage');
+        sfx.play('forage');
         for (const [id, qty] of Object.entries(merged)) addItem(this.inventory, id, qty);
         const text = Object.entries(merged).map(([id, qty]) => (qty > 1 ? `${qty}× ${ITEMS[id].name}` : ITEMS[id].name)).join(' & ');
-        if (best.inter === 'chest') {
-          this.treasures++;
-          this.onToast?.(`You found ${text}!`);
-        } else {
-          this.foraged++;
-          this.onToast?.(`You picked up ${text}.`);
-        }
+        this.foraged++;
+        this.onToast?.(`You picked up ${text}.`);
         this.emitInventory();
         this.save();
       }
     }
     this.interactPressed = false;
+  }
+
+  // A chest or fridge pops open and the loot flies out onto the ground around it: walk over the pieces to pick them up
+  burstChest(o) {
+    const seed = this.world.seed;
+    const loot = this.world.apoc ? LOOT_APOC : undefined;
+    const epoch = Math.floor(this.day / 3); // dungeon chests fill up again every three days
+    const sd = seed + (o.rich ? epoch * 7 : 0);
+    const rolls = [rollLoot(hash2(o.x, o.y, sd), hash2(o.y, o.x, sd), loot), rollLoot(hash2(o.x, 1, sd + 3), hash2(1, o.y, sd + 3), loot)];
+    if (o.rich) {
+      const tier = this.dungeon?.tier || 1;
+      rolls.push(rollLoot(hash2(o.x, 2, sd + 5), hash2(2, o.y, sd + 5), loot), rollLoot(hash2(o.x, 3, sd + 9), hash2(3, o.y, sd + 9), loot), { item: 'coin', qty: 3 + Math.floor(Math.random() * 4) * tier });
+      if (o.boss) rolls.push({ item: 'gem', qty: 1 + Math.floor(Math.random() * 2) }, { item: 'gold', qty: 2 + tier });
+    }
+    this.collected.add(o.rich ? `${o.id}@${epoch}` : o.id);
+    this.treasures++;
+    sfx.play('chest');
+    const pieces = [];
+    for (const r of rolls) {
+      const n = Math.min(r.qty, 5); // a pile of coins flies out as a few separate pieces
+      for (let i = 0; i < n; i++) pieces.push({ id: r.item, qty: Math.floor(r.qty / n) + (i < r.qty % n ? 1 : 0) });
+    }
+    pieces.forEach((pc, i) => {
+      const a = (i / pieces.length) * Math.PI * 2 + Math.random() * 0.9;
+      const sp = 26 + Math.random() * 30;
+      this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: 110 + Math.random() * 60, fly: true, burst: true, id: pc.id, qty: pc.qty, age: 0 });
+    });
+    this.combat.floaters.push({ x: o.x, y: o.y - 22, text: 'Pop!', color: '#ffb347', t: 0 });
+    this.onToast?.(this.world.apoc ? 'The fridge swings open and supplies spill out! Walk over them to pick them up.' : 'The chest bursts open! Walk over the loot to pick it up.');
+    this.save();
+  }
+
+  // ---------- weather ----------
+
+  // the climate of this world: Survival's maps each have their own, indoor maps have none
+  climate() {
+    if (!this.world.apoc) return 'meadow';
+    return this.world.mapInfo?.climate || 'mild';
+  }
+
+  updateWeather(dt) {
+    this.weatherT -= dt;
+    if (this.weatherT > 0) return;
+    this.weatherT = 0.5;
+    this.weather = weatherAt(this.world.seed, this.day, this.hour, this.demo || this.dungeon ? 'none' : this.climate());
+    const f = this.weatherForce;
+    if (f && !this.weather.indoors) this.weather = { kind: f, k: 1, cloud: WEATHER[f].cloud, rain: f === 'rain' ? 1 : 0, snow: f === 'snow' ? 1 : 0 };
+  }
+
+  // Soft shadows of clouds sliding over the ground by day. They are painted small and stretched, which blurs the edges.
+  drawCloudShadows(camX, camY) {
+    const day = 1 - this.darkness();
+    const w = this.weather;
+    if (day < 0.2 || w.indoors) return;
+    const SC = 4;
+    const cw = Math.ceil(this.viewW / SC) + 3;
+    const ch = Math.ceil(this.viewH / SC) + 3;
+    let c = this.cloudCanvas;
+    if (!c) c = this.cloudCanvas = document.createElement('canvas');
+    if (c.width !== cw || c.height !== ch) {
+      c.width = cw;
+      c.height = ch;
+    }
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, cw, ch);
+    g.fillStyle = '#000';
+    const CELL = 150;
+    const dx = this.t * 7;
+    const dy = this.t * 2;
+    const seed = this.world.seed;
+    const density = 0.12 + 0.55 * w.cloud;
+    const i0 = Math.floor((camX - dx - 120) / CELL);
+    const i1 = Math.floor((camX + this.viewW - dx + 120) / CELL);
+    const j0 = Math.floor((camY - dy - 120) / CELL);
+    const j1 = Math.floor((camY + this.viewH - dy + 120) / CELL);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        if (hash2(i, j, seed + 700) > density) continue;
+        const cx = (i + hash2(i, j, seed + 701)) * CELL + dx;
+        const cy = (j + hash2(j, i, seed + 702)) * CELL + dy;
+        for (let k = 0; k < 4; k++) {
+          const ox = (hash2(i + k, j, seed + 703) - 0.5) * 80;
+          const oy = (hash2(i, j + k, seed + 704) - 0.5) * 34;
+          const rx = 32 + hash2(i + k, j + k, seed + 705) * 34;
+          g.beginPath();
+          g.ellipse((cx + ox - camX) / SC, (cy + oy - camY) / SC, rx / SC, (rx * 0.55) / SC, 0, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+    }
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalAlpha = 0.17 * day * (0.55 + 0.45 * w.cloud);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(c, camX, camY, cw * SC, ch * SC);
+    ctx.restore();
+  }
+
+  // Rain streaks and snowflakes over the whole screen, with a little gloom
+  drawPrecip() {
+    const { ctx, canvas, zoom } = this;
+    const w = canvas.width;
+    const h = canvas.height;
+    const { rain, snow, cloud } = this.weather;
+    if (cloud > 0.5 && !this.weather.indoors) {
+      ctx.fillStyle = `rgba(60,70,95,${0.07 * (cloud - 0.5) * 2})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+    if (rain > 0.02) {
+      ctx.fillStyle = `rgba(40,60,100,${0.2 * rain})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = `rgba(215,232,255,${0.8 * rain})`;
+      ctx.lineWidth = Math.max(1, Math.round(zoom * 0.55));
+      ctx.beginPath();
+      const n = Math.round(190 * rain);
+      for (let i = 0; i < n; i++) {
+        const a = hash2(i, 5, 41);
+        const b = hash2(i, 6, 41);
+        const y = (b * h + this.t * (300 + a * 160) * zoom * 0.5) % h;
+        const x = (((a * w - this.t * 40 * zoom - y * 0.2) % w) + w) % w;
+        ctx.moveTo(Math.round(x), Math.round(y));
+        ctx.lineTo(Math.round(x - zoom * 1.4), Math.round(y + zoom * 5.5));
+      }
+      ctx.stroke();
+    }
+    if (snow > 0.02) {
+      ctx.fillStyle = `rgba(235,245,255,${0.06 * snow})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      const n = Math.round(130 * snow);
+      for (let i = 0; i < n; i++) {
+        const a = hash2(i, 5, 31);
+        const b = hash2(i, 6, 31);
+        const x = (((a * w + Math.sin(this.t * 0.7 + i) * 14 * zoom + this.t * 6 * zoom) % w) + w) % w;
+        const y = (b * h + this.t * (14 + a * 22) * zoom) % h;
+        const s = Math.max(1, Math.round(zoom * (0.5 + b * 0.5)));
+        ctx.fillRect(Math.round(x), Math.round(y), s, s);
+      }
+    }
+  }
+
+  // ---------- dungeons ----------
+
+  // has this chest been emptied? (dungeon chests refill every three days)
+  looted(o) {
+    return this.collected.has(o.rich ? `${o.id}@${Math.floor(this.day / 3)}` : o.id);
+  }
+
+  enterDungeon(o) {
+    if (this.dungeon || this.inside || this.fade || this.wave || this.demo || this.dead) return;
+    this.transition(() => {
+      if (this.mount) this.dismount();
+      this.world.setActiveZone({ rx: o.drx, ry: o.dry });
+      this.chunkCanvases.clear();
+      const layout = this.world.dungeonLayout(o.drx, o.dry);
+      this.dungeon = { drx: o.drx, dry: o.dry, kind: o.dkind, tier: this.world.dungeonTier(o.drx, o.dry), layout, out: { x: o.x, y: o.y + 16 }, spawned: new Set(), t: 0 };
+      this.combat.clearEnemies();
+      this.player.x = layout.entry.x;
+      this.player.y = layout.entry.y;
+      this.player.dir = 'right';
+      this.cam.x = this.player.x;
+      this.cam.y = this.player.y;
+      this.weatherT = 0;
+      sfx.play('pickup');
+      this.onToast?.(`${KINDS[o.dkind].name}: monsters lurk in the dark, and chests wait deeper in. Find the glowing archway to leave.`);
+    });
+  }
+
+  exitDungeon() {
+    if (!this.dungeon || this.fade) return;
+    this.transition(() => this.leaveDungeon(true));
+  }
+
+  // back to the meadow: at the entrance, or (when `toOut` is false) wherever the caller puts you next
+  leaveDungeon(toOut) {
+    const d = this.dungeon;
+    if (!d) return;
+    this.dungeon = null;
+    this.world.setActiveZone(null);
+    this.chunkCanvases.clear();
+    this.combat.clearEnemies();
+    this.weatherT = 0;
+    if (toOut) {
+      this.player.x = d.out.x;
+      this.player.y = d.out.y;
+      this.player.dir = 'down';
+      this.cam.x = d.out.x;
+      this.cam.y = d.out.y;
+    }
+  }
+
+  // wake the monsters of each room as you come near
+  updateDungeon(dt) {
+    const d = this.dungeon;
+    d.t -= dt;
+    if (d.t > 0) return;
+    d.t = 0.35;
+    const p = this.player;
+    d.layout.rooms.forEach((r, i) => {
+      if (i === 0 || d.spawned.has(i)) return;
+      const rx = (d.layout.ox + r.cx) * 16 + 8;
+      const ry = (d.layout.oy + r.cy) * 16 + 8;
+      if (Math.hypot(rx - p.x, ry - p.y) < 200) {
+        d.spawned.add(i);
+        this.combat.spawnDungeonRoom(d.layout, r, d.kind, d.tier, i === d.layout.rooms.length - 1);
+      }
+    });
+  }
+
+  // ---------- your house, from the inside (Free Roam) ----------
+
+  canHaveInterior() {
+    return !this.wave && !this.world.apoc && !this.demo;
+  }
+
+  // a quick blink to black that hides the jump between outside and inside
+  transition(fn) {
+    this.fade = { t: 0, dur: 0.5, fn, done: false };
+    this.combat?.cancelHold();
+  }
+
+  updateFade(dt) {
+    const f = this.fade;
+    if (!f) return;
+    f.t += dt;
+    if (!f.done && f.t >= f.dur / 2) {
+      f.done = true;
+      f.fn();
+    }
+    if (f.t >= f.dur) this.fade = null;
+  }
+
+  enterHouse(instant = false) {
+    if (!this.canHaveInterior() || this.inside) return;
+    const go = () => {
+      if (this.mount) {
+        this.dismount();
+        this.onToast?.('You left your ride at the door.');
+      }
+      this.inside = { out: { x: this.home.x, y: this.home.y }, sleepCd: 0 };
+      this.player.x = ROOM.w / 2;
+      this.player.y = ROOM.h - 28;
+      this.player.dir = 'up';
+      this.player.moving = false;
+      this.cam.x = ROOM.w / 2;
+      this.cam.y = ROOM.h / 2;
+      this.combat?.cancelHold();
+      this.mouseHeld[0] = false;
+      sfx.play('pickup');
+    };
+    if (instant) go();
+    else this.transition(go);
+  }
+
+  exitHouse(instant = false) {
+    if (!this.inside) return;
+    const go = () => {
+      this.storageOpen = false;
+      const out = this.inside.out;
+      this.inside = null;
+      this.player.x = out.x;
+      this.player.y = out.y;
+      this.player.dir = 'down';
+      this.cam.x = out.x;
+      this.cam.y = out.y;
+      this.combat.revealT = 0;
+    };
+    if (instant) go();
+    else this.transition(go);
+  }
+
+  moveInside(dt) {
+    const p = this.player;
+    const lock = this.dead || this.celeb || this.fade;
+    let dx = lock ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
+    let dy = lock ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
+    p.moving = dx !== 0 || dy !== 0;
+    this.inWater = false;
+    this.sprinting = false;
+    this.stamina = Math.min(1, this.stamina + 0.3 * dt);
+    this.exhausted = this.exhausted && this.stamina < 0.3;
+    this.animT += dt;
+    if (p.moving) {
+      if (dx && dy) {
+        dx *= Math.SQRT1_2;
+        dy *= Math.SQRT1_2;
+      }
+      if (Math.abs(dx) >= Math.abs(dy)) p.dir = dx > 0 ? 'right' : 'left';
+      else p.dir = dy > 0 ? 'down' : 'up';
+      const nx = p.x + dx * SPEED * dt;
+      if (!roomBlocked(nx, p.y, FOOT_W, FOOT_H)) p.x = nx;
+      const ny = p.y + dy * SPEED * dt;
+      if (!roomBlocked(p.x, ny, FOOT_W, FOOT_H)) p.y = ny;
+    }
+    this.inside.sleepCd = Math.max(0, this.inside.sleepCd - dt);
+    // the room is small: keep it centred, or follow the hero when the window is smaller than the room
+    this.cam.x = this.viewW >= ROOM.w ? ROOM.w / 2 : Math.min(ROOM.w - this.viewW / 2, Math.max(this.viewW / 2, p.x));
+    this.cam.y = this.viewH >= ROOM.h ? ROOM.h / 2 : Math.min(ROOM.h - this.viewH / 2, Math.max(this.viewH / 2, p.y));
+    // stepping onto the door mat takes you back outside
+    if (!this.fade && !this.dead && p.y >= DOOR.y && p.x > DOOR.x0 && p.x < DOOR.x1) this.exitHouse();
+  }
+
+  updateInsideInteraction() {
+    const p = this.player;
+    let best = null;
+    let bd = 26;
+    for (const [inter, s] of Object.entries(SPOTS)) {
+      const d = Math.hypot(s.x - p.x, s.y - p.y);
+      if (d < bd) {
+        bd = d;
+        best = { inter, x: s.x, y: s.y, label: s.label };
+      }
+    }
+    if (!best && p.y > 140 && p.x > DOOR.x0 - 10 && p.x < DOOR.x1 + 10) best = { inter: 'door', x: ROOM.w / 2, y: ROOM.h - 20, label: 'Space · go outside' };
+    this.prompt = best;
+    if (this.interactPressed && best && !this.fade) {
+      if (best.inter === 'chest') {
+        sfx.play('chest');
+        this.emitStorage();
+        this.onOpenStorage?.();
+      } else if (best.inter === 'bed') {
+        if (this.inside.sleepCd > 0) {
+          this.onToast?.('You are not sleepy yet.');
+        } else {
+          this.inside.sleepCd = 20;
+          this.combat.hp = this.combat.maxHp;
+          this.stamina = 1;
+          this.exhausted = false;
+          sfx.play('heal');
+          this.onToast?.('Zzz… you feel completely rested.');
+        }
+      } else if (best.inter === 'door') {
+        this.exitHouse();
+      }
+    }
+    this.interactPressed = false;
+  }
+
+  // ---------- chat commands (cheats) ----------
+
+  // Runs a "-command" from the chat box. Tells you why if cheats are off.
+  command(text) {
+    if (!this.cheats) return 'Cheats are turned off in this room. The host can allow them in the room settings.';
+    try {
+      return runCommand(this, text);
+    } catch (err) {
+      return `That did not work: ${err.message}`;
+    }
+  }
+
+  cheatGive(id, qty) {
+    const left = addItem(this.inventory, id, qty);
+    if (left > 0) this.combat.drops.push({ x: this.player.x, y: this.player.y, id, qty: left, age: 0, ins: !!this.inside });
+    this.emitInventory();
+    this.save();
+    return `🎁 ${qty}× ${ITEMS[id].name}${left > 0 ? ' (the rest dropped at your feet)' : ''}`;
+  }
+
+  setHour(h) {
+    if (this.mp) {
+      this.mp.clockHour = h;
+      this.mp.clockAt = performance.now();
+    }
+    this.hour = h;
+    this.weatherT = 0;
+  }
+
+  teleportTo(x, y) {
+    this.leaveDungeon(false);
+    if (this.inside) {
+      this.inside = null;
+      this.fade = null;
+      this.storageOpen = false;
+    }
+    this.player.x = x;
+    this.player.y = y;
+    this.cam.x = x;
+    this.cam.y = y;
+  }
+
+  // ---------- the chest at home ----------
+
+  emitStorage() {
+    this.onStorage?.(this.storage.map((slot) => slot && { ...slot }));
+  }
+
+  setStorageOpen(on) {
+    this.storageOpen = !!on;
+  }
+
+  // rearrange within the backpack or the chest
+  shuffle(side, from, to) {
+    moveSlot(side === 'box' ? this.storage : this.inventory, from, to);
+    this.emitInventory();
+    this.emitStorage();
+    this.save();
+  }
+
+  // Drop some of a stack on the floor in front of you: it pops out, and you can walk over it again to take it back
+  dropItem(side, i, qty = 1) {
+    const arr = side === 'box' ? this.storage : this.inventory;
+    const slot = arr[i];
+    if (!slot) return;
+    if (this.wave && slot.id === 'sword') {
+      this.onToast?.('You need your weapon!');
+      return;
+    }
+    const n = Math.max(1, Math.min(slot.qty, Math.floor(Number(qty)) || 1));
+    removeFromSlot(arr, i, n);
+    const p = this.player;
+    const [vx, vy] = DIR_VEC[p.dir] || [0, 1];
+    this.combat.drops.push({
+      x: p.x + vx * 6, y: p.y + vy * 4, z: 10, vz: 70, vx: vx * 38 + (Math.random() - 0.5) * 10, vy: vy * 22 + (Math.random() - 0.5) * 8,
+      fly: true, burst: true, nopick: 1.2, id: slot.id, qty: n, age: 0, ins: !!this.inside,
+    });
+    sfx.play('pickup');
+    this.emitInventory();
+    this.emitStorage();
+    this.onToast?.(`Dropped ${n > 1 ? `${n}× ` : ''}${ITEMS[slot.id].name}.`);
+    this.save();
+  }
+
+  // move one stack (or just one item, or a number of them) between the backpack ('inv') and the chest ('box')
+  storeMove(side, i, all = true) {
+    const from = side === 'inv' ? this.inventory : this.storage;
+    const to = side === 'inv' ? this.storage : this.inventory;
+    const slot = from[i];
+    if (!slot) return;
+    const qty = all === true ? slot.qty : all === false ? 1 : Math.max(1, Math.min(slot.qty, Math.floor(Number(all)) || 1));
+    const left = addItem(to, slot.id, qty);
+    const moved = qty - left;
+    if (!moved) {
+      this.onToast?.(side === 'inv' ? 'The chest is full.' : 'Your backpack is full.');
+      return;
+    }
+    removeFromSlot(from, i, moved);
+    sfx.play('pickup');
+    this.emitInventory();
+    this.emitStorage();
+    this.save();
+  }
+
+  drawInterior() {
+    const { ctx } = this;
+    const p = this.player;
+    drawRoom(ctx, {
+      img: this.img,
+      t: this.t,
+      hour: this.hour,
+      storageOpen: this.storageOpen,
+      weather: this.weather?.kind,
+      meY: p.y,
+      drawMe: () => {
+        ctx.globalAlpha = 1;
+        this.drawHeroAt(ctx, this.hero, p.dir, p.moving, this.animT, p.x, p.y);
+      },
+    });
+    for (const d of this.combat.drops) if (d.ins) this.combat.drawDrop(ctx, d, this.t);
+    const dark = this.darkness();
+    if (dark > 0) {
+      ctx.fillStyle = `rgba(24,20,60,${0.28 * dark})`;
+      ctx.fillRect(0, 0, ROOM.w, ROOM.h);
+    }
+  }
+
+  drawFade() {
+    const f = this.fade;
+    if (!f) return;
+    const k = 1 - Math.abs((2 * f.t) / f.dur - 1);
+    this.ctx.fillStyle = `rgba(10,8,12,${Math.min(1, Math.max(0, k * 1.4))})`;
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   // A water tile just in front of the hero counts as a drinking spot
@@ -1895,7 +2589,7 @@ export class Game {
     this.stamina = Math.min(1, this.stamina + (def.energy || 0));
     if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
     const bits = [];
-    if (healed > 0) bits.push(`+${Math.round(healed * 10) / 10} HP`);
+    if (healed > 0) bits.push(`+${hp100(healed)} HP`);
     if (def.energy) bits.push('+stamina');
     this.onToast?.(`${(def.energy || 0) * 2 >= (def.heal || 0) && def.energy ? 'Glug!' : 'Yum!'} ${def.name}${bits.length ? ` (${bits.join(', ')})` : ''}.`);
     sfx.play(def.energy && !def.heal ? 'drink' : 'eat');
@@ -2036,6 +2730,15 @@ export class Game {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(zoom, 0, 0, zoom, -camX * zoom, -camY * zoom);
 
+    if (this.inside) {
+      this.drawInterior();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.drawNameTag(camX, camY);
+      if (this.prompt) this.drawPrompt(this.prompt, camX, camY);
+      this.drawFade();
+      return;
+    }
+
     // twinkling water
     const tx0 = Math.floor(camX / T);
     const ty0 = Math.floor(camY / T);
@@ -2111,12 +2814,25 @@ export class Game {
           if (o.apoc) {
             // a supply fridge: dimmed once it has been searched
             const f = img[`apoc/${o.apoc}`];
-            if (this.collected.has(o.id)) ctx.globalAlpha = 0.45;
+            if (this.looted(o)) ctx.globalAlpha = 0.45;
             ctx.drawImage(f, Math.round(o.x - f.width / 2), o.y - f.height + 2);
             ctx.globalAlpha = 1;
           } else {
-            ctx.drawImage(img.chest, 0, this.collected.has(o.id) ? 16 : 0, 32, 16, o.x - 16, o.y - 16, 32, 16);
+            ctx.drawImage(img.chest, 0, this.looted(o) ? 16 : 0, 32, 16, o.x - 16, o.y - 16, 32, 16);
           }
+          break;
+        case 'dungeon':
+          if (o.dkind === 'ruin' && !this.ruinHouse) this.ruinHouse = makeRuinHouse(img.house, HOUSE_SPRITE.sx, HOUSE_SPRITE.sy, HOUSE_SPRITE.sw, HOUSE_SPRITE.sh);
+          drawEntrance(ctx, o, this.ruinHouse);
+          if (o.dkind === 'crypt') this.glows.push([o.x - 14, o.y - 12, 22], [o.x + 14, o.y - 12, 22]);
+          break;
+        case 'dexit':
+          drawExit(ctx, o, this.t);
+          this.glows.push([o.x, o.y - 16, 38]);
+          break;
+        case 'torch':
+          drawTorch(ctx, o, this.t);
+          this.glows.push([o.x, o.y - 6, 46]);
           break;
         case 'forage':
           if (o.forage.img) {
@@ -2138,7 +2854,8 @@ export class Game {
           ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && Math.floor(this.t * 14) % 2 ? 0.4 : 1;
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
-          if (!this.wave) this.drawHealthBar(ctx, { x: this.player.x, y: this.player.y - this.rideLift(), hp: this.combat.hp, max: this.combat.maxHp, hero: this.hero, lv: (this.upgrades.melee || 0) + 1 });
+          if (this.wave && this.world.apoc) this.combat.drawGun(ctx, this.player.x, this.player.y);
+          if (!this.wave) this.drawHealthBar(ctx, { x: this.player.x, y: this.player.y - this.rideLift(), hp: this.combat.hp, max: this.combat.maxHp, hero: this.hero, lv: this.level });
           break;
         case 'remote': {
           const lift = this.remoteLift(o.r);
@@ -2175,11 +2892,13 @@ export class Game {
     }
 
     if (this.wave) this.drawWaveExtras(ctx);
+    this.drawCloudShadows(camX, camY);
 
     // screen-space overlay
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawDaylight(camX, camY);
     this.drawMotes();
+    this.drawPrecip();
     if (!this.demo) {
       this.combat.drawOverlay(ctx, camX, camY, zoom, this.t);
       this.drawHouseOwners(camX, camY);
@@ -2194,6 +2913,7 @@ export class Game {
         this.pill(this.placeMessage(this.ghostWhy.why).replace(/\.$/, ''), sx, sy, this.zoom * 3.6, '#fff', 'rgba(224,70,90,0.95)');
       }
       if (this.prompt) this.drawPrompt(this.prompt, camX, camY);
+      this.drawFade();
     }
 
     if (Math.floor(this.t) % 3 === 0) this.trimChunkCache();
@@ -2201,7 +2921,7 @@ export class Game {
 
   drawDaylight(camX, camY) {
     const { ctx, canvas, zoom } = this;
-    const [r, g, b] = skyTint(this.hour);
+    const [r, g, b] = this.dungeon ? [150, 156, 192] : this.world.depot ? [200, 205, 226] : skyTint(this.hour); // indoors it is always dim
     if (r < 255 || g < 255 || b < 255) {
       ctx.globalCompositeOperation = 'multiply';
       ctx.fillStyle = `rgb(${r},${g},${b})`;
@@ -2376,7 +3096,7 @@ export class Game {
 
   // Draws a hero; anyone standing in water sinks in a little, with ripples around the feet
   drawHeroAt(ctx, hero, dir, moving, animT, x, y) {
-    const wet = this.world.type(Math.floor(x / T), Math.floor((y - 2) / T)) === WATER;
+    const wet = !this.inside && this.world.type(Math.floor(x / T), Math.floor((y - 2) / T)) === WATER;
     if (!wet) {
       drawHero(ctx, this.img, hero, dir, moving, animT, x, y);
       return;
@@ -2409,7 +3129,7 @@ export class Game {
     ctx.fillRect(x - 1, y - 1, w + 2, 4);
     ctx.fillStyle = '#ff7a8f';
     ctx.fillRect(x, y, Math.round(w * Math.min(1, r.hp / (r.max || 6))), 2);
-    // the level of their sword, beside the bar
+    // their character level, beside the bar
     if (r.lv) {
       ctx.save();
       ctx.font = '700 5px "Pixelify Sans", monospace';
@@ -2463,7 +3183,7 @@ export class Game {
   drawPrompt(o, camX, camY) {
     const bob = Math.sin(this.t * 5) * 1.5;
     const [sx, sy] = this.toScreen(o.x, o.y - (o.inter === 'chest' ? 24 : 22) + bob, camX, camY);
-    this.pill(o.inter === 'chest' ? 'Space · open' : o.inter === 'water' ? 'Space · drink' : 'Space · pick up', sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
+    this.pill(o.label || (o.inter === 'chest' ? 'Space · open' : o.inter === 'water' ? 'Space · drink' : 'Space · pick up'), sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
   }
 
   // The small corner map, and the big one opened with M

@@ -53,6 +53,7 @@ export function attachRoomServer(httpServer) {
     target: targetOf(r),
     winBy: r.winBy,
     allowLate: r.allowLate,
+    allowCheats: r.allowCheats,
     allowThrow: r.allowThrow,
     allowMelee: r.allowMelee,
     streakMonsters: r.streakMonsters,
@@ -115,6 +116,7 @@ export function attachRoomServer(httpServer) {
       if (!rooms.has(room.code)) return;
       room.started = false;
       room.winning = false;
+      room.paused = false;
       room.introOpen = false;
       for (const p of room.players.values()) p.kills = 0;
       sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: [...room.players.values()].map(publicPlayer), scores: scoreList(room) });
@@ -185,6 +187,7 @@ export function attachRoomServer(httpServer) {
       clock: { hour: hours % 24, day: 1 + Math.floor(hours / 24) },
     });
     sendRoom(room, { t: 'peer_join', player: publicPlayer(ws) }, ws);
+    if (room.paused) send(ws, { t: 'paused', on: true, by: room.players.get(room.hostId)?.player.name || 'the host' }); // joined while paused
     sendTeams(room);
     sendScores(room);
     pushLobby();
@@ -230,6 +233,7 @@ export function attachRoomServer(httpServer) {
         teams: !['waves', 'survival'].includes(m.mode) && [2, 3, 4].includes(Number(m.teams)) ? Number(m.teams) : 0, // 0 = free for all
         streakMonsters: m.streakMonsters === true, // do monster kills count towards kill streaks (and get announced to everyone)?
         allowLate: m.allowLate !== false, // may people join once the round is under way?
+        allowCheats: m.allowCheats === true, // may players type chat commands like -gold 100?
         started: false, // a new room waits for its host to press Start
         winning: false,
         t0: Date.now(),
@@ -257,6 +261,7 @@ export function attachRoomServer(httpServer) {
       if (!room || room.started || room.hostId !== ws.id) return;
       room.started = true;
       room.winning = false;
+      room.paused = false;
       for (const p of room.players.values()) if (room.teams && (p.team === null || p.team === undefined)) assignTeam(room, p);
       openIntro(room);
       room.t0 = Date.now();
@@ -283,8 +288,9 @@ export function attachRoomServer(httpServer) {
         dir: ['up', 'down', 'left', 'right'].includes(m.dir) ? m.dir : 'down',
         moving: !!m.moving,
         hidden: !!m.hidden,
-        hp: Math.max(0, Math.min(12, Math.round(Number(m.hp) || 0))),
-        lv: Math.max(1, Math.min(9, Math.round(Number(m.lv)) || 1)), // sword level, shown next to the health bar
+        hp: Math.max(0, Math.min(40, Math.round((Number(m.hp) || 0) * 10) / 10)),
+        mhp: Math.max(1, Math.min(40, Math.round((Number(m.mhp) || 6) * 10) / 10)), // max health, in hearts
+        lv: Math.max(1, Math.min(99, Math.round(Number(m.lv)) || 1)), // character level, shown next to the health bar
         mt: m.mt === 'chicken' || m.mt === 'cow' ? m.mt : '', // what they are riding
       };
       sendRoom(ws.room, { t: 'state', id: ws.id, ...ws.pos }, ws);
@@ -330,18 +336,28 @@ export function attachRoomServer(httpServer) {
       room.introReady.add(ws.id);
       checkIntro(room);
     },
+    // the host pauses or resumes the game for everyone in the room
+    pause(ws, m) {
+      const room = ws.room;
+      if (!room || !room.started || room.hostId !== ws.id) return;
+      room.paused = !!m.on;
+      sendRoom(room, { t: 'paused', on: room.paused, by: ws.player.name });
+    },
     // host-only room settings, changeable from the waiting room
     settings(ws, m) {
       const room = ws.room;
       if (!room || room.hostId !== ws.id) return;
       const free = room.mode === 'free';
       if (typeof m.allowLate === 'boolean') room.allowLate = m.allowLate;
-      // everything else is decided before the round, not during it
+      if (typeof m.allowCheats === 'boolean') room.allowCheats = m.allowCheats;
+      // these can be changed at any time, even in the middle of a round
+      if (typeof m.allowThrow === 'boolean') room.allowThrow = m.allowThrow;
+      if (typeof m.allowMelee === 'boolean') room.allowMelee = m.allowMelee;
+      if (typeof m.streakMonsters === 'boolean') room.streakMonsters = m.streakMonsters;
+      if (Number.isFinite(Number(m.max))) room.max = Math.min(MAX_PLAYERS, Math.max(2, room.players.size, Math.round(Number(m.max))));
+      if (free && m.target !== undefined) room.target = clampTarget(m.target, room.target);
+      // the rest is decided before the round
       if (!room.started) {
-        if (typeof m.allowThrow === 'boolean') room.allowThrow = m.allowThrow;
-        if (typeof m.allowMelee === 'boolean') room.allowMelee = m.allowMelee;
-        if (typeof m.streakMonsters === 'boolean') room.streakMonsters = m.streakMonsters;
-        if (Number.isFinite(Number(m.max))) room.max = Math.min(MAX_PLAYERS, Math.max(2, room.players.size, Math.round(Number(m.max))));
         if (free) {
           if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== room.teams) {
             room.teams = Number(m.teams);
@@ -362,6 +378,8 @@ export function attachRoomServer(httpServer) {
       const room = ws.room;
       const n = Number(m.team);
       if (!room || room.started || !room.teams || !Number.isInteger(n) || n < 0 || n >= room.teams) return;
+      const cap = Math.ceil(room.max / room.teams); // a team only has so many places
+      if (ws.team !== n && [...room.players.values()].filter((p) => p.team === n).length >= cap) return;
       ws.team = n;
       sendTeams(room);
     },
@@ -394,8 +412,10 @@ export function attachRoomServer(httpServer) {
     },
     fx(ws, m) {
       if (!ws.room) return;
-      if (m.kind === 'swing') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'swing', a: num(m.a) }, ws);
+      if (m.kind === 'swing') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'swing', a: num(m.a), w: clean(m.w, 12) }, ws);
       if (m.kind === 'shield') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'shield' }, ws);
+      if (m.kind === 'loot') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) }, ws);
+      if (m.kind === 'grab') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'grab', lid: clean(m.lid, 40) }, ws);
       if (m.kind === 'spin') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) }, ws);
       // thrown items are only drawn for others; the thrower's client decides if it hit
       if (m.kind === 'throw') {

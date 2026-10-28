@@ -48,7 +48,10 @@ Object.assign(MONSTERS, {
   z_small: { name: 'Walker', apoc: 'small', kind: 'walk', hp: 3, speed: 34, dmg: 1, sd: 2 },
   z_axe: { name: 'Axe Zombie', apoc: 'axe', kind: 'walk', hp: 7, speed: 22, dmg: 2, sd: 5, kb: 0.6 },
   z_big: { name: 'Brute', apoc: 'big', kind: 'walk', hp: 26, speed: 15, dmg: 3, sd: 9, kb: 0.2 },
-  z_boss: { name: 'The Colossus', apoc: 'big', kind: 'walk', hp: 140, speed: 12, dmg: 4, sd: 16, scale: 2, kb: 0.05, boss: true },
+  z_boss: { name: 'The Colossus', apoc: 'big', kind: 'walk', hp: 190, speed: 13, dmg: 5, sd: 16, scale: 2, kb: 0.05, boss: true },
+  // Survival's extra threats (same art as the walkers, tinted): a sprinter that is hard to hit, and a slow one that soaks up hits
+  z_runner: { name: 'Runner', apoc: 'small', kind: 'walk', hp: 2, speed: 64, dmg: 1, sd: 2, tint: 'hue-rotate(150deg) saturate(2.2) brightness(1.1)' },
+  z_armor: { name: 'Armored', apoc: 'axe', kind: 'walk', hp: 16, speed: 21, dmg: 3, sd: 6, kb: 0.25, tint: 'grayscale(0.9) brightness(0.85) contrast(1.4)' },
 });
 
 export const MONSTER_IDS = Object.keys(MONSTERS);
@@ -70,23 +73,27 @@ export const WAVES = [
   [['cyclops', 1], ['ettin', 2], ['giantscarab', 2], ['murky', 6], ['revenant', 6], ['archer', 6], ['bat', 10], ['hound', 8], ['dcrawler', 8], ['feeder', 6], ['eye', 6]],
 ];
 
+// Survival is meant to be a struggle: bigger waves, sprinters from wave 2, armoured ones from wave 5
 export const WAVES_APOC = [
-  [['z_small', 8]],
-  [['z_small', 10], ['z_axe', 2]],
-  [['z_small', 12], ['z_axe', 4]],
-  [['z_small', 10], ['z_axe', 6], ['z_big', 1]],
-  [['z_small', 12], ['z_axe', 8], ['z_big', 2]],
-  [['z_small', 14], ['z_axe', 8], ['z_big', 3]],
-  [['z_small', 16], ['z_axe', 10], ['z_big', 4]],
-  [['z_small', 16], ['z_axe', 12], ['z_big', 5]],
-  [['z_small', 20], ['z_axe', 14], ['z_big', 6]],
-  [['z_boss', 1], ['z_big', 6], ['z_axe', 14], ['z_small', 24]],
+  [['z_small', 10]],
+  [['z_small', 10], ['z_runner', 3], ['z_axe', 2]],
+  [['z_small', 10], ['z_runner', 5], ['z_axe', 5]],
+  [['z_small', 10], ['z_runner', 6], ['z_axe', 6], ['z_big', 2]],
+  [['z_small', 12], ['z_runner', 8], ['z_axe', 6], ['z_armor', 3], ['z_big', 2]], // + Colossus bosses (see bossesFor)
+  [['z_small', 12], ['z_runner', 10], ['z_axe', 8], ['z_armor', 4], ['z_big', 3]],
+  [['z_small', 14], ['z_runner', 12], ['z_axe', 8], ['z_armor', 6], ['z_big', 4]],
+  [['z_small', 14], ['z_runner', 14], ['z_axe', 10], ['z_armor', 8], ['z_big', 5]],
+  [['z_small', 16], ['z_runner', 16], ['z_axe', 12], ['z_armor', 10], ['z_big', 7]],
+  [['z_big', 8], ['z_armor', 10], ['z_axe', 14], ['z_runner', 16], ['z_small', 20]], // + Colossus bosses (see bossesFor)
 ];
 
+// Survival's Colossus bosses come on wave 5 and wave 10, and how many depends on the difficulty
+export const bossesFor = (wave, diff) => (wave === 5 ? diff.boss5 : wave === 10 ? diff.boss10 : 0) || 0;
+
 export const DIFFICULTY = {
-  easy: { name: 'Easy', blurb: 'Fewer, softer monsters and a sturdy base.', hp: 0.8, count: 0.7, dmg: 0.7, baseHp: 120, barricadeHp: 30, heal: 0.4 },
-  medium: { name: 'Medium', blurb: 'A fair fight. Keep those barricades repaired.', hp: 1, count: 1, dmg: 1, baseHp: 90, barricadeHp: 24, heal: 0.28 },
-  hard: { name: 'Hard', blurb: 'Packed waves and tougher hides. Good luck!', hp: 1.35, count: 1.45, dmg: 1.4, baseHp: 65, barricadeHp: 18, heal: 0.18 },
+  easy: { name: 'Easy', blurb: 'Fewer, softer monsters and a sturdy base.', boss5: 1, boss10: 2, hp: 0.8, count: 0.7, dmg: 0.7, baseHp: 120, barricadeHp: 30, heal: 0.4 },
+  medium: { name: 'Medium', blurb: 'A fair fight. Keep those barricades repaired.', boss5: 2, boss10: 4, hp: 1, count: 1, dmg: 1, baseHp: 90, barricadeHp: 24, heal: 0.28 },
+  hard: { name: 'Hard', blurb: 'Packed waves and tougher hides. Good luck!', boss5: 4, boss10: 6, hp: 1.35, count: 1.45, dmg: 1.4, baseHp: 65, barricadeHp: 18, heal: 0.18 },
 };
 
 export const DIFFICULTY_IDS = Object.keys(DIFFICULTY);
@@ -94,7 +101,9 @@ export const DIFFICULTY_IDS = Object.keys(DIFFICULTY);
 // How many of each type a wave brings, as [[type, count], ...] (the same numbers waveList deals out)
 export function waveCounts(wave, diff, theme = 'cozy') {
   const table = (theme === 'apoc' ? WAVES_APOC : WAVES)[wave - 1] || [];
-  return table.map(([type, n]) => [type, Math.max(1, Math.round(n * diff.count))]);
+  const out = table.map(([type, n]) => [type, Math.max(1, Math.round(n * diff.count))]);
+  const bosses = theme === 'apoc' ? bossesFor(wave, diff) : 0;
+  return bosses ? [['z_boss', bosses], ...out] : out;
 }
 
 export function waveList(wave, diff, theme = 'cozy') {
@@ -103,6 +112,7 @@ export function waveList(wave, diff, theme = 'cozy') {
     const count = Math.max(1, Math.round(n * diff.count)); // never fewer than one, so bosses always show up
     for (let i = 0; i < count; i++) list.push(type);
   }
+  if (theme === 'apoc') for (let i = 0; i < bossesFor(wave, diff); i++) list.push('z_boss');
   // shuffle so the strong ones are mixed in with the weak
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -118,10 +128,11 @@ export function rollMonsterLoot(def, diff, theme = 'cozy') {
   const roll = (id, chance, min = 1, max = 1) => {
     if (Math.random() < chance) out.push({ id, qty: min + Math.floor(Math.random() * (max - min + 1)) });
   };
-  roll('heart', def.boss ? 1 : big ? Math.min(1, diff.heal * 2.2) : diff.heal);
+  const scarce = theme === 'apoc' ? 0.7 : 1; // Survival hands out less help
+  roll('heart', def.boss ? 1 : big ? Math.min(1, diff.heal * 2.2 * scarce) : diff.heal * scarce);
   if (def.boss) roll('heart', 1);
   // coins pay for upgrades and recruits
-  roll('coin', def.boss ? 1 : big ? 1 : 0.6, def.boss ? 8 : big ? 2 : 1, def.boss ? 12 : big ? 5 : 3);
+  roll('coin', def.boss ? 1 : big ? 1 : 0.6 * scarce, def.boss ? 8 : big ? 2 : 1, def.boss ? 12 : big ? (theme === 'apoc' ? 4 : 5) : 3);
   if (theme === 'apoc') {
     // scavenged supplies instead of trinkets
     roll('rock', big ? 0.9 : 0.3, 1, big ? 3 : 2);

@@ -1,7 +1,10 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { APOC_DECOR, APOC_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
+import { mapInfo, splitSeed } from './maps';
+import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf } from './dungeon';
+import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 
 export const T = 16; // tile size in px
+const FROST_TREES = ['tree_pine', 'tree_pine', 'tree_spruce'];
 const CHEST_RATE = 0.0032; // chance a clear grass tile holds a chest: roughly one per chunk
 export const CHUNK = 16; // tiles per chunk side
 export const CHUNK_PX = T * CHUNK;
@@ -43,11 +46,17 @@ export class World {
     this.seedStr = String(seedStr);
     this.seed = hashString(this.seedStr);
     this.apoc = theme === 'apoc'; // Survival: the ruined, overgrown look from the Apocalypse pack
+    this.map = this.apoc ? splitSeed(this.seedStr).map : 'meadow'; // Survival has more than one map
+    this.frost = this.map === 'frost';
+    this.depot = this.map === 'depot'; // the indoor map: a warehouse floor instead of open ground
+    this.mapInfo = this.apoc ? mapInfo(this.map) : null;
     this.waveMode = waves; // one house in the middle instead of a scattering of cottages
     this.extraRects = []; // movable obstacles (the wave-defense barricades)
     this.chunks = new Map();
     this.typeCache = new Map();
     this.siteCache = new Map();
+    this.dsites = new Map(); // dungeon entrances
+    this.activeZone = null; // the dungeon you are in (only that one is built)
     this.treeCache = new Map();
   }
 
@@ -60,16 +69,99 @@ export class World {
   }
 
   type(x, y) {
+    if (x >= ZONE_TILE0 && x < ZONE_TILE1 && y >= ZONE_TILE0 && y < ZONE_TILE1) return GRASS; // inside a dungeon
     const key = (x + 32768) * 65536 + (y + 32768);
     let t = this.typeCache.get(key);
     if (t === undefined) {
       const e = this.elevation(x, y);
       // Survival has no water: low ground is patchy dry dirt instead
-      t = this.apoc ? (e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
+      t = this.depot ? GRASS : this.apoc ? (e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
       if (this.typeCache.size > 600000) this.typeCache.clear();
       this.typeCache.set(key, t);
     }
     return t;
+  }
+
+  // ---------- dungeons: crypts, caves and ruined houses in Free Roam ----------
+
+  // one entrance per region, sometimes: on clear meadow, away from the cottages and the trees
+  dungeonSite(drx, dry) {
+    const key = `${drx},${dry}`;
+    if (this.dsites.has(key)) return this.dsites.get(key);
+    let site = null;
+    if (!this.apoc && !this.waveMode && hash2(drx, dry, this.seed + 8800) < 0.55) {
+      const kr = hash2(drx, dry, this.seed + 8801);
+      const kind = kr < 0.4 ? 'crypt' : kr < 0.75 ? 'cave' : 'ruin';
+      const x = drx * DREGION + 8 + Math.floor(hash2(drx, dry, this.seed + 8802) * 24);
+      const y = dry * DREGION + 12 + Math.floor(hash2(drx, dry, this.seed + 8803) * 20);
+      const rad = kind === 'ruin' ? 5 : 3;
+      let ok = true;
+      for (let ty = y - 6; ty <= y + 1 && ok; ty++) {
+        for (let tx = x - rad; tx <= x + rad; tx++) {
+          if (this.type(tx, ty) !== GRASS || this.elevation(tx, ty) < BEACH + 0.02 || this.isCleared(tx, ty)) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      for (let by = (y - 6) >> 1; by <= (y + 1) >> 1 && ok; by++) {
+        for (let bx = (x - rad) >> 1; bx <= (x + rad) >> 1; bx++) {
+          if (this.treeAt(bx, by)) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (ok) site = { x, y, kind, drx, dry };
+    }
+    this.dsites.set(key, site);
+    return site;
+  }
+
+  dungeonKind(drx, dry) {
+    return this.dungeonSite(drx, dry)?.kind || 'crypt';
+  }
+
+  dungeonLayout(rx, ry) {
+    return buildLayout(this.seed, rx, ry, this.dungeonKind(rx, ry));
+  }
+
+  dungeonTier(rx, ry) {
+    return tierOf(rx, ry);
+  }
+
+  // build only the dungeon you are in; throw away anything built for another one
+  setActiveZone(z) {
+    this.activeZone = z;
+    for (const k of [...this.chunks.keys()]) {
+      const [cx, cy] = k.split(',').map(Number);
+      if (zoneOf(cx, cy)) this.chunks.delete(k);
+    }
+  }
+
+  buildZoneChunk(cx, cy, z) {
+    const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [], zone: z };
+    const az = this.activeZone;
+    if (!az || az.rx !== z.rx || az.ry !== z.ry) return chunk;
+    const L = this.dungeonLayout(z.rx, z.ry);
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    for (let ty = 0; ty < CHUNK; ty++) {
+      let run = -1;
+      for (let tx = 0; tx <= CHUNK; tx++) {
+        const wall = tx < CHUNK && L.isWall(x0 + tx - L.ox, y0 + ty - L.oy);
+        if (wall && run < 0) run = tx;
+        else if (!wall && run >= 0) {
+          chunk.rects.push({ x: (x0 + run) * T, y: (y0 + ty) * T, w: (tx - run) * T, h: T });
+          run = -1;
+        }
+      }
+    }
+    const here = (p) => Math.floor(p.x / (CHUNK * T)) === cx && Math.floor(p.y / (CHUNK * T)) === cy;
+    if (here(L.exit)) chunk.objects.push({ kind: 'dexit', inter: 'dexit', id: `dx${z.rx},${z.ry}`, label: 'Space · leave the dungeon', x: L.exit.x, y: L.exit.y });
+    for (const c of L.chests) if (here(c)) chunk.objects.push({ kind: 'chest', inter: 'chest', rich: true, boss: c.boss, id: `dc${z.rx},${z.ry}-${c.k}`, x: c.x, y: c.y });
+    for (const t of L.torches) if (here(t)) chunk.objects.push({ kind: 'torch', x: t.x, y: t.y, y2: t.y });
+    return chunk;
   }
 
   deepness(x, y) {
@@ -140,6 +232,10 @@ export class World {
     const key = `${bx},${by}`;
     if (this.treeCache.has(key)) return this.treeCache.get(key);
     let tree = null;
+    if (this.depot) {
+      this.treeCache.set(key, null); // no trees indoors
+      return null;
+    }
     const x = bx * 2;
     const y = by * 2;
     const f = this.forest(x + 1, y + 1);
@@ -168,11 +264,12 @@ export class World {
     const s = this.seed;
     for (let by = y0 / 2; by < (y0 + CHUNK) / 2; by++) {
       for (let bx = x0 / 2; bx < (x0 + CHUNK) / 2; bx++) {
-        if (hash2(bx, by, s + 71) > 0.02 || this.treeAt(bx, by)) continue;
+        if (hash2(bx, by, s + 71) > (this.depot ? 0.1 : this.frost ? 0.04 : 0.02) || this.treeAt(bx, by)) continue; // the frozen pass is littered with wrecks
         const x = bx * 2;
         const y = by * 2;
         if (this.isCleared(x, y) || this.type(x, y) !== GRASS || this.type(x + 1, y + 1) !== GRASS) continue;
-        const prop = APOC_PROPS[Math.floor(hash2(bx, by, s + 72) * APOC_PROPS.length)];
+        const list = this.depot ? DEPOT_PROPS : APOC_PROPS;
+        const prop = list[Math.floor(hash2(bx, by, s + 72) * list.length)];
         const { w, h } = apocSize(prop.key);
         const px = bx * 32 + 16;
         const py = by * 32 + 24;
@@ -203,7 +300,7 @@ export class World {
         return;
       }
     }
-    if (r < (t === GRASS ? 0.11 : 0.05)) {
+    if (!this.depot && r < (t === GRASS ? 0.11 : 0.05)) {
       const total = APOC_DECOR.reduce((n, d) => n + d[1], 0);
       let pick = hash2(x, y, s + 73) * total;
       let key = APOC_DECOR[0][0];
@@ -235,6 +332,8 @@ export class World {
   }
 
   buildChunk(cx, cy) {
+    const zone = zoneOf(cx, cy);
+    if (zone) return this.buildZoneChunk(cx, cy, zone);
     const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
     const x0 = cx * CHUNK;
     const y0 = cy * CHUNK;
@@ -246,7 +345,9 @@ export class World {
         if (!tree) continue;
         if (this.apoc) {
           const kind = APOC_TREES[tree.kind];
-          const key = kind.keys[Math.floor(hash2(tree.x, tree.y, s + 15) * kind.keys.length)];
+          const keys = this.frost && tree.kind !== 'sapling' && tree.kind !== 'stump' ? FROST_TREES : kind.keys; // only pines survive the cold
+          let key = keys[Math.floor(hash2(tree.x, tree.y, s + 15) * keys.length)];
+          if (this.mapInfo?.trees && key !== 'stump') key = `${key}__${this.mapInfo.trees}`; // this map's own colours
           const { w, h } = apocSize(key);
           chunk.objects.push({ kind: 'tree', sheet: `apoc/${key}`, sx: 0, sy: 0, sw: w, sh: h, x: tree.x, y: tree.y });
           if (kind.cw) chunk.rects.push({ x: tree.x - kind.cw / 2, y: tree.y - kind.ch - 2, w: kind.cw, h: kind.ch });
@@ -315,7 +416,7 @@ export class World {
           // Survival's base is a wrecked bus: a solid block in the middle of the barricade ring
           const bus = apocSize('bus');
           chunk.objects.push({ kind: 'tree', id, sheet: 'apoc/bus', sx: 0, sy: 0, sw: bus.w, sh: bus.h, x: left + bus.w / 2, y: base });
-          chunk.rects.push({ x: left + 2, y: base - 22, w: bus.w - 4, h: 20 });
+          chunk.rects.push({ x: left + 2, y: base - 22, w: bus.w - 4, h: 20, bus: true });
           continue;
         }
         chunk.objects.push({ kind: 'house', id, sheet: 'house', ...HOUSE_SPRITE, x: left + HOUSE_SPRITE.sw / 2, y: base, ox: left, oy: base - HOUSE_BASE });
@@ -348,11 +449,28 @@ export class World {
         }
       }
     }
+    // a crypt, cave or ruined house to walk into
+    if (!this.apoc && !this.waveMode) {
+      const drx0 = Math.floor(x0 / DREGION);
+      const dry0 = Math.floor(y0 / DREGION);
+      for (let j = -1; j <= 1; j++) {
+        for (let i = -1; i <= 1; i++) {
+          const ds = this.dungeonSite(drx0 + i, dry0 + j);
+          if (!ds || Math.floor(ds.x / CHUNK) !== cx || Math.floor(ds.y / CHUNK) !== cy) continue;
+          const px = ds.x * T + 8;
+          const py = ds.y * T + 14;
+          const half = ds.kind === 'ruin' ? 36 : 22;
+          chunk.objects.push({ kind: 'dungeon', inter: 'dungeon', dkind: ds.kind, drx: ds.drx, dry: ds.dry, id: `dg${ds.x},${ds.y}`, label: KINDS[ds.kind].enter, x: px, y: py });
+          chunk.rects.push({ x: px - half, y: py - 12, w: half * 2, h: 10 });
+        }
+      }
+    }
     return chunk;
   }
 
   animalSpawns(cx, cy) {
     const out = [];
+    if (zoneOf(cx, cy)) return out; // none underground
     if (this.apoc) return out; // no friendly farm animals in the apocalypse
     if (hash2(cx, cy, this.seed + 51) > 0.45) return out;
     const n = 1 + Math.floor(hash2(cx, cy, this.seed + 52) * 3);
@@ -375,7 +493,7 @@ export class World {
 
   // `wadeable` lets heroes paddle through water; skeletons and animals still treat it as a wall
   // `skipExtra` ignores the wave barricades, for things that are shot over the walls
-  isBlocked(l, t, w, h, wadeable = false, skipExtra = false) {
+  isBlocked(l, t, w, h, wadeable = false, skipExtra = false, skipBus = false) {
     if (!wadeable) {
       const x0 = Math.floor(l / T);
       const x1 = Math.floor((l + w - 1) / T);
@@ -395,6 +513,7 @@ export class World {
     for (let j = -1; j <= 1; j++) {
       for (let i = -1; i <= 1; i++) {
         for (const r of this.getChunk(ccx + i, ccy + j).rects) {
+          if (skipBus && r.bus) continue; // shots fly over the bus
           if (l < r.x + r.w && l + w > r.x && t < r.y + r.h && t + h > r.y) return true;
         }
       }

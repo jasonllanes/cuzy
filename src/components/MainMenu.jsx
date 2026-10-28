@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { RETRO_COUNT, SURVIVOR_COLORS, heroById, isRetro, isSurvivor, retroId, survivorId } from '../game/heroes';
-import { randomName, randomSeed } from '../game/rng';
+import { randomName } from '../game/rng';
 import SpritePreview from './SpritePreview';
 import WorldBackdrop from './WorldBackdrop';
 import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
 import { MAX_BOTS } from '../game/bots';
 import AudioSettings from './AudioSettings';
+import MenuHome from './MenuHome';
+import { FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
 
@@ -37,6 +39,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const [fullMenu, setFullMenu] = useState(false);
   const inviting = !!invite && !fullMenu;
   const [step, setStep] = useState('name');
+  const [view, setView] = useState('home'); // the main menu, or 'wizard' (the setup pages), 'settings', 'about', 'exit'
   const [showSettings, setShowSettings] = useState(false);
   const stepIndex = STEPS.findIndex(([id]) => id === step);
   const [name, setName] = useState(initial.name);
@@ -67,7 +70,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const activeHeroId = hero; // the same heroes in every game type, Survival included
   const activeHero = heroById(activeHeroId);
   const selected = heroById(hero);
-  const [seed, setSeed] = useState(initial.seed);
+  const [freeMap, setFreeMap] = useState(FREE_MAPS.find((m) => m.seed === splitSeed(initial.seed).base)?.id || FREE_MAPS[0].id);
+  const [survMap, setSurvMap] = useState(splitSeed(initial.seed).map); // Survival's map, kept in the seed after a ~
+  // the map you pick decides the world seed (maps are named, not typed in)
+  const seed = gameMode === 'survival' ? joinSeed(SURVIVAL_BASE, survMap) : FREE_MAPS.find((m) => m.id === freeMap).seed;
   const [hovered, setHovered] = useState(null);
   const [code, setCode] = useState(invite);
   const [roomName, setRoomName] = useState('');
@@ -81,7 +87,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const { status, rooms, problem } = useLobby(net);
 
   // `hero` is what the game uses; the other picks are remembered so switching game type does not lose them
-  const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed, mode: gameMode, difficulty, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
+  const fullSeed = () => seed;
+  const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed: fullSeed(), mode: gameMode, difficulty, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
   const myName = () => name.trim() || 'Friend';
 
   const go = (next) => {
@@ -114,7 +121,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const create = () =>
     run(
       net
-        .create({ name: roomName.trim(), seed: seed.trim() || 'sunny-meadow-101', max, pvp: gameMode === 'free', mode: gameMode, difficulty, winBy, allowLate: lateJoin, player: { name: myName(), hero: activeHeroId } })
+        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, winBy, allowLate: lateJoin, player: { name: myName(), hero: activeHeroId } })
         .then((joined) => {
           // a room server that was started before Wave Defense existed quietly makes an ordinary room
           if (gameMode !== 'free' && joined.room.mode !== gameMode) {
@@ -124,15 +131,22 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
           return joined;
         }),
     );
+  const [noRoomOk, setNoRoomOk] = useState(false); // the last room attempt failed: the next press plays without a room
   const soloRoom = gameMode === 'free' && !vsAi && status === 'online';
   const createSolo = async () => {
     setBusy(true);
     setError('');
     try {
-      onEnterRoom(profile(), await net.create({ name: `${myName()}'s meadow`, seed: seed.trim() || 'sunny-meadow-101', max: 4, pvp: true, mode: 'free', difficulty, winBy, allowLate: true, player: { name: myName(), hero: activeHeroId } }));
-    } catch {
-      // no room available (offline, or the rooms table is not set up): just play
-      onBegin(profile());
+      onEnterRoom(profile(), await net.create({ name: `${myName()}'s meadow`, seed: fullSeed(), max: 4, pvp: true, mode: 'free', difficulty, winBy, allowLate: true, player: { name: myName(), hero: activeHeroId } }));
+    } catch (err) {
+      // no room available (offline, or the rooms table is not set up): say so, and play without one if asked again
+      if (noRoomOk) {
+        onBegin(profile());
+        return;
+      }
+      setNoRoomOk(true);
+      setBusy(false);
+      setError(`Couldn't open a room (${err?.message || 'no connection'}). Room settings only exist in a room. Press the button again to play without one.`);
     }
   };
   const join = (c) => run(net.join(c, { name: myName(), hero: activeHeroId }));
@@ -196,11 +210,30 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
             {!online && <p className="hint">Connecting to the room server…</p>}
             {error && <div className="notice error">{error}</div>}
             <div className="nav-row">
-              <button type="button" className="btn ghost" onClick={() => { window.history.replaceState(null, '', window.location.pathname); setFullMenu(true); }}>Open the full menu</button>
+              <button type="button" className="btn ghost" onClick={() => { window.history.replaceState(null, '', window.location.pathname); setFullMenu(true); setView('wizard'); }}>Open the full menu</button>
               <button type="submit" className="btn go" disabled={busy || !online}>{busy ? 'Joining…' : 'Join the room ➜'}</button>
             </div>
           </section>
         </form>
+      </div>
+    );
+  }
+
+  // ---------- the main menu: Play, Multiplay, Settings, About, Exit ----------
+  if (view !== 'wizard') {
+    const start = (m) => {
+      setMode(m);
+      setStep('name');
+      setError('');
+      setView('wizard');
+    };
+    return (
+      <div className="menu">
+        <WorldBackdrop assets={assets} seed={seed} />
+        <div className="cloud c1" />
+        <div className="cloud c2" />
+        <div className="cloud c3" />
+        <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => start('together')} name={name} setName={setName} online={status === 'online'} />
       </div>
     );
   }
@@ -225,7 +258,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
           <h1>Cuzy</h1>
           <span className="logo-spark">✿</span>
         </header>
-        <p className="tagline">a tiny cozy world, grown from a seed</p>
+        <p className="tagline">a tiny cozy world to explore</p>
+        <button type="button" className="menu-back" onClick={() => setView('home')}>← Main menu</button>
 
         {invite && (
           <div className="invite-banner">
@@ -444,6 +478,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
                   )}
                   {mode === 'together' ? ' Everyone in the room defends the same base.' : ''}
                 </p>
+                {gameMode === 'survival' && <p className="hint">👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5 and {DIFFICULTY[difficulty].boss10} on wave 10.</p>}
                 <div className="diff-row" role="radiogroup" aria-label="Difficulty">
                   {DIFFICULTY_IDS.map((id) => (
                     <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} onClick={() => setDifficulty(id)}>
@@ -455,12 +490,19 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
               </div>
             )}
 
-            <label className="sub-label" htmlFor="seed">World seed</label>
-            <div className="row">
-              <input id="seed" value={seed} placeholder="any words or numbers" autoComplete="off" onChange={(e) => setSeed(e.target.value)} />
-              <button type="button" className="btn dice" title="Random seed" onClick={() => setSeed(randomSeed())}>🎲</button>
+            <span className="sub-label">Map</span>
+            <div className="map-grid" role="radiogroup" aria-label="Map">
+              {(gameMode === 'survival' ? SURVIVAL_MAPS : FREE_MAPS).map((m) => {
+                const on = gameMode === 'survival' ? survMap === m.id : freeMap === m.id;
+                return (
+                  <button key={m.id} type="button" role="radio" aria-checked={on} className={`diff-chip map-card ${on ? 'on' : ''}`} onClick={() => (gameMode === 'survival' ? setSurvMap(m.id) : setFreeMap(m.id))}>
+                    <b>{m.icon} {m.name}</b>
+                    <small>{m.blurb}</small>
+                  </button>
+                );
+              })}
             </div>
-            <p className="hint">Same seed, same world. Watch it drift by behind this card!</p>
+            <p className="hint">The world drifting by behind this card is the map you picked.</p>
 
             {mode === 'together' && (
               <div className="together">
@@ -479,7 +521,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
                     <div className="room-row" key={r.code}>
                       <div className="room-info">
                         <b>{r.name}{r.pvp && <span className="pvp-badge">⚔️ Fight</span>}{r.mode === 'waves' && <span className="pvp-badge waves">🌊 {DIFFICULTY[r.difficulty]?.name || 'Waves'}</span>}{r.mode === 'survival' && <span className="pvp-badge survival">☠️ {DIFFICULTY[r.difficulty]?.name || 'Survival'}</span>}</b>
-                        <span>Host {r.host} · seed {r.seed}{r.mode === 'waves' ? ' · wave defense' : r.mode === 'survival' ? ' · survival' : r.pvp ? ` · first to ${r.target} ${r.winBy === 'monsters' ? 'monster ' : ''}kills` : ' · friendly'}{r.allowLate ? '' : ' · no late join'}</span>
+                        <span>Host {r.host} · 🗺️ {mapNameOf(r.seed)}{r.mode === 'waves' ? ' · wave defense' : r.mode === 'survival' ? ' · survival' : r.pvp ? ` · first to ${r.target} ${r.winBy === 'monsters' ? 'monster ' : ''}kills` : ' · friendly'}{r.allowLate ? '' : ' · no late join'}</span>
                       </div>
                       <span className="room-code">{r.code}</span>
                       <span className={`room-count ${r.count >= r.max ? 'full' : ''}`}>👥 {r.count}/{r.max}</span>

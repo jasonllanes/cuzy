@@ -20,8 +20,8 @@ const MAX_PLAYERS = 10;
 const INTRO_MAX_MS = 45000; // the longest everyone waits for slow players to finish the opening scene
 const CELEBRATE_MS = 7000; // how long a winner is cheered before everyone returns to the waiting room
 const HEARTBEAT_MS = 15000; // the host touches its lobby row this often
-const STALE_MS = 60000; // a room whose row has not been touched for this long is not listed
-const STATE_MS = 100; // positions go out at most this often
+const STALE_MS = 45000; // a room whose row has not been touched for this long is not listed (its host would have refreshed it)
+const DELETE_AFTER_MS = 90000; // ...and one this old is deleted by whoever next looks at the lobby
 
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
 const num = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : 0);
@@ -30,7 +30,7 @@ const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'streakMonsters', 'teams'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -78,8 +78,13 @@ const cfgToRow = (cfg) => ({
 });
 
 export class SupaNet {
-  constructor(getClient) {
+  // `flushMs`: how often a player's outgoing messages are sent, together in one batch
+  constructor(getClient, { flushMs = 100, sweepMs = 3500 } = {}) {
     this.getClient = getClient;
+    this.flushMs = flushMs;
+    this.sweepMs = sweepMs; // how long after leaving a room we double-check that it is really empty
+    // closing the tab skips leave(), so tidy the room's row on the way out
+    if (typeof window !== 'undefined') window.addEventListener('pagehide', () => this.dropOnUnload());
     this.status = 'connecting'; // connecting | online | offline
     this.rooms = [];
     this.lan = [];
@@ -93,7 +98,7 @@ export class SupaNet {
     this.identity = { name: 'Friend', hero: 'adam' };
     this.lobbyCh = null;
     this.lobbyReady = false;
-    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0 };
+    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0 };
     this.resetRoom();
     this.connect();
   }
@@ -120,6 +125,7 @@ export class SupaNet {
     this.hostId = null;
     this.started = false;
     this.winning = false;
+    this.paused = false; // the host has paused the game for everyone
     this.syncing = false;
     this.startHour = START_HOUR;
     this.t0 = Date.now();
@@ -128,8 +134,8 @@ export class SupaNet {
     this.introOpen = false;
     this.introReady = new Set();
     this.pos = { x: 0, y: 0, dir: 'down', moving: false, hp: 6, hidden: false, lv: 1 };
-    this.lastState = 0;
-    this.pendingState = null;
+    this.outbox = []; // messages waiting for the next batch
+    this.flushT = 0;
     this.gotSync = null;
   }
 
@@ -230,7 +236,7 @@ export class SupaNet {
       if (!this.sb) return;
     }
     const since = new Date(Date.now() - STALE_MS).toISOString();
-    const { data, error } = await this.sb.from('rooms').select('*').gt('updated_at', since).order('updated_at', { ascending: false }).limit(50);
+    const { data, error } = await this.sb.from('rooms').select('*').gt('updated_at', since).gt('count', 0).order('updated_at', { ascending: false }).limit(50);
     if (error) {
       this.problem = friendly(error);
       this.rooms = [];
@@ -238,7 +244,7 @@ export class SupaNet {
       this.problem = '';
       this.rooms = data.map(rowToSummary);
       // tidy up rooms whose host vanished long ago
-      this.sb.from('rooms').delete().lt('updated_at', new Date(Date.now() - 10 * STALE_MS).toISOString()).then(() => {}, () => {});
+      this.sb.from('rooms').delete().lt('updated_at', new Date(Date.now() - DELETE_AFTER_MS).toISOString()).then(() => {}, () => {});
     }
     this.emit({ t: 'rooms', rooms: this.rooms });
   }
@@ -253,7 +259,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, streakMonsters, teams, target, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, streakMonsters, teams, target, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -274,6 +280,7 @@ export class SupaNet {
       streakMonsters: streakMonsters === true,
       teams: free && [2, 3, 4].includes(Number(teams)) ? Number(teams) : 0, // 0 = free for all
       allowLate: allowLate !== false,
+      allowCheats: allowCheats === true, // chat commands like -gold 100 (kept in the channel, not in the rooms table)
     };
     cfg.target = clampTarget(target, defaultTarget(cfg.winBy));
     const startHour = mode === 'survival' ? 17.3 : START_HOUR; // Survival begins at dusk
@@ -353,7 +360,15 @@ export class SupaNet {
       this.resolveSync = resolve;
     });
     ch.on('broadcast', { event: 'm' }, ({ payload }) => this.receive(payload));
-    ch.on('presence', { event: 'sync' }, () => this.resolveSync?.());
+    ch.on('presence', { event: 'sync' }, () => {
+      this.resolveSync?.();
+      // a "join" notice can be missed; the full list never lies, so anyone in it that we do not know yet counts as joined
+      if (!this.syncing && this.channel === ch) {
+        const known = [];
+        for (const [key, metas] of Object.entries(ch.presenceState())) if (metas[0] && key !== this.me) known.push(metas[0]);
+        this.onPresenceJoin(known);
+      }
+    });
     ch.on('presence', { event: 'join' }, ({ newPresences }) => this.onPresenceJoin(newPresences));
     ch.on('presence', { event: 'leave' }, ({ leftPresences }) => this.onPresenceLeave(leftPresences));
     await new Promise((resolve, reject) => {
@@ -371,7 +386,16 @@ export class SupaNet {
         }
       });
     });
-    if (!creator) await Promise.race([this.gotSync, new Promise((r) => setTimeout(r, 2500))]);
+    if (!creator) {
+      await Promise.race([this.gotSync, new Promise((r) => setTimeout(r, 2500))]);
+      // Presence can report the others a moment late. The room's row says who the host is, so give the host a
+      // moment to show up before deciding anything (guessing wrong here makes a second "host").
+      for (let i = 0; i < 20; i++) {
+        this.readPresence();
+        if (this.members.has(this.hostId)) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
     this.readPresence();
     const taken = new Set([...this.members.values()].map((m) => m.slot));
     let slot = 0;
@@ -380,7 +404,17 @@ export class SupaNet {
     this.members.set(this.me, meta);
     if (creator) this.assignTeam(this.me);
     await ch.track(meta);
-    if (!creator && !this.members.has(this.hostId)) this.hostId = this.electHost();
+    // The room's row names the host, and we go with that. Presence can be slow, so we never guess at join time; only if
+    // that host still has not shown up well after (an abandoned room) is someone else chosen.
+    if (!creator) {
+      clearTimeout(this.timers.hostWatch);
+      this.timers.hostWatch = setTimeout(() => {
+        if (this.channel && !this.members.has(this.hostId)) {
+          this.hostId = this.electHost();
+          if (this.isHost) this.takeOver();
+        }
+      }, 10000);
+    }
     this.syncing = false;
     return slot;
   }
@@ -416,10 +450,14 @@ export class SupaNet {
     clearInterval(this.timers.heartbeat);
     clearTimeout(this.timers.intro);
     clearTimeout(this.timers.back);
-    clearTimeout(this.timers.state);
-    const alone = this.members.size <= 1;
+    clearTimeout(this.flushT);
+    clearTimeout(this.timers.hostWatch);
+    const others = [...this.members.values()].filter((m) => m.id !== this.me).sort((a, b) => a.at - b.at);
+    const alone = others.length === 0;
+    const wasHost = this.isHost;
     const code = this.code;
     // say goodbye at once; Presence only notices a departure a few seconds later
+    this.flushOutbox();
     try {
       await ch.send({ type: 'broadcast', event: 'm', payload: { t: 'bye', id: this.me } });
     } catch {
@@ -427,7 +465,11 @@ export class SupaNet {
     }
     this.channel = null; // from now on its events are ignored
     try {
-      if (alone) await this.sb.from('rooms').delete().eq('code', code);
+      if (alone) await this.sb.from('rooms').delete().eq('code', code); // the last one out turns the lights off
+      else if (wasHost) {
+        // the room goes on without us: its row must point at the next host straight away, not at someone who left
+        await this.sb.from('rooms').update({ host_id: others[0].id, host_name: others[0].name, count: others.length, updated_at: new Date().toISOString() }).eq('code', code);
+      }
       await ch.untrack();
       await this.sb.removeChannel(ch);
     } catch {
@@ -435,6 +477,59 @@ export class SupaNet {
     }
     this.resetRoom();
     this.trackLobby(); // back to "not in a room"
+    if (!alone) this.sweepRoom(code); // someone else may have been leaving at the same moment
+  }
+
+  // Two people leaving at the same instant each think the other is still there, so neither deletes the room.
+  // A few seconds later, take a quiet look at who is really in it; if nobody is, close it down.
+  async sweepRoom(code) {
+    const sb = this.sb;
+    if (!sb || !code) return;
+    await new Promise((r) => setTimeout(r, this.sweepMs));
+    const ch = sb.channel(`cuzy-room-${code}`, { config: { presence: { key: `sweep-${this.me}` } } });
+    try {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('no presence')), 6000);
+        ch.on('presence', { event: 'sync' }, () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        ch.subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            clearTimeout(timeout);
+            reject(new Error(status));
+          }
+        });
+      });
+      const present = Object.keys(ch.presenceState()).filter((k) => !k.startsWith('sweep-'));
+      if (!present.length) await sb.from('rooms').delete().eq('code', code);
+    } catch {
+      /* the stale-row rules will tidy it up instead */
+    } finally {
+      try {
+        await sb.removeChannel(ch);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // The page is closing, so there is no time for the normal leave(). Fire-and-forget requests that survive the page:
+  // delete the room if we were the only one in it, or hand the row to the next host.
+  dropOnUnload() {
+    if (!this.sb || !this.code || typeof fetch !== 'function') return;
+    const url = `${this.sb.supabaseUrl}/rest/v1/rooms?code=eq.${encodeURIComponent(this.code)}`;
+    const key = this.sb.supabaseKey;
+    const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+    const others = [...this.members.values()].filter((m) => m.id !== this.me).sort((a, b) => a.at - b.at);
+    try {
+      if (!others.length) fetch(url, { method: 'DELETE', headers, keepalive: true }).catch(() => {});
+      else if (this.isHost) {
+        fetch(url, { method: 'PATCH', headers, keepalive: true, body: JSON.stringify({ host_id: others[0].id, host_name: others[0].name, count: others.length }) }).catch(() => {});
+      }
+    } catch {
+      /* nothing more can be done */
+    }
   }
 
   close() {
@@ -478,6 +573,8 @@ export class SupaNet {
       if (this.isHost) this.assignTeam(m.id);
       this.emit({ t: 'peer_join', player: this.publicPlayer(m) });
       if (this.isHost) {
+        this.out({ t: 'settings', room: this.summary() }); // so a newcomer sees the settings that are not in the rooms table
+        if (this.paused) this.out({ t: 'paused', on: true, by: this.members.get(this.me)?.name || 'the host' }); // joined while paused
         this.sendTeams();
         this.sendScores();
         this.touchRow();
@@ -535,9 +632,25 @@ export class SupaNet {
 
   // ---------- talking ----------
 
+  // Messages are not sent one by one: everything a player produces in a moment (positions, hits, fx, wave traffic)
+  // leaves in a single batch every `flushMs`. Supabase limits how many messages per second a project may send,
+  // and a busy fight between several players blew straight through it when every event was its own message.
+  // Only the newest position and the newest Wave Defense snapshot matter, so older ones are replaced.
   bcast(payload) {
     if (!this.channel) return;
-    this.channel.send({ type: 'broadcast', event: 'm', payload }).catch?.(() => {});
+    if (payload.t === 'state') this.outbox = this.outbox.filter((m) => m.t !== 'state');
+    else if (payload.t === 'w' && payload.k === 'snap') this.outbox = this.outbox.filter((m) => !(m.t === 'w' && m.k === 'snap'));
+    this.outbox.push(payload);
+    if (!this.flushT) this.flushT = setTimeout(() => this.flushOutbox(), this.flushMs);
+  }
+
+  flushOutbox() {
+    clearTimeout(this.flushT);
+    this.flushT = 0;
+    const msgs = this.outbox;
+    this.outbox = [];
+    if (!this.channel || !msgs.length) return;
+    this.channel.send({ type: 'broadcast', event: 'm', payload: msgs.length === 1 ? msgs[0] : { t: 'batch', msgs } }).catch?.(() => {});
   }
 
   // tell everyone, ourselves included
@@ -568,6 +681,7 @@ export class SupaNet {
       case 'settings':
       case 'mkill':
       case 'team':
+      case 'pause':
         this.request(m.t, m);
         break;
       case 'fell':
@@ -590,8 +704,10 @@ export class SupaNet {
         break;
       }
       case 'fx':
-        if (m.kind === 'swing') this.bcast({ t: 'fx', id: this.me, kind: 'swing', a: num(m.a) });
+        if (m.kind === 'swing') this.bcast({ t: 'fx', id: this.me, kind: 'swing', a: num(m.a), w: clean(m.w, 12) });
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
+        else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
+        else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
         else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
         else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) });
         break;
@@ -610,22 +726,11 @@ export class SupaNet {
       dir: ['up', 'down', 'left', 'right'].includes(m.dir) ? m.dir : 'down',
       moving: !!m.moving,
       hidden: !!m.hidden,
-      hp: Math.max(0, Math.min(12, Math.round(Number(m.hp) || 0))),
-      lv: Math.max(1, Math.min(9, Math.round(Number(m.lv)) || 1)), // sword level, shown next to the health bar
+      hp: Math.max(0, Math.min(40, Math.round((Number(m.hp) || 0) * 10) / 10)),
+      mhp: Math.max(1, Math.min(40, Math.round((Number(m.mhp) || 6) * 10) / 10)), // max health, in hearts
+      lv: Math.max(1, Math.min(99, Math.round(Number(m.lv)) || 1)), // character level, shown next to the health bar
       mt: m.mt === 'chicken' || m.mt === 'cow' ? m.mt : '', // what they are riding
     };
-    const wait = this.lastState + STATE_MS - Date.now();
-    if (wait <= 0) this.flushState();
-    else if (!this.timers.state) {
-      this.timers.state = setTimeout(() => {
-        this.timers.state = 0;
-        this.flushState();
-      }, wait);
-    }
-  }
-
-  flushState() {
-    this.lastState = Date.now();
     this.bcast({ t: 'state', id: this.me, ...this.pos });
   }
 
@@ -640,6 +745,10 @@ export class SupaNet {
   // anything that arrives from the channel (or from ourselves, via out())
   receive(m) {
     if (!m || typeof m !== 'object') return;
+    if (m.t === 'batch') {
+      for (const sub of m.msgs || []) this.receive(sub);
+      return;
+    }
     if (m.req) {
       if (this.isHost && m.from !== this.me) this.handleRequest(m);
       return;
@@ -711,6 +820,8 @@ export class SupaNet {
         return this.hMkill(from);
       case 'team':
         return this.hTeam(from, m);
+      case 'pause':
+        return this.hPause(from, m);
       default:
     }
   }
@@ -748,10 +859,19 @@ export class SupaNet {
     return sum;
   }
 
+  // the host pauses or resumes the game for everyone in the room
+  hPause(from, m) {
+    if (!this.started || from !== this.hostId) return;
+    this.paused = !!m.on;
+    this.out({ t: 'paused', on: this.paused, by: this.members.get(from)?.name || 'the host' });
+  }
+
   // a player picks their own team in the waiting room
   hTeam(from, m) {
     const n = Number(m.team);
     if (this.started || !this.cfg.teams || !Number.isInteger(n) || n < 0 || n >= this.cfg.teams) return;
+    const cap = Math.ceil(this.cfg.max / this.cfg.teams); // a team only has so many places
+    if (this.teamMap[from] !== n && [...this.members.keys()].filter((id) => this.teamMap[id] === n).length >= cap) return;
     this.teamMap[from] = n;
     this.sendTeams();
   }
@@ -773,6 +893,12 @@ export class SupaNet {
     this.introOpen = false;
     clearTimeout(this.timers.intro);
     this.out({ t: 'go' });
+    // say it again a few times, in case it got lost on the way (extra ones are harmless)
+    for (const ms of [800, 2000, 4000]) {
+      setTimeout(() => {
+        if (this.channel && this.started && !this.introOpen) this.bcast({ t: 'go' });
+      }, ms);
+    }
   }
 
   // if every player has finished or skipped it, the game starts at once
@@ -784,6 +910,7 @@ export class SupaNet {
     if (this.started || from !== this.hostId) return;
     this.started = true;
     this.winning = false;
+    this.paused = false;
     for (const id of this.members.keys()) if (this.cfg.teams && this.teamMap[id] === undefined) this.assignTeam(id);
     this.openIntro();
     this.t0 = Date.now();
@@ -805,12 +932,15 @@ export class SupaNet {
     const cfg = this.cfg;
     const free = cfg.mode === 'free';
     if (typeof m.allowLate === 'boolean') cfg.allowLate = m.allowLate;
-    // everything else is decided before the round, not during it
+    if (typeof m.allowCheats === 'boolean') cfg.allowCheats = m.allowCheats;
+    // these can be changed at any time, even in the middle of a round
+    if (typeof m.allowThrow === 'boolean') cfg.allowThrow = m.allowThrow;
+    if (typeof m.allowMelee === 'boolean') cfg.allowMelee = m.allowMelee;
+    if (typeof m.streakMonsters === 'boolean') cfg.streakMonsters = m.streakMonsters;
+    if (Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
+    if (free && m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
+    // the rest is decided before the round
     if (!this.started) {
-      if (typeof m.allowThrow === 'boolean') cfg.allowThrow = m.allowThrow;
-      if (typeof m.allowMelee === 'boolean') cfg.allowMelee = m.allowMelee;
-      if (typeof m.streakMonsters === 'boolean') cfg.streakMonsters = m.streakMonsters;
-      if (Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
       if (free) {
         if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
           cfg.teams = Number(m.teams);
@@ -827,6 +957,7 @@ export class SupaNet {
     this.touchRow(cfgToRow(cfg));
   }
 
+  // (a player who is still waiting asks again every couple of seconds; once the scene is over they are told to go)
   hReady(from) {
     if (!this.started) return;
     if (!this.introOpen) {
@@ -876,6 +1007,7 @@ export class SupaNet {
     if (!this.channel || !this.isHost) return;
     this.started = false;
     this.winning = false;
+    this.paused = false;
     this.introOpen = false;
     this.kills = new Map();
     this.out({ t: 'lobby', room: this.summary(), teams: { ...this.teamMap }, host: this.hostId, players: [...this.members.values()].map((m) => this.publicPlayer(m)), scores: this.scoreList() });

@@ -227,6 +227,302 @@
   "w": 384,
   "h": 272
  },
+ "bg_yellow": {
+  "w": 384,
+  "h": 272
+ },
+ "bg_dark": {
+  "w": 384,
+  "h": 272
+ },
+ "gun_down": {
+  "w": 30,
+  "h": 11
+ },
+ "gun_up": {
+  "w": 30,
+  "h": 11
+ },
+ "gun_side": {
+  "w": 48,
+  "h": 9
+ },
+ "gun_left": {
+  "w": 48,
+  "h": 9
+ },
+ "icon_pistol": {
+  "w": 8,
+  "h": 7
+ },
+ "cont_gray_v": {
+  "w": 24,
+  "h": 43
+ },
+ "cont_green_v": {
+  "w": 24,
+  "h": 43
+ },
+ "cont_green_h": {
+  "w": 41,
+  "h": 26
+ },
+ "cont_red_h": {
+  "w": 41,
+  "h": 26
+ },
+ "car_gray": {
+  "w": 25,
+  "h": 37
+ },
+ "car_orange": {
+  "w": 25,
+  "h": 37
+ },
+ "car_green": {
+  "w": 38,
+  "h": 19
+ },
+ "car_yellow": {
+  "w": 38,
+  "h": 19
+ },
+ "car_scrap": {
+  "w": 39,
+  "h": 20
+ },
+ "car_flipped": {
+  "w": 27,
+  "h": 37
+ },
+ "truck_blue": {
+  "w": 59,
+  "h": 58
+ },
+ "truck_orange": {
+  "w": 59,
+  "h": 58
+ },
+ "van_green": {
+  "w": 43,
+  "h": 27
+ },
+ "tractor": {
+  "w": 41,
+  "h": 30
+ },
+ "moto": {
+  "w": 23,
+  "h": 16
+ },
+ "barrel_blue": {
+  "w": 12,
+  "h": 16
+ },
+ "barrel_red2": {
+  "w": 15,
+  "h": 10
+ },
+ "bin2": {
+  "w": 20,
+  "h": 28
+ },
+ "trash_can": {
+  "w": 13,
+  "h": 13
+ },
+ "trash_bag": {
+  "w": 11,
+  "h": 11
+ },
+ "tires": {
+  "w": 15,
+  "h": 13
+ },
+ "cone": {
+  "w": 9,
+  "h": 11
+ },
+ "bench": {
+  "w": 32,
+  "h": 15
+ },
+ "bench_side": {
+  "w": 11,
+  "h": 28
+ },
+ "streetlight": {
+  "w": 23,
+  "h": 38
+ },
+ "streetlight_up": {
+  "w": 6,
+  "h": 49
+ },
+ "pallet2": {
+  "w": 14,
+  "h": 10
+ },
+ "cardboard2": {
+  "w": 12,
+  "h": 10
+ },
+ "metal_plates": {
+  "w": 23,
+  "h": 18
+ },
+ "iron_beam": {
+  "w": 15,
+  "h": 5
+ },
+ "brick_debris": {
+  "w": 17,
+  "h": 15
+ },
+ "hvac": {
+  "w": 16,
+  "h": 12
+ },
+ "wall_ruin": {
+  "w": 16,
+  "h": 14
+ },
+ "wall_ruin_corner": {
+  "w": 14,
+  "h": 13
+ },
+ "brick_lying": {
+  "w": 13,
+  "h": 12
+ },
+ "door_metal": {
+  "w": 16,
+  "h": 25
+ },
+ "hatch": {
+  "w": 13,
+  "h": 10
+ },
+ "ammo_green": {
+  "w": 9,
+  "h": 7
+ },
+ "ammo_red": {
+  "w": 9,
+  "h": 7
+ },
+ "manhole": {
+  "w": 16,
+  "h": 16
+ },
+ "tree_spruce__orange": {
+  "w": 16,
+  "h": 29
+ },
+ "tree_normal__orange": {
+  "w": 21,
+  "h": 30
+ },
+ "tree_big__orange": {
+  "w": 34,
+  "h": 52
+ },
+ "tree_pine__orange": {
+  "w": 27,
+  "h": 49
+ },
+ "tree_birch__orange": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_oak__orange": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_small__orange": {
+  "w": 24,
+  "h": 36
+ },
+ "bush1__orange": {
+  "w": 15,
+  "h": 13
+ },
+ "bush2__orange": {
+  "w": 28,
+  "h": 13
+ },
+ "tree_spruce__yellow": {
+  "w": 16,
+  "h": 29
+ },
+ "tree_normal__yellow": {
+  "w": 21,
+  "h": 30
+ },
+ "tree_big__yellow": {
+  "w": 34,
+  "h": 52
+ },
+ "tree_pine__yellow": {
+  "w": 27,
+  "h": 49
+ },
+ "tree_birch__yellow": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_oak__yellow": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_small__yellow": {
+  "w": 24,
+  "h": 36
+ },
+ "bush1__yellow": {
+  "w": 15,
+  "h": 13
+ },
+ "bush2__yellow": {
+  "w": 28,
+  "h": 13
+ },
+ "tree_spruce__dark": {
+  "w": 16,
+  "h": 29
+ },
+ "tree_normal__dark": {
+  "w": 21,
+  "h": 30
+ },
+ "tree_big__dark": {
+  "w": 34,
+  "h": 52
+ },
+ "tree_pine__dark": {
+  "w": 27,
+  "h": 49
+ },
+ "tree_birch__dark": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_oak__dark": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_small__dark": {
+  "w": 24,
+  "h": 36
+ },
+ "bush1__dark": {
+  "w": 15,
+  "h": 13
+ },
+ "bush2__dark": {
+  "w": 28,
+  "h": 13
+ },
  "z_small_walk_down": {
   "w": 72,
   "h": 16

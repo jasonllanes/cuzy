@@ -6,11 +6,11 @@ export const UPGRADES = [
   { id: 'house', icon: '🏠', name: 'Reinforce the base', desc: '+30% base health per level (arriving already repaired) and room for more helpers. Shared by everyone.', cost: [5, 8, 12, 17, 24] },
   { id: 'stamina', icon: '⚡', name: 'Endurance', desc: 'Sprinting and dashing cost less, and stamina refills faster.', cost: [4, 6, 9, 13, 18] },
   { id: 'melee', icon: '🗡️', name: 'Melee damage', desc: '+1 damage on every swing (and a little more on dashes).', cost: [5, 8, 12, 18, 26] },
-  { id: 'throw', icon: '🎯', name: 'Throw damage', desc: '+1 damage on every throw.', cost: [4, 6, 9, 13, 18] },
+  { id: 'throw', icon: '🎯', name: 'Throw damage', desc: '+1 damage on every throw.', cost: [4, 6, 9, 13, 18], survIcon: '🔫', survName: 'Gun damage', survDesc: '+1 damage on every bullet from your pistol.' },
   { id: 'light', icon: '🔦', name: 'Lantern', desc: 'A bigger, brighter glow around you, so the night is easier to see through.', cost: [3, 5, 8, 12, 16] },
 ];
 
-export const emptyUpgrades = () => ({ house: 0, stamina: 0, melee: 0, throw: 0, light: 0, dash: 0, dashdmg: 0, spinrad: 0, spindmg: 0, rapid: 0, health: 0 });
+export const emptyUpgrades = () => ({ chest: 0, atkspd: 0, house: 0, stamina: 0, melee: 0, throw: 0, light: 0, dash: 0, dashdmg: 0, spinrad: 0, spindmg: 0, rapid: 0, health: 0 });
 
 export const upgradeCost = (id, level) => UPGRADES.find((u) => u.id === id).cost[level];
 
@@ -21,8 +21,8 @@ export const upgradeCost = (id, level) => UPGRADES.find((u) => u.id === id).cost
 export const FREE_UPGRADES = [
   {
     id: 'health', icon: '❤️', name: 'Max health', cost: [6, 10, 15, 21, 28],
-    desc: '+1 heart of total health per level, and the new heart arrives full.',
-    value: (l) => `${6 + l} hearts`,
+    desc: '+10 max HP per level, and the extra health arrives full.',
+    value: (l) => `${100 + 10 * l} max HP`,
   },
   {
     id: 'stamina', icon: '⚡', name: 'Endurance', cost: [4, 6, 9, 13, 18],
@@ -33,6 +33,16 @@ export const FREE_UPGRADES = [
     id: 'melee', icon: '🗡️', name: 'Melee damage', cost: [4, 7, 11, 16, 22],
     desc: 'Sword swings hit harder. Fully upgraded, two swings drop a rival.',
     value: (l) => `${(2 + 0.4 * l).toFixed(1)} damage per swing`,
+  },
+  {
+    id: 'chest', icon: '📦', name: 'Chest space', cost: [4, 7, 11, 16, 22],
+    desc: 'Room for 9 more stacks in the storage chest at home.',
+    value: (l) => `${27 + 9 * l} chest slots`,
+  },
+  {
+    id: 'atkspd', icon: '⚔️', name: 'Attack speed', cost: [5, 8, 12, 17, 24],
+    desc: 'Swing your sword more often. Works with whichever sword you carry.',
+    value: (l) => `${Math.round(l * 9)}% less time between swings`,
   },
   {
     id: 'dash', icon: '💨', name: 'Dash distance', cost: [3, 6, 9, 13, 18], needs: 'dash',
@@ -71,7 +81,7 @@ export const SHIELD_CAP = 3;
 
 // One-off purchases that stock the quick slots at the bottom of the screen
 export const SUPPLY_SHOP = [
-  { id: 'hp', item: 'hppack', name: 'HP Pack', desc: 'Restores 3 hearts. Press Z.', cost: 5, cap: SUPPLY_CAP },
+  { id: 'hp', item: 'hppack', name: 'HP Pack', desc: 'Restores 50 HP. Press Z.', cost: 5, cap: SUPPLY_CAP },
   { id: 'stam', item: 'soupcan', name: 'Soup Can', desc: 'Restores 60% stamina. Press X.', cost: 3, cap: SUPPLY_CAP },
 ];
 

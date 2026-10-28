@@ -178,9 +178,9 @@ export default function App() {
 
   let screen;
   if (playing && session && lobby) {
-    screen = <WaitingRoom assets={assets} net={net} session={session} profile={profile} onStart={startRound} onLeave={exit} />;
+    screen = <WaitingRoom assets={assets} net={net} session={session} profile={profile} onStart={startRound} onLeave={exit} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else if (playing) {
-    screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} />;
+    screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else {
     screen = <MainMenu assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }

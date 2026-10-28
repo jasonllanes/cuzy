@@ -143,7 +143,10 @@ export class Bots {
       this.g.dropKillLoot(b.x, b.y);
       sfx.play(by === 'me' ? 'kill' : 'monsterDie', 0.7);
       this.credit(by, b.id);
-      if (by === 'me') c.kills++;
+      if (by === 'me') {
+        c.kills++;
+        this.g.addXp(35);
+      }
     }
   }
 

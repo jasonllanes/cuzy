@@ -92,6 +92,10 @@ const SOUNDS = {
     noise({ dur: 0.06, vol: 0.2, f0: 4000, kind: 'highpass' });
   },
   throw: () => noise({ dur: 0.11, vol: 0.18, f0: 1200, f1: 3500, q: 1.4 }),
+  gun: () => {
+    noise({ dur: 0.1, vol: 0.34, f0: 3400, f1: 260, q: 0.7 });
+    tone({ type: 'square', f0: 220, f1: 60, dur: 0.09, vol: 0.2 });
+  },
   thud: () => tone({ type: 'triangle', f0: 150, f1: 55, dur: 0.1, vol: 0.28 }),
   splat: () => {
     noise({ dur: 0.12, vol: 0.28, f0: 600, f1: 200, q: 0.7 });
