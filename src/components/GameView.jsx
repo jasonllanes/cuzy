@@ -7,6 +7,7 @@ import MapPanel from './MapPanel';
 import MonsterIcon from './MonsterIcon';
 import { TEAMS } from '../game/teams';
 import IntroScene from './IntroScene';
+import OnlinePlayers from './OnlinePlayers';
 import { sfx } from '../game/sfx';
 import { INVIS_CD } from '../game/combat';
 import AudioSettings from './AudioSettings';
@@ -130,6 +131,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [intro, setIntro] = useState(() => (new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
   const introRef = useRef(intro);
   const [mapOpen, setMapOpen] = useState(false);
+  const [onlineOpen, setOnlineOpen] = useState(false); // the "players online" list
+  const [onlineCount, setOnlineCount] = useState(() => net.online?.length || 0);
   const [muted, setMuted] = useState(sfx.muted);
   const [banners, setBanners] = useState([]);
   const banner = banners[0];
@@ -206,7 +209,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       winBy: session ? session.room.winBy : profile.winBy,
       onRoundWon: session ? null : () => onRoundWon?.(),
       assets,
-      hero: heroById(survival ? (String(profile.hero).startsWith('survivor') ? profile.hero : 'survivor') : profile.hero),
+      hero: heroById(profile.hero),
       name: profile.name,
       net: session ? net : null,
       session,
@@ -287,8 +290,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   };
 
   useEffect(() => {
-    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen;
-  }, [paused, mapOpen, guideOpen, upgOpen]);
+    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || onlineOpen;
+  }, [paused, mapOpen, guideOpen, upgOpen, onlineOpen]);
+
+  // how many others are online, for the button
+  useEffect(() => {
+    setOnlineCount(net.online?.length || 0);
+    return net.on((m) => m.t === 'online' && setOnlineCount(m.players.length));
+  }, [net]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -453,6 +462,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <button className="btn small-btn" onClick={() => setUpgOpen(true)}>{waves ? '⬆ Upgrades' : '🛒 Shop'} <kbd>Tab</kbd></button>
         <button className="btn small-btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
         <button className="btn small-btn" onClick={() => setMapOpen(true)}>🗺️ Map <kbd>M</kbd></button>
+        <button className="btn small-btn" onClick={() => setOnlineOpen(true)} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu</button>
       </div>
 
@@ -575,6 +585,17 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         ? <UpgradePanel hud={hud} game={gameRef.current} survival={survival} onClose={() => setUpgOpen(false)} />
         : <ShopPanel hud={hud} game={gameRef.current} onClose={() => setUpgOpen(false)} />)}
       {guideOpen && <Guide onClose={() => setGuideOpen(false)} />}
+      {onlineOpen && (
+        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOnlineOpen(false)}>
+          <div className="panel online-panel">
+            <header className="inv-head">
+              <h2>🌐 Players online</h2>
+              <button className="btn small-btn" onClick={() => setOnlineOpen(false)} aria-label="Close">✕</button>
+            </header>
+            <OnlinePlayers net={net} assets={assets} />
+          </div>
+        </div>
+      )}
       {mapOpen && <MapPanel game={gameRef.current} onClose={() => setMapOpen(false)} />}
       {toast && <div className="toast panel small">✨ {toast}</div>}
       {intro === 'play' && <IntroScene kind={survival ? 'survival' : mode === 'waves' ? 'waves' : 'free'} name={profile.name} fight={pvp || Number(profile.bots) > 0} onDone={finishIntro} />}

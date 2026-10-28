@@ -1403,9 +1403,8 @@ export class Game {
     this.remotes.set(p.id, {
       id: p.id,
       name: p.name,
-      // in Survival everyone is a survivor, in whichever jacket colour they picked
       slot: p.slot,
-      hero: this.world.apoc ? (String(p.hero).startsWith('survivor') ? heroById(p.hero) : SURVIVOR) : heroById(p.hero),
+      hero: heroById(p.hero),
       x: p.x ?? 0,
       y: p.y ?? 0,
       tx: p.x ?? 0,

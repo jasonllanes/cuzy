@@ -62,15 +62,9 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
     return Number.isInteger(fromHero) && SURVIVOR_COLORS[fromHero] ? fromHero : 0;
   });
 
-  const randomHero = () => {
-    if (survival) {
-      setSurvColor(Math.floor(Math.random() * SURVIVOR_COLORS.length));
-      return;
-    }
-    setHero(retroId(1 + Math.floor(Math.random() * RETRO_COUNT)));
-  };
+  const randomHero = () => setHero(retroId(1 + Math.floor(Math.random() * RETRO_COUNT)));
 
-  const activeHeroId = survival ? survivorId(survColor) : hero;
+  const activeHeroId = hero; // the same heroes in every game type, Survival included
   const activeHero = heroById(activeHeroId);
   const selected = heroById(hero);
   const [seed, setSeed] = useState(initial.seed);
@@ -148,8 +142,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   // ---------- an invite link: name + hero, then straight into the room ----------
   if (inviting) {
     const invited = rooms.find((r) => r.code === invite);
-    const inviteSurvival = invited?.mode === 'survival';
-    const inviteHeroId = inviteSurvival ? survivorId(survColor) : hero;
+    const inviteHeroId = hero;
     const joinInvited = (e) => {
       e.preventDefault();
       if (busy || !online) return;
@@ -157,14 +150,14 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
       setError('');
       const me = { name: myName(), hero: inviteHeroId };
       net.join(invite, me).then(
-        (joined) => onEnterRoom({ ...profile(), hero: inviteHeroId, cozyHero: inviteSurvival ? hero : inviteHeroId, mode: joined.room.mode, seed: joined.room.seed }, joined),
+        (joined) => onEnterRoom({ ...profile(), hero: inviteHeroId, cozyHero: inviteHeroId, mode: joined.room.mode, seed: joined.room.seed }, joined),
         (err) => {
           setError(err.message);
           setBusy(false);
         },
       );
     };
-    const pickHero = (id) => (inviteSurvival ? setSurvColor(id) : setHero(id));
+    const pickHero = (id) => setHero(id);
     return (
       <div className="menu">
         <WorldBackdrop assets={assets} seed={invited?.seed || seed} />
@@ -185,17 +178,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
               <input id="invite-name" value={name} maxLength={14} placeholder="Your name…" autoComplete="off" autoFocus onChange={(e) => setName(e.target.value)} />
               <button type="button" className="btn dice" title="Surprise me" onClick={() => setName(randomName())}>🎲</button>
             </div>
-            <div className="step">{inviteSurvival ? 'Pick your jacket' : 'Pick your character'}</div>
-            {inviteSurvival ? (
-              <div className="heroes survivors" role="radiogroup" aria-label="Survivor jacket">
-                {SURVIVOR_COLORS.map((c, i) => (
-                  <button type="button" key={c.name} role="radio" aria-checked={survColor === i} className={`hero-card ${survColor === i ? 'selected' : ''}`} onClick={() => pickHero(i)} onMouseEnter={() => setHovered(`s${i}`)} onMouseLeave={() => setHovered(null)}>
-                    <SpritePreview img={assets.img} hero={heroById(survivorId(i))} active={survColor === i || hovered === `s${i}`} />
-                    <span className="hero-name">{c.name}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
+            <div className="step">Pick your character</div>
+            {(
               <div className="heroes retro-grid" role="radiogroup" aria-label="Character">
                 {Array.from({ length: RETRO_COUNT }, (_, i) => {
                   const h = heroById(retroId(i + 1));
@@ -355,36 +339,11 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
         {step === 'hero' && (
           <section className="page">
             <div className="step">
-              {survival ? 'Pick your survivor' : 'Pick your hero'}
+              Pick your hero
               <button type="button" className="btn dice mini-dice" title="Surprise me" onClick={randomHero}>🎲</button>
             </div>
 
-            {survival ? (
-              <>
-                <div className="heroes survivors" role="radiogroup" aria-label="Survivor jacket">
-                  {SURVIVOR_COLORS.map((c, i) => {
-                    const s = heroById(survivorId(i));
-                    return (
-                      <button
-                        type="button"
-                        key={c.name}
-                        role="radio"
-                        aria-checked={survColor === i}
-                        className={`hero-card ${survColor === i ? 'selected' : ''}`}
-                        onClick={() => setSurvColor(i)}
-                        onMouseEnter={() => setHovered(`s${i}`)}
-                        onMouseLeave={() => setHovered(null)}
-                      >
-                        <SpritePreview img={assets.img} hero={s} active={survColor === i || hovered === `s${i}`} />
-                        <span className="hero-name">{c.name}</span>
-                        <span className="hero-title">jacket</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="hero-blurb">☠️ Survival has one kind of survivor. Pick the jacket you want to be seen in.</p>
-              </>
-            ) : (
+            {(
               <>
                 <div className="heroes retro-grid" role="radiogroup" aria-label="Hero">
                   {Array.from({ length: RETRO_COUNT }, (_, i) => {
@@ -409,7 +368,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
                     );
                   })}
                 </div>
-                <p className="hero-blurb">Selected: <b>{selected.label}</b>. Super Retro World pixel heroes (credit: Gif, Noiracide &amp; Romi).</p>
+                <p className="hero-blurb">Selected: <b>{selected.label}</b>. {survival ? 'Your hero faces the horde in Survival too. ' : ''}Super Retro World pixel heroes (credit: Gif, Noiracide &amp; Romi).</p>
               </>
             )}
             {nav('who', 'play')}

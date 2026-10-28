@@ -3,6 +3,7 @@ import { heroById } from '../game/heroes';
 import { TEAMS, TEAM_COUNTS } from '../game/teams';
 import { inviteLink } from '../game/net';
 import SpritePreview from './SpritePreview';
+import OnlinePlayers from './OnlinePlayers';
 import WorldBackdrop from './WorldBackdrop';
 
 const MODE_LABEL = { free: '🌻 Free Roam', waves: '🛡️ Wave Defense', survival: '🧟 Survival' };
@@ -182,6 +183,11 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
             </div>
           ))}
         </div>
+
+        <section className="settings-panel online-section" aria-label="Players online">
+          <h3>🌐 Online now <small>invite anyone who has the game open</small></h3>
+          <OnlinePlayers net={net} assets={assets} />
+        </section>
 
         <RoomSettings room={room} count={ordered.length} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
 

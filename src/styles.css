@@ -810,3 +810,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .team-chip.on { border-color: var(--team); opacity: 1; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--team); }
 .team-chip:disabled { cursor: default; }
 .team-row { background: color-mix(in srgb, var(--team) 22%, #fff3df); font-weight: 700; }
+
+/* players online and invitations */
+.online-list { display: grid; gap: 6px; max-height: 260px; overflow-y: auto; }
+.online-row { display: flex; align-items: center; gap: 10px; background: #fff; border: 3px solid var(--wood); border-radius: 12px; padding: 4px 10px; }
+.online-face .sprite-preview { width: 30px; height: 48px; margin: 0; }
+.online-info { display: grid; flex: 1; min-width: 0; }
+.online-info b { font: 700 0.95rem var(--pixel); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.online-info small { color: var(--ink-soft); font-size: 0.75rem; }
+.online-empty { margin: 0; }
+.online-panel { padding: 16px 20px 18px; width: min(480px, 94vw); display: grid; gap: 8px; animation: pop 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.invite-stack { position: fixed; top: 14px; right: 14px; z-index: 300; display: grid; gap: 8px; width: min(360px, 92vw); }
+.invite-toast { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 14px; overflow: hidden; border-color: var(--rose); background: #fff8f0; animation: pop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.invite-toast.error { border-color: #d9556b; justify-content: space-between; }
+.invite-face .sprite-preview { width: 36px; height: 57px; margin: 0; }
+.invite-text { display: grid; flex: 1; min-width: 0; font-size: 0.9rem; color: var(--ink); line-height: 1.25; }
+.invite-text small { color: var(--ink-soft); }
+.invite-actions { display: flex; gap: 6px; }
+.invite-timer { position: absolute; left: 0; bottom: 0; height: 4px; width: 100%; background: var(--rose); transform-origin: left; animation: invite-drain linear forwards; }
+@keyframes invite-drain { to { transform: scaleX(0); } }

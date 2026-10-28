@@ -9,6 +9,9 @@ export class Net {
     this.wantLobby = false;
     this.closed = false;
     this.problem = '';
+    this.online = []; // everyone else who has the game open
+    this.identity = null;
+    this.roomCode = null;
     this.connect();
   }
 
@@ -37,6 +40,7 @@ export class Net {
     ws.onopen = () => {
       this.setStatus('online');
       if (this.wantLobby) this.send({ t: 'lobby' });
+      if (this.identity) this.send({ t: 'identify', ...this.identity });
     };
     ws.onmessage = (e) => {
       let m;
@@ -46,6 +50,8 @@ export class Net {
         return;
       }
       if (m.t === 'rooms') this.rooms = m.rooms;
+      if (m.t === 'online') this.online = m.players;
+      if (m.t === 'joined') this.roomCode = m.room.code;
       if (m.t === 'hello') this.lan = m.lan || [];
       this.emit(m);
     };
@@ -120,7 +126,20 @@ export class Net {
     return this.request({ t: 'join', code, player });
   }
 
+  setIdentity(p) {
+    this.identity = { name: p?.name || 'Friend', hero: p?.hero || 'adam' };
+    this.send({ t: 'identify', ...this.identity });
+  }
+
+  // ask a player to join the room we are in
+  invite(toId) {
+    if (!this.roomCode) return false;
+    this.send({ t: 'invite', to: toId });
+    return true;
+  }
+
   leave() {
+    this.roomCode = null;
     this.send({ t: 'leave' });
   }
 

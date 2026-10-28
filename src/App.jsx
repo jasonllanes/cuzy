@@ -8,6 +8,7 @@ import { cloudOn, rawClient, store } from './game/store';
 import MainMenu from './components/MainMenu';
 import GameView from './components/GameView';
 import WaitingRoom from './components/WaitingRoom';
+import InviteToasts from './components/InviteToasts';
 
 const PROFILE_KEY = 'cuzi-profile';
 
@@ -47,6 +48,7 @@ export default function App() {
   const [playing, setPlaying] = useState(() => new URLSearchParams(window.location.search).has('play'));
   const [session, setSession] = useState(null); // set while inside a multiplayer room
   const [lobby, setLobby] = useState(false); // true while the room is waiting for its host to press Start
+  const [invites, setInvites] = useState([]); // pop-up invitations from other players
   const netRef = useRef(null);
   // with Supabase configured, rooms run on it (works on GitHub Pages); otherwise on the local room server (npm run dev)
   if (!netRef.current) netRef.current = cloudOn ? new SupaNet(rawClient) : new Net();
@@ -59,6 +61,21 @@ export default function App() {
       setAssets(a);
     }, setError);
   }, []);
+
+  // who we are, for the "players online" list everyone can see
+  useEffect(() => {
+    net.setIdentity?.({ name: profile.name.trim() || 'Friend', hero: profile.cozyHero || profile.hero });
+  }, [net, profile.name, profile.hero, profile.cozyHero]);
+
+  // an invitation arrives, wherever we are; it fades after a while on its own
+  useEffect(
+    () =>
+      net.on((m) => {
+        if (m.t !== 'invite') return;
+        setInvites((list) => [...list.filter((i) => !(i.from.id === m.from.id && i.code === m.code)), { ...m, key: Math.random() }].slice(-3));
+      }),
+    [net],
+  );
 
   // a won round sends everyone back to the room's waiting area
   useEffect(
@@ -134,6 +151,19 @@ export default function App() {
     }
   };
 
+  const dismissInvite = (key) => setInvites((list) => list.filter((i) => i.key !== key));
+
+  // "Join" on an invitation: leave whatever we are doing and go to that room
+  const joinInvite = async (invite) => {
+    dismissInvite(invite.key);
+    try {
+      const joined = await net.join(invite.code, { name: profile.name.trim() || 'Friend', hero: profile.cozyHero || profile.hero });
+      enterRoom(profile, joined);
+    } catch (err) {
+      setInvites((list) => [...list, { key: Math.random(), error: err.message }]);
+    }
+  };
+
   const exit = () => {
     if (session) net.leave();
     setSession(null);
@@ -146,13 +176,18 @@ export default function App() {
   if (error) return <div className="splash">Oh no, something went wrong loading the meadow. ({error.message})</div>;
   if (!assets) return <div className="splash"><span className="splash-dot" /> Gathering acorns…</div>;
 
+  let screen;
   if (playing && session && lobby) {
-    return <WaitingRoom assets={assets} net={net} session={session} profile={profile} onStart={startRound} onLeave={exit} />;
+    screen = <WaitingRoom assets={assets} net={net} session={session} profile={profile} onStart={startRound} onLeave={exit} />;
+  } else if (playing) {
+    screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} />;
+  } else {
+    screen = <MainMenu assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }
-
-  return playing ? (
-    <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} />
-  ) : (
-    <MainMenu assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />
+  return (
+    <>
+      {screen}
+      <InviteToasts invites={invites} assets={assets} onJoin={joinInvite} onDismiss={dismissInvite} />
+    </>
   );
 }

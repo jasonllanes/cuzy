@@ -89,6 +89,10 @@ export class SupaNet {
     this.closed = false;
     this.me = newId();
     this.sb = null;
+    this.online = []; // everyone else who has the game open: { id, name, hero, room, roomName }
+    this.identity = { name: 'Friend', hero: 'adam' };
+    this.lobbyCh = null;
+    this.lobbyReady = false;
     this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0 };
     this.resetRoom();
     this.connect();
@@ -96,6 +100,10 @@ export class SupaNet {
 
   get offlineText() {
     return "Can't reach Supabase. Check your internet connection and the VITE_SUPABASE_* values in .env.";
+  }
+
+  get roomCode() {
+    return this.code;
   }
 
   get isHost() {
@@ -128,6 +136,64 @@ export class SupaNet {
   async connect() {
     this.sb = await this.getClient();
     this.setStatus(this.sb ? 'online' : 'offline');
+    if (this.sb) this.openLobbyChannel();
+  }
+
+  // ---------- who is online, and invites ----------
+  // One channel that every browser with the game open joins. Presence is the "players online" list, and an
+  // invite is a broadcast addressed to one player; it reaches them wherever they are (menu, waiting room, in a game).
+
+  openLobbyChannel() {
+    if (this.lobbyCh || !this.sb) return;
+    const ch = this.sb.channel('cuzy-lobby', { config: { broadcast: { self: false }, presence: { key: this.me } } });
+    this.lobbyCh = ch;
+    ch.on('broadcast', { event: 'invite' }, ({ payload }) => this.onInvite(payload));
+    for (const event of ['sync', 'join', 'leave']) ch.on('presence', { event }, () => this.refreshOnline());
+    ch.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        this.lobbyReady = true;
+        this.trackLobby();
+      }
+    });
+  }
+
+  // tell everyone who we are and where we are
+  trackLobby() {
+    if (!this.lobbyCh || !this.lobbyReady) return;
+    this.lobbyCh.track({ id: this.me, ...this.identity, room: this.code || null, roomName: this.cfg?.name || '', at: Date.now() }).catch?.(() => {});
+  }
+
+  setIdentity(p) {
+    this.identity = { name: clean(p?.name, 14) || 'Friend', hero: clean(p?.hero, 32) || 'adam' };
+    this.trackLobby();
+  }
+
+  refreshOnline() {
+    if (!this.lobbyCh) return;
+    const players = [];
+    for (const [key, metas] of Object.entries(this.lobbyCh.presenceState())) {
+      const m = metas[0];
+      if (m && key !== this.me && m.id) players.push({ id: m.id, name: m.name, hero: m.hero, room: m.room || null, roomName: m.roomName || '' });
+    }
+    players.sort((a, b) => a.name.localeCompare(b.name));
+    this.online = players;
+    this.emit({ t: 'online', players });
+  }
+
+  // ask a player to join the room we are in
+  invite(toId) {
+    if (!this.lobbyCh || !this.code) return false;
+    this.lobbyCh.send({
+      type: 'broadcast',
+      event: 'invite',
+      payload: { to: toId, from: { id: this.me, name: this.identity.name, hero: this.identity.hero }, code: this.code, roomName: this.cfg?.name || '' },
+    }).catch?.(() => {});
+    return true;
+  }
+
+  onInvite(p) {
+    if (!p || p.to !== this.me || !p.code || !p.from) return;
+    this.emit({ t: 'invite', from: { id: p.from.id, name: clean(p.from.name, 14), hero: clean(p.from.hero, 32) }, code: clean(p.code, 8).toUpperCase(), roomName: clean(p.roomName, 24) });
   }
 
   setStatus(status) {
@@ -240,6 +306,7 @@ export class SupaNet {
     this.started = false;
     const slot = await this.subscribe(code, me, true);
     this.startHeartbeat();
+    this.trackLobby();
     return this.joinedMessage(slot);
   }
 
@@ -273,6 +340,7 @@ export class SupaNet {
       await this.leave();
       throw new Error('That room is full.');
     }
+    this.trackLobby();
     return this.joinedMessage(slot);
   }
 
@@ -366,11 +434,13 @@ export class SupaNet {
       /* leaving is best effort */
     }
     this.resetRoom();
+    this.trackLobby(); // back to "not in a room"
   }
 
   close() {
     this.closed = true;
     this.stopLobby();
+    this.lobbyCh && this.sb?.removeChannel(this.lobbyCh);
     return this.leave();
   }
 

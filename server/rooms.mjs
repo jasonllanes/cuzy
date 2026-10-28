@@ -122,6 +122,12 @@ export function attachRoomServer(httpServer) {
     }, CELEBRATE_MS);
   };
 
+  // everyone with the game open, so players can see each other and invite one another anywhere
+  const pushOnline = () => {
+    const list = [...clients].filter((c) => c.identified).map((c) => ({ id: c.id, name: c.player.name, hero: c.player.hero, room: c.room?.code || null, roomName: c.room?.name || '' }));
+    for (const c of clients) if (c.identified) send(c, { t: 'online', players: list.filter((p) => p.id !== c.id) });
+  };
+
   const pushLobby = () => {
     const list = [...rooms.values()].map(summary);
     for (const c of clients) if (c.lobby && !c.room) send(c, { t: 'rooms', rooms: list });
@@ -151,6 +157,7 @@ export function attachRoomServer(httpServer) {
       sendScores(room);
     }
     pushLobby();
+    pushOnline();
   };
 
   const enter = (ws, room) => {
@@ -181,9 +188,23 @@ export function attachRoomServer(httpServer) {
     sendTeams(room);
     sendScores(room);
     pushLobby();
+    pushOnline();
   };
 
   const handlers = {
+    // who this client is (shown in everyone's online list)
+    identify(ws, m) {
+      ws.player = { name: clean(m.name, 14) || 'Friend', hero: clean(m.hero, 32) || 'adam' };
+      ws.identified = true;
+      pushOnline();
+    },
+    // ask another player to join the room we are in
+    invite(ws, m) {
+      if (!ws.room) return;
+      const target = [...clients].find((c) => c.id === Number(m.to));
+      if (!target || target === ws) return;
+      send(target, { t: 'invite', from: { id: ws.id, name: ws.player.name, hero: ws.player.hero }, code: ws.room.code, roomName: ws.room.name });
+    },
     lobby(ws) {
       ws.lobby = true;
       send(ws, { t: 'rooms', rooms: [...rooms.values()].map(summary) });
@@ -411,6 +432,7 @@ export function attachRoomServer(httpServer) {
     ws.on('close', () => {
       leaveRoom(ws);
       clients.delete(ws);
+      pushOnline();
     });
   });
 
