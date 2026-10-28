@@ -19,12 +19,20 @@ const NAMES = [
   ...APOC_KEYS.map((k) => `apoc/${k}`),
 ];
 
-const load = (name) =>
+// A static host can answer a burst of ~150 image requests with the odd 503, so a failed image is retried a few times
+const load = (name, attempt = 0) =>
   new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve([name, img]);
-    img.onerror = () => reject(new Error(`Could not load ${name}`));
-    img.src = `${import.meta.env.BASE_URL}assets/${name}.png`;
+    img.onerror = () => {
+      if (attempt >= 4) {
+        reject(new Error(`Could not load ${name}`));
+        return;
+      }
+      setTimeout(() => load(name, attempt + 1).then(resolve, reject), 400 * (attempt + 1));
+    };
+    // after a failure ask again with a throwaway query so a cached error is not reused
+    img.src = `${import.meta.env.BASE_URL}assets/${name}.png${attempt ? `?retry=${attempt}` : ''}`;
   });
 
 // The pack only ships a grass tileset, so we tint it into a warm sand twin
