@@ -8,6 +8,7 @@ import { ALLIES } from './allies';
 import { Bots } from './bots';
 import { Streaks } from './streaks';
 import { sfx } from './sfx';
+import { store } from './store';
 import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, emptyUpgrades, upgradeCost } from './upgrades';
 
 // how far above the feet a hero's name tag floats; the villager is shorter than the others
@@ -66,7 +67,7 @@ const saveKey = (seed) => `cuzi-save:${seed}`;
 
 function readSave(seed) {
   try {
-    return JSON.parse(localStorage.getItem(saveKey(seed))) || null;
+    return JSON.parse(store.get(saveKey(seed))) || null;
   } catch {
     return null;
   }
@@ -340,7 +341,7 @@ export class Game {
   save() {
     if (this.wave) return; // wave runs are one-off
     try {
-      localStorage.setItem(
+      store.set(
         saveKey(this.world.seedStr),
         JSON.stringify({
           x: this.player.x,

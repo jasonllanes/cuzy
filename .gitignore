@@ -1,5 +1,8 @@
 # dependencies and build output
 node_modules/
+.env
+.env.*
+!.env.example
 dist/
 *.log
 
@@ -8,6 +11,8 @@ dist/
 # actually loads live in public/assets and are committed.
 /*
 !/.gitignore
+!/.env.example
+!/supabase/
 !/README.md
 !/index.html
 !/package.json

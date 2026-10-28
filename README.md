@@ -11,8 +11,25 @@ npm run deploy    # builds, then publishes dist/ to the gh-pages branch (GitHub 
 
 On GitHub: **Settings → Pages → Deploy from a branch → `gh-pages` / root**.
 
-GitHub Pages only hosts static files, so the deployed site runs solo modes; multiplayer rooms need
-`npm run dev` (or `npm run preview`) running on a machine your friends can reach.
+GitHub Pages only hosts static files, so online rooms there run on Supabase (below). `npm run deploy` reads your local
+`.env` while building, so keep the Supabase values in it.
+
+## Supabase: cloud saves and online rooms
+
+With `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` (copy `.env.example`), Cuzy uses Supabase for two things:
+
+- **Cloud saves.** Your profile and saved games stay in `localStorage` and are also uploaded, so they come back
+  on the next visit. Each browser is an anonymous Supabase user (turn on **Authentication → Providers → Anonymous
+  sign-ins**); saves follow that browser, not a person. Sign-in with an account would be the next step.
+- **Multiplayer rooms.** The lobby list is the `rooms` table, and everything inside a room travels over Supabase
+  Realtime. The room host's browser does the referee's job (scores, winner, start, settings); if the host leaves,
+  the longest-serving player takes over. This works on GitHub Pages, no room server needed.
+
+Setup: run `supabase/schema.sql` once in the Supabase SQL Editor (it is safe to run again), then restart `npm run dev`.
+
+Without those variables the game falls back to `localStorage` and the local room server that `npm run dev` runs
+(friends on the same Wi-Fi can join it). The rooms table is open to anyone holding the public key, which is fine
+for playing with friends; tighten the policies before anything more serious.
 
 Art credits: Sunnyside World, Super Retro World Character Pack (Gif, Noiracide, Romi), the ENEMY pack
 and the Apocalypse pack. See `public/assets/retro/LICENCE.txt` and check each pack's licence

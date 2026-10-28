@@ -19,13 +19,13 @@ const STEPS = [
 ];
 
 function useLobby(net) {
-  const [state, setState] = useState({ status: net.status, rooms: net.rooms });
+  const [state, setState] = useState({ status: net.status, rooms: net.rooms, problem: net.problem });
   useEffect(() => {
     const off = net.on((m) => {
-      if (m.t === 'rooms' || m.t === 'status') setState({ status: net.status, rooms: net.rooms });
+      if (m.t === 'rooms' || m.t === 'status') setState({ status: net.status, rooms: net.rooms, problem: net.problem });
     });
     net.watchLobby();
-    setState({ status: net.status, rooms: net.rooms });
+    setState({ status: net.status, rooms: net.rooms, problem: net.problem });
     return off;
   }, [net]);
   return state;
@@ -84,7 +84,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const [difficulty, setDifficulty] = useState(DIFFICULTY[initial.difficulty] ? initial.difficulty : 'medium');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const { status, rooms } = useLobby(net);
+  const { status, rooms, problem } = useLobby(net);
 
   // `hero` is what the game uses; the other picks are remembered so switching game type does not lose them
   const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed, mode: gameMode, difficulty, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
@@ -131,8 +131,16 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
         }),
     );
   const soloRoom = gameMode === 'free' && !vsAi && status === 'online';
-  const createSolo = () =>
-    run(net.create({ name: `${myName()}'s meadow`, seed: seed.trim() || 'sunny-meadow-101', max: 4, pvp: true, mode: 'free', difficulty, winBy, allowLate: true, player: { name: myName(), hero: activeHeroId } }));
+  const createSolo = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      onEnterRoom(profile(), await net.create({ name: `${myName()}'s meadow`, seed: seed.trim() || 'sunny-meadow-101', max: 4, pvp: true, mode: 'free', difficulty, winBy, allowLate: true, player: { name: myName(), hero: activeHeroId } }));
+    } catch {
+      // no room available (offline, or the rooms table is not set up): just play
+      onBegin(profile());
+    }
+  };
   const join = (c) => run(net.join(c, { name: myName(), hero: activeHeroId }));
 
   const online = status === 'online';
@@ -497,9 +505,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
 
             {mode === 'together' && (
               <div className="together">
+                {online && problem && <div className="notice error">{problem}</div>}
                 {!online && (
                   <div className="notice">
-                    {status === 'connecting' ? 'Connecting to the room server…' : 'Room server not reachable. Start the game with `npm run dev` and open it from there.'}
+                    {status === 'connecting' ? 'Connecting to the room server…' : net.offlineText}
                   </div>
                 )}
                 {error && <div className="notice error">{error}</div>}

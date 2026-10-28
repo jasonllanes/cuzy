@@ -50,5 +50,7 @@
 /* after skipping: black, until the others have arrived */
 .intro-wait { position: absolute; inset: 0; z-index: 60; background: #000; color: #f6ecd8; display: grid; place-content: center; gap: 8px; text-align: center; font: 700 1.6rem var(--pixel); }
 .intro-wait small { font: 400 0.9rem var(--body); opacity: 0.6; }
+/* the words only appear if the wait is more than a blink (when everyone skips, the game starts at once) */
+.intro-wait > * { animation: intro-in 0.4s 0.8s backwards; }
 .intro-fade { position: absolute; inset: 0; z-index: 60; background: #000; pointer-events: none; animation: fade-out 0.7s ease-out forwards; }
 @keyframes fade-out { to { opacity: 0; } }

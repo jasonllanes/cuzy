@@ -3,6 +3,8 @@ import { loadAssets } from './game/assets';
 import { retroId } from './game/heroes';
 import { sfx } from './game/sfx';
 import { Net } from './game/net';
+import { SupaNet } from './game/supaNet';
+import { cloudOn, rawClient, store } from './game/store';
 import MainMenu from './components/MainMenu';
 import GameView from './components/GameView';
 import WaitingRoom from './components/WaitingRoom';
@@ -12,7 +14,7 @@ const PROFILE_KEY = 'cuzi-profile';
 function initialProfile() {
   let saved = {};
   try {
-    saved = JSON.parse(localStorage.getItem(PROFILE_KEY)) || {};
+    saved = JSON.parse(store.get(PROFILE_KEY)) || {};
   } catch {
     /* ignore */
   }
@@ -46,11 +48,16 @@ export default function App() {
   const [session, setSession] = useState(null); // set while inside a multiplayer room
   const [lobby, setLobby] = useState(false); // true while the room is waiting for its host to press Start
   const netRef = useRef(null);
-  if (!netRef.current) netRef.current = new Net();
+  // with Supabase configured, rooms run on it (works on GitHub Pages); otherwise on the local room server (npm run dev)
+  if (!netRef.current) netRef.current = cloudOn ? new SupaNet(rawClient) : new Net();
   const net = netRef.current;
 
   useEffect(() => {
-    loadAssets().then(setAssets, setError);
+    // the cloud copy of your profile and saves is pulled in while the art loads (it gives up after a few seconds)
+    Promise.all([loadAssets(), store.sync()]).then(([a]) => {
+      setProfile(initialProfile());
+      setAssets(a);
+    }, setError);
   }, []);
 
   // a won round sends everyone back to the room's waiting area
@@ -68,7 +75,7 @@ export default function App() {
     const next = { ...p, name: p.name.trim() || 'Friend', seed: p.seed.trim() || 'sunny-meadow-101' };
     setProfile(next);
     try {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(next));
+      store.set(PROFILE_KEY, JSON.stringify(next));
     } catch {
       /* ignore */
     }
@@ -78,7 +85,7 @@ export default function App() {
   // every new game starts clean: drop whatever was saved for this seed (backpack, shop upgrades, spot in the world)
   const wipeSave = (seed) => {
     try {
-      localStorage.removeItem(`cuzi-save:${seed}`);
+      store.remove(`cuzi-save:${seed}`);
     } catch {
       /* storage may be unavailable */
     }

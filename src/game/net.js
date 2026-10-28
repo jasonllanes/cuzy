@@ -8,7 +8,12 @@ export class Net {
     this.listeners = new Set();
     this.wantLobby = false;
     this.closed = false;
+    this.problem = '';
     this.connect();
+  }
+
+  get offlineText() {
+    return 'Room server not reachable. Start the game with `npm run dev` and open it from there.';
   }
 
   get url() {
