@@ -803,3 +803,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .recruit-chip.hire { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .recruit-chip.hire span { display: grid; gap: 1px; }
 .recruit-list:has(.hire) { display: grid; gap: 6px; margin-top: 8px; }
+
+/* teams */
+.team-chips { display: flex; gap: 4px; margin-top: 4px; }
+.team-chip { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 3px solid transparent; background: #fff; font-size: 0.8rem; line-height: 1; cursor: pointer; opacity: 0.55; }
+.team-chip.on { border-color: var(--team); opacity: 1; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--team); }
+.team-chip:disabled { cursor: default; }
+.team-row { background: color-mix(in srgb, var(--team) 22%, #fff3df); font-weight: 700; }

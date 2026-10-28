@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { heroById } from '../game/heroes';
+import { TEAMS, TEAM_COUNTS } from '../game/teams';
 import { inviteLink } from '../game/net';
 import SpritePreview from './SpritePreview';
 import WorldBackdrop from './WorldBackdrop';
@@ -51,6 +52,12 @@ function RoomSettings({ room, count, editable, onChange }) {
         <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
         {free && (
           <>
+            <div className="set-row">
+              <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score. Pick your team on your card.' : 'Free for all: everyone for themselves'}</small></div>
+              <select value={room.teams || 0} disabled={locked} onChange={(e) => onChange({ teams: Number(e.target.value) })}>
+                {TEAM_COUNTS.map((n) => <option key={n} value={n}>{n ? `${n} teams` : 'Free for all'}</option>)}
+              </select>
+            </div>
             <Switch label="Player damage" hint="Heroes can hurt each other" on={!!room.pvp} disabled={locked} onChange={(v) => onChange({ pvp: v })} />
             <Switch label="Allow melee" hint="Sword, dash and spiral" on={room.allowMelee !== false} disabled={locked} onChange={(v) => onChange({ allowMelee: v })} />
             <Switch label="Allow throwing" hint="Right-click throws" on={room.allowThrow !== false} disabled={locked} onChange={(v) => onChange({ allowThrow: v })} />
@@ -79,6 +86,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
   const [room, setRoom] = useState(session.room); // the host's settings, kept up to date
   const [peers, setPeers] = useState(() => [{ id: you, name: profile.name, hero: profile.hero, slot: session.slot }, ...session.players]);
   const [host, setHost] = useState(session.host);
+  const [teams, setTeams] = useState(() => ({ ...(session.teams || {}), ...Object.fromEntries(session.players.filter((p) => p.team !== null && p.team !== undefined).map((p) => [p.id, p.team])) }));
   const [copied, setCopied] = useState('');
   const [lan] = useState(() => net.lan);
 
@@ -87,6 +95,9 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
       net.on((m) => {
         if (m.t === 'peer_join') {
           setPeers((p) => [...p.filter((x) => x.id !== m.player.id), m.player]);
+          if (m.player.team !== null && m.player.team !== undefined) setTeams((t) => ({ ...t, [m.player.id]: m.player.team }));
+        } else if (m.t === 'teams') {
+          setTeams(m.teams || {});
         } else if (m.t === 'peer_leave') {
           setPeers((p) => p.filter((x) => x.id !== m.id));
           if (m.host != null) setHost(m.host);
@@ -139,11 +150,28 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           {ordered.map((p) => {
             const hero = heroById(p.hero);
             return (
-              <div className={`wait-slot ${p.id === you ? 'me' : ''}`} key={p.id}>
+              <div className={`wait-slot ${p.id === you ? 'me' : ''}`} key={p.id} style={room.teams > 0 && TEAMS[teams[p.id]] ? { borderColor: TEAMS[teams[p.id]].color } : undefined}>
                 {p.id === host && <span className="wait-badge">👑 Host</span>}
                 <SpritePreview img={assets.img} hero={hero} active />
                 <b className="wait-name">{p.name}{p.id === you ? ' (you)' : ''}</b>
                 <small>{hero.label}</small>
+                {room.teams > 0 && (
+                  <div className="team-chips" role="group" aria-label={`${p.name}'s team`}>
+                    {TEAMS.slice(0, room.teams).map((t, i) => (
+                      <button
+                        key={t.name}
+                        type="button"
+                        className={`team-chip ${teams[p.id] === i ? 'on' : ''}`}
+                        style={{ '--team': t.color }}
+                        disabled={p.id !== you}
+                        title={p.id === you ? `Join the ${t.name} team` : `${p.name}'s team`}
+                        onClick={() => net.send({ t: 'team', team: i })}
+                      >
+                        {t.icon}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

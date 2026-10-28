@@ -9,6 +9,8 @@
 //
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
+import { TEAMS, TEAM_COUNTS } from './teams.js';
+
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
 const START_HOUR = 8;
@@ -28,7 +30,7 @@ const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'streakMonsters'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'streakMonsters', 'teams'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -53,6 +55,7 @@ const rowToSummary = (r) => ({
   allowThrow: r.allow_throw,
   allowMelee: r.allow_melee,
   streakMonsters: r.streak_monsters,
+  teams: r.teams || 0,
   count: r.count,
   started: r.started,
   host: r.host_name,
@@ -71,6 +74,7 @@ const cfgToRow = (cfg) => ({
   allow_throw: cfg.allowThrow,
   allow_melee: cfg.allowMelee,
   streak_monsters: cfg.streakMonsters,
+  teams: cfg.teams || 0,
 });
 
 export class SupaNet {
@@ -104,6 +108,7 @@ export class SupaNet {
     this.cfg = null;
     this.members = new Map(); // id -> { id, name, hero, slot, at }
     this.posOf = new Map(); // id -> last known position
+    this.teamMap = {}; // id -> team number (the host decides; everyone keeps a copy)
     this.hostId = null;
     this.started = false;
     this.winning = false;
@@ -182,7 +187,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, streakMonsters, target, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, streakMonsters, teams, target, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -201,6 +206,7 @@ export class SupaNet {
       allowThrow: allowThrow !== false,
       allowMelee: allowMelee !== false,
       streakMonsters: streakMonsters === true,
+      teams: free && [2, 3, 4].includes(Number(teams)) ? Number(teams) : 0, // 0 = free for all
       allowLate: allowLate !== false,
     };
     cfg.target = clampTarget(target, defaultTarget(cfg.winBy));
@@ -304,6 +310,7 @@ export class SupaNet {
     while (taken.has(slot)) slot++;
     const meta = { id: this.me, name: me.name, hero: me.hero, slot, at: Date.now() };
     this.members.set(this.me, meta);
+    if (creator) this.assignTeam(this.me);
     await ch.track(meta);
     if (!creator && !this.members.has(this.hostId)) this.hostId = this.electHost();
     this.syncing = false;
@@ -328,6 +335,7 @@ export class SupaNet {
       slot,
       host: this.hostId,
       room: this.summary(),
+      teams: { ...this.teamMap },
       players: [...this.members.values()].filter((m) => m.id !== this.me).map((m) => this.publicPlayer(m)),
       scores: this.scoreList(),
       clock: { hour: hours % 24, day: 1 + Math.floor(hours / 24) },
@@ -369,11 +377,11 @@ export class SupaNet {
   // ---------- who is here ----------
 
   publicPlayer(m) {
-    return { id: m.id, slot: m.slot, name: m.name, hero: m.hero, ...(this.posOf.get(m.id) || { x: 0, y: 0, dir: 'down', moving: false, hp: 6 }) };
+    return { id: m.id, slot: m.slot, team: this.teamMap[m.id] ?? null, name: m.name, hero: m.hero, ...(this.posOf.get(m.id) || { x: 0, y: 0, dir: 'down', moving: false, hp: 6 }) };
   }
 
   scoreList() {
-    return [...this.members.values()].map((m) => ({ id: m.id, name: m.name, kills: this.kills.get(m.id) || 0 }));
+    return [...this.members.values()].map((m) => ({ id: m.id, name: m.name, kills: this.kills.get(m.id) || 0, team: this.teamMap[m.id] ?? null }));
   }
 
   summary() {
@@ -397,8 +405,10 @@ export class SupaNet {
       if (!m.id || m.id === this.me || this.members.has(m.id)) continue;
       this.members.set(m.id, m);
       if (this.syncing) continue;
+      if (this.isHost) this.assignTeam(m.id);
       this.emit({ t: 'peer_join', player: this.publicPlayer(m) });
       if (this.isHost) {
+        this.sendTeams();
         this.sendScores();
         this.touchRow();
       }
@@ -411,6 +421,7 @@ export class SupaNet {
       if (!m.id || m.id === this.me || !this.members.has(m.id)) continue;
       this.members.delete(m.id);
       this.kills.delete(m.id);
+      delete this.teamMap[m.id];
       const wasHost = m.id === this.hostId;
       if (wasHost) this.hostId = this.electHost();
       this.emit({ t: 'peer_leave', id: m.id, name: m.name, host: this.hostId });
@@ -474,6 +485,7 @@ export class SupaNet {
         break;
       case 'hit': {
         if (!this.cfg.pvp || String(m.target) === this.me) return;
+        if (this.cfg.teams && this.teamMap[String(m.target)] === this.teamMap[this.me]) return; // no friendly fire
         const dmg = Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
         this.bcast({ t: 'hit', to: String(m.target), from: this.me, dmg, fx: this.pos.x, fy: this.pos.y });
         break;
@@ -485,6 +497,7 @@ export class SupaNet {
       case 'ready':
       case 'settings':
       case 'mkill':
+      case 'team':
         this.request(m.t, m);
         break;
       case 'fell':
@@ -509,6 +522,7 @@ export class SupaNet {
       case 'fx':
         if (m.kind === 'swing') this.bcast({ t: 'fx', id: this.me, kind: 'swing', a: num(m.a) });
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
+        else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
         else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) });
         break;
       case 'leave':
@@ -528,6 +542,7 @@ export class SupaNet {
       hidden: !!m.hidden,
       hp: Math.max(0, Math.min(12, Math.round(Number(m.hp) || 0))),
       lv: Math.max(1, Math.min(9, Math.round(Number(m.lv)) || 1)), // sword level, shown next to the health bar
+      mt: m.mt === 'chicken' || m.mt === 'cow' ? m.mt : '', // what they are riding
     };
     const wait = this.lastState + STATE_MS - Date.now();
     if (wait <= 0) this.flushState();
@@ -546,7 +561,7 @@ export class SupaNet {
 
   // a request for the host (a message of its own kind, so it is never mistaken for an announcement)
   request(r, m = {}) {
-    const msg = { r, to: 'host', from: this.me, ...m };
+    const msg = { req: r, to: 'host', from: this.me, ...m };
     delete msg.t;
     if (this.isHost) this.handleRequest(msg);
     else this.bcast(msg);
@@ -555,7 +570,7 @@ export class SupaNet {
   // anything that arrives from the channel (or from ourselves, via out())
   receive(m) {
     if (!m || typeof m !== 'object') return;
-    if (m.r) {
+    if (m.req) {
       if (this.isHost && m.from !== this.me) this.handleRequest(m);
       return;
     }
@@ -574,12 +589,20 @@ export class SupaNet {
         this.winning = false;
         this.t0 = Date.now();
         this.cfg = pickCfg(msg.room);
+        if (msg.teams) this.teamMap = { ...msg.teams };
         this.emit({ ...msg, players: msg.players.filter((p) => p.id !== this.me) });
         return;
       case 'lobby':
         this.started = false;
         this.winning = false;
         this.cfg = pickCfg(msg.room);
+        if (msg.teams) this.teamMap = { ...msg.teams };
+        break;
+      case 'teams':
+        this.teamMap = { ...msg.teams };
+        break;
+      case 'hit':
+        if (this.cfg?.teams && this.teamMap[msg.from] === this.teamMap[this.me]) return; // no friendly fire
         break;
       case 'settings':
         this.cfg = pickCfg(msg.room);
@@ -605,7 +628,7 @@ export class SupaNet {
   handleRequest(m) {
     const from = m.from;
     if (!this.members.has(from) && from !== this.me) return;
-    switch (m.r) {
+    switch (m.req) {
       case 'start':
         return this.hStart(from);
       case 'settings':
@@ -616,8 +639,51 @@ export class SupaNet {
         return this.hDied(from, m);
       case 'mkill':
         return this.hMkill(from);
+      case 'team':
+        return this.hTeam(from, m);
       default:
     }
+  }
+
+  // ---- teams: a room is free for all (teams = 0) or split into 2-4 teams ----
+  sendTeams() {
+    this.out({ t: 'teams', teams: { ...this.teamMap } });
+  }
+
+  // a newcomer joins the smallest team
+  assignTeam(id) {
+    const n = this.cfg.teams;
+    if (!n) {
+      delete this.teamMap[id];
+      return;
+    }
+    const counts = Array(n).fill(0);
+    for (const [pid, t] of Object.entries(this.teamMap)) if (pid !== id && this.members.has(pid) && t < n) counts[t]++;
+    this.teamMap[id] = counts.indexOf(Math.min(...counts));
+  }
+
+  reassignAll() {
+    this.teamMap = {};
+    if (!this.cfg.teams) return;
+    let i = 0;
+    for (const id of this.members.keys()) this.teamMap[id] = i++ % this.cfg.teams;
+  }
+
+  // what a win is counted on: your own kills, or your whole team's
+  scoreOf(id) {
+    const t = this.teamMap[id];
+    if (!this.cfg.teams || t === undefined) return this.kills.get(id) || 0;
+    let sum = 0;
+    for (const pid of this.members.keys()) if (this.teamMap[pid] === t) sum += this.kills.get(pid) || 0;
+    return sum;
+  }
+
+  // a player picks their own team in the waiting room
+  hTeam(from, m) {
+    const n = Number(m.team);
+    if (this.started || !this.cfg.teams || !Number.isInteger(n) || n < 0 || n >= this.cfg.teams) return;
+    this.teamMap[from] = n;
+    this.sendTeams();
   }
 
   sendScores() {
@@ -648,12 +714,14 @@ export class SupaNet {
     if (this.started || from !== this.hostId) return;
     this.started = true;
     this.winning = false;
+    for (const id of this.members.keys()) if (this.cfg.teams && this.teamMap[id] === undefined) this.assignTeam(id);
     this.openIntro();
     this.t0 = Date.now();
     this.kills = new Map();
     this.out({
       t: 'start',
       room: this.summary(),
+      teams: { ...this.teamMap },
       host: this.hostId,
       players: [...this.members.values()].map((m) => this.publicPlayer(m)),
       scores: this.scoreList(),
@@ -674,6 +742,10 @@ export class SupaNet {
       if (typeof m.streakMonsters === 'boolean') cfg.streakMonsters = m.streakMonsters;
       if (Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
       if (free) {
+        if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
+          cfg.teams = Number(m.teams);
+          this.reassignAll();
+        }
         if (typeof m.pvp === 'boolean') cfg.pvp = m.pvp;
         if (m.winBy === 'duel' || m.winBy === 'monsters') cfg.winBy = m.winBy;
         if (m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
@@ -681,6 +753,7 @@ export class SupaNet {
       }
     }
     this.out({ t: 'settings', room: this.summary() });
+    this.sendTeams();
     this.touchRow(cfgToRow(cfg));
   }
 
@@ -706,7 +779,7 @@ export class SupaNet {
     if (cfg.winBy === 'monsters') return;
     const n = (this.kills.get(killer.id) || 0) + 1;
     this.kills.set(killer.id, n);
-    if (n >= cfg.target) this.finishRound(killer.id);
+    if (this.scoreOf(killer.id) >= cfg.target) this.finishRound(killer.id);
     this.sendScores();
   }
 
@@ -717,13 +790,14 @@ export class SupaNet {
     const n = (this.kills.get(from) || 0) + 1;
     this.kills.set(from, n);
     this.sendScores();
-    if (n >= cfg.target) this.finishRound(from);
+    if (this.scoreOf(from) >= cfg.target) this.finishRound(from);
   }
 
   // a player reached the target: cheer them, then send everyone back to the waiting room
   finishRound(id) {
     this.winning = true;
-    this.out({ t: 'win', id, name: this.members.get(id)?.name || 'Someone', target: this.cfg.target });
+    const team = this.cfg.teams ? this.teamMap[id] ?? null : null;
+    this.out({ t: 'win', id, name: team !== null ? `${TEAMS[team].name} team` : this.members.get(id)?.name || 'Someone', team, target: this.cfg.target });
     clearTimeout(this.timers.back);
     this.timers.back = setTimeout(() => this.returnToLobby(), CELEBRATE_MS);
   }
@@ -734,7 +808,7 @@ export class SupaNet {
     this.winning = false;
     this.introOpen = false;
     this.kills = new Map();
-    this.out({ t: 'lobby', room: this.summary(), host: this.hostId, players: [...this.members.values()].map((m) => this.publicPlayer(m)), scores: this.scoreList() });
+    this.out({ t: 'lobby', room: this.summary(), teams: { ...this.teamMap }, host: this.hostId, players: [...this.members.values()].map((m) => this.publicPlayer(m)), scores: this.scoreList() });
     this.touchRow({ started: false });
   }
 }

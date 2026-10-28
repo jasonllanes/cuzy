@@ -316,7 +316,7 @@ export class Combat {
     this.revealT = 1.5;
     this.spin = { t: 0, dur: SPIN_DUR, a0: this.aim(), power, r: this.spinRadius(), dmg: this.spinDmg(power), hit: new Set() };
     sfx.play('dash');
-    g.mp?.net.send({ t: 'fx', kind: 'swing', a: this.spin.a0 });
+    g.mp?.net.send({ t: 'fx', kind: 'spin', a: this.spin.a0, r: this.spin.r, d: SPIN_DUR }); // others see the whirl too
   }
 
   // The blade sweeps a full circle; whatever it passes over is cut once
@@ -1033,6 +1033,7 @@ export class Combat {
 
   // fight-mode rooms only: damage another hero. They apply it to themselves when the server relays it.
   hitRemote(r, dmg) {
+    if (this.g.sameTeam(r)) return; // no friendly fire
     sfx.play('hit');
     if (r.bot) {
       this.g.bots.hurt(r, dmg, 'me', this.g.player.x, this.g.player.y);
@@ -1141,7 +1142,7 @@ export class Combat {
       }
       if (this.g.fight) {
         for (const r of this.g.remotes.values()) {
-          if (r.hidden) continue;
+          if (r.hidden || this.g.sameTeam(r)) continue;
           const ox = (p.x - r.x) / 8;
           const oy = (p.y - (r.y - 9)) / 12;
           if (ox * ox + oy * oy < 1) {
@@ -1351,8 +1352,11 @@ export class Combat {
 
   // A bright whirl: a glowing sweep that follows three big blades round the hero, inside a ring showing the reach
   drawSpin(ctx) {
-    const sp = this.spin;
-    const [cx, cy] = this.center();
+    this.drawSpinAt(ctx, ...this.center(), this.spin);
+  }
+
+  // the whirl around (cx, cy): yours, or another player's (their sp = { t, dur, a0, r })
+  drawSpinAt(ctx, cx, cy, sp) {
     const k = Math.min(1, sp.t / sp.dur);
     const swept = k * Math.PI * 2;
     const fade = k > 0.8 ? (1 - k) / 0.2 : 1;

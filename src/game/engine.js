@@ -8,6 +8,7 @@ import { ALLIES } from './allies';
 import { Bots } from './bots';
 import { Streaks } from './streaks';
 import { sfx } from './sfx';
+import { TEAMS } from './teams';
 import { store } from './store';
 import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, emptyUpgrades, upgradeCost } from './upgrades';
 
@@ -103,6 +104,9 @@ export class Game {
       : null;
     // what the room allows (everything, when playing alone)
     this.rules = { melee: session?.room?.allowMelee !== false, throw: session?.room?.allowThrow !== false };
+    // teams: who is on which team (player id -> team number); a room with teams = 0 is free for all
+    this.teamMap = { ...(session?.teams || {}) };
+    this.teamCount = this.mp ? session.room.teams || 0 : 0;
     this.remotes = new Map();
     this.myBubble = null;
     this.dead = null; // set while you are downed: { t, dur, by, last }
@@ -443,6 +447,7 @@ export class Game {
 
   celebMine() {
     const c = this.celeb;
+    if (c && c.team !== undefined) return c.team === this.myTeam();
     return !!c && (c.key === 'me' || (!!this.mp && String(c.key) === String(this.mp.you)));
   }
 
@@ -450,7 +455,7 @@ export class Game {
   celebPoint() {
     const c = this.celeb;
     if (!c) return null;
-    if (this.celebMine()) return { x: this.player.x, y: this.player.y };
+    if (c.key === 'me' || (!!this.mp && String(c.key) === String(this.mp.you))) return { x: this.player.x, y: this.player.y }; // the one who scored
     const r = this.remotes.get(c.key) ?? this.remotes.get(Number(c.key));
     return r ? { x: r.x, y: r.y } : null;
   }
@@ -1414,8 +1419,51 @@ export class Game {
       animT: 0,
       bubble: null,
       swing: null,
+      spin: null,
+      mt: p.mt || '', // what they are riding
+      variant: [...String(p.id)].reduce((n, c) => n + c.charCodeAt(0), 0) % 2, // which colour of animal
       color: this.remotes.size % PEER_COLORS.length,
     });
+    if (p.team !== undefined && p.team !== null) this.teamMap[p.id] = p.team;
+  }
+
+  // ---------- teams ----------
+
+  myTeam() {
+    return this.mp ? this.teamMap[this.mp.you] : undefined;
+  }
+
+  teamOf(r) {
+    return this.teamCount ? this.teamMap[r.id] : undefined;
+  }
+
+  sameTeam(r) {
+    const t = this.teamOf(r);
+    return t !== undefined && t !== null && t === this.myTeam();
+  }
+
+  // the colour of a player's name, ring and health bar
+  peerColor(r) {
+    const t = this.teamOf(r);
+    return t !== undefined && t !== null && TEAMS[t] ? TEAMS[t].color : PEER_COLORS[r.color];
+  }
+
+  // a coloured ring under everyone's feet in a team game
+  drawTeamRing(ctx, x, y, team) {
+    if (team === undefined || team === null || !TEAMS[team]) return;
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = TEAMS[team].color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(Math.round(x), Math.round(y), 8, 3.2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // how high another player's mount lifts them
+  remoteLift(r) {
+    return r.mt === 'cow' ? 11 : r.mt === 'chicken' ? 5 : 0;
   }
 
   onNetMessage(m) {
@@ -1423,6 +1471,9 @@ export class Game {
       this.addRemote(m.player);
     } else if (m.t === 'peer_leave') {
       this.remotes.delete(m.id);
+      delete this.teamMap[m.id];
+    } else if (m.t === 'teams') {
+      this.teamMap = { ...m.teams };
     } else if (m.t === 'state') {
       const r = this.remotes.get(m.id);
       if (!r) return;
@@ -1433,6 +1484,7 @@ export class Game {
       r.moving = m.moving;
       r.hp = m.hp;
       if (m.lv) r.lv = m.lv;
+      r.mt = m.mt || '';
       r.hidden = !!m.hidden;
     } else if (m.t === 'hit') {
       this.combat.hitByPlayer(m);
@@ -1445,6 +1497,7 @@ export class Game {
       sfx.play(m.id === this.mp.you ? 'win' : 'wave');
       // the server sends everyone back to the waiting room once the cheering is over
       this.celebrate(m.id, m.name, 6.9, 'Back to the room in a moment…');
+      if (m.team !== undefined && m.team !== null && this.celeb) this.celeb.team = m.team; // a team won: everyone on it shares the cheer
     } else if (m.t === 'fx' && m.kind === 'shield') {
       const r = this.remotes.get(m.id);
       if (r) r.shield = SHIELD_DUR;
@@ -1458,6 +1511,9 @@ export class Game {
     } else if (m.t === 'fx' && m.kind === 'swing') {
       const r = this.remotes.get(m.id);
       if (r) r.swing = { t: 0, a: m.a };
+    } else if (m.t === 'fx' && m.kind === 'spin') {
+      const r = this.remotes.get(m.id);
+      if (r) r.spin = { t: 0, dur: m.d || 0.6, a0: m.a || 0, r: Math.min(80, m.r || 40) };
     }
   }
 
@@ -1466,7 +1522,7 @@ export class Game {
     this.mp.sendT -= dt;
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
-      this.mp.net.send({ t: 'state', x: p.x, y: p.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, lv: (this.upgrades.melee || 0) + 1, hidden: this.combat.hidden });
+      this.mp.net.send({ t: 'state', x: p.x, y: p.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, lv: (this.upgrades.melee || 0) + 1, hidden: this.combat.hidden, mt: this.mount?.type || '' });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -1481,6 +1537,7 @@ export class Game {
       r.animT += dt;
       if (r.bubble && (r.bubble.t += dt) > 5) r.bubble = null;
       if (r.swing && (r.swing.t += dt) > 0.24) r.swing = null;
+      if (r.spin && (r.spin.t += dt) > r.spin.dur) r.spin = null;
       if (r.shield > 0) r.shield -= dt;
     }
     if (this.myBubble && (this.myBubble.t += dt) > 5) this.myBubble = null;
@@ -2078,17 +2135,24 @@ export class Game {
             this.drawGrave(ctx, this.dead.x, this.dead.y);
             break;
           }
+          if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
           ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && Math.floor(this.t * 14) % 2 ? 0.4 : 1;
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
           if (!this.wave) this.drawHealthBar(ctx, { x: this.player.x, y: this.player.y - this.rideLift(), hp: this.combat.hp, max: this.combat.maxHp, hero: this.hero, lv: (this.upgrades.melee || 0) + 1 });
           break;
-        case 'remote':
-          this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving, o.r.animT, o.r.x, o.r.y);
-          if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, o.r);
-          if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y, o.r.shield);
-          if (o.r.swing) this.combat.drawSwingAt(ctx, o.r.x, o.r.y - 8, o.r.swing);
+        case 'remote': {
+          const lift = this.remoteLift(o.r);
+          this.drawTeamRing(ctx, o.r.x, o.r.y, this.teamOf(o.r));
+          // riding: the animal under them, and they sit a little higher
+          if (o.r.mt) this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
+          this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
+          if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, { ...o.r, y: o.r.y - lift, teamColor: this.teamCount ? this.peerColor(o.r) : null });
+          if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y - lift, o.r.shield);
+          if (o.r.swing) this.combat.drawSwingAt(ctx, o.r.x, o.r.y - lift - 8, o.r.swing);
+          if (o.r.spin) this.combat.drawSpinAt(ctx, o.r.x, o.r.y - lift - 8, o.r.spin);
           break;
+        }
         case 'monster':
           this.drawMonster(ctx, o.m);
           break;
@@ -2368,10 +2432,10 @@ export class Game {
     const { ctx, canvas, zoom } = this;
     for (const r of this.remotes.values()) {
       if (r.hidden) continue; // tucked away indoors
-      const [sx, sy] = this.toScreen(r.x, r.y - tagHeight(r.hero), camX, camY);
+      const [sx, sy] = this.toScreen(r.x, r.y - this.remoteLift(r) - tagHeight(r.hero), camX, camY);
       const off = sx < 0 || sy < 0 || sx > canvas.width || sy > canvas.height;
       if (!off) {
-        this.pill(r.name, sx, sy, zoom * 4.5, '#fff', PEER_COLORS[r.color]);
+        this.pill(r.name, sx, sy, zoom * 4.5, '#fff', this.peerColor(r));
         if (r.bubble) this.pill(r.bubble.text, sx, sy - zoom * 9, zoom * 4.2, '#5b4636', '#fff');
         continue;
       }
@@ -2385,7 +2449,7 @@ export class Game {
       ctx.save();
       ctx.translate(ex, ey);
       ctx.rotate(ang);
-      ctx.fillStyle = PEER_COLORS[r.color];
+      ctx.fillStyle = this.peerColor(r);
       ctx.beginPath();
       ctx.moveTo(zoom * 4, 0);
       ctx.lineTo(-zoom * 3, -zoom * 3.2);
@@ -2393,7 +2457,7 @@ export class Game {
       ctx.closePath();
       ctx.fill();
       ctx.restore();
-      this.pill(r.name, ex - Math.cos(ang) * zoom * 12, ey - Math.sin(ang) * zoom * 12, zoom * 3.6, '#fff', PEER_COLORS[r.color]);
+      this.pill(r.name, ex - Math.cos(ang) * zoom * 12, ey - Math.sin(ang) * zoom * 12, zoom * 3.6, '#fff', this.peerColor(r));
     }
   }
 

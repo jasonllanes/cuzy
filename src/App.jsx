@@ -65,7 +65,7 @@ export default function App() {
     () =>
       net.on((m) => {
         if (m.t !== 'lobby') return;
-        setSession((s) => (s ? { ...s, room: m.room || s.room, host: m.host, players: m.players.filter((p) => p.id !== s.you), scores: m.scores } : s));
+        setSession((s) => (s ? { ...s, room: m.room || s.room, teams: m.teams || {}, host: m.host, players: m.players.filter((p) => p.id !== s.you), scores: m.scores } : s));
         setLobby(true);
       }),
     [net],
@@ -109,7 +109,7 @@ export default function App() {
 
   // the host pressed Start: everyone gets the fresh roster, scores and clock
   const startRound = (m) => {
-    setSession((s) => ({ ...s, room: m.room || s.room, host: m.host, players: m.players, scores: m.scores, clock: m.clock, clockAt: performance.now() }));
+    setSession((s) => ({ ...s, room: m.room || s.room, teams: m.teams || {}, host: m.host, players: m.players, scores: m.scores, clock: m.clock, clockAt: performance.now() }));
     setLobby(false);
   };
 

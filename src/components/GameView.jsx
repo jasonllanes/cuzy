@@ -5,6 +5,7 @@ import { heroById } from '../game/heroes';
 import { emptyInventory } from '../game/inventory';
 import MapPanel from './MapPanel';
 import MonsterIcon from './MonsterIcon';
+import { TEAMS } from '../game/teams';
 import IntroScene from './IntroScene';
 import { sfx } from '../game/sfx';
 import { INVIS_CD } from '../game/combat';
@@ -420,8 +421,18 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {pvp && (
           <div className="scoreboard panel small">
             <div className="score-title">{session.room.winBy === 'monsters' ? '👹' : '⚔️'} First to {session.room.target} {session.room.winBy === 'monsters' ? 'monster ' : ''}kills</div>
+            {session.room.teams > 0 && TEAMS.slice(0, session.room.teams).map((t, i) => {
+              const total = scores.filter((s) => s.team === i).reduce((n, s) => n + s.kills, 0);
+              return (
+                <div key={t.name} className="score-row team-row" style={{ '--team': t.color }}>
+                  <span>{t.icon} {t.name} team</span>
+                  <b>{total}</b>
+                  <i style={{ width: `${Math.min(100, (total / session.room.target) * 100)}%` }} />
+                </div>
+              );
+            })}
             {[...scores].sort((a, b) => b.kills - a.kills).map((s) => (
-              <div key={s.id} className={`score-row ${s.id === session.you ? 'me' : ''}`}>
+              <div key={s.id} className={`score-row ${s.id === session.you ? 'me' : ''}`} style={s.team !== null && s.team !== undefined && TEAMS[s.team] ? { borderLeft: `4px solid ${TEAMS[s.team].color}` } : undefined}>
                 <span>{s.name}</span>
                 <b>{s.kills}</b>
                 <i style={{ width: `${Math.min(100, (s.kills / session.room.target) * 100)}%` }} />

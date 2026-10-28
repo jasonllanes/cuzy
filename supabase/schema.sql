@@ -42,6 +42,7 @@ create table if not exists public.rooms (
   allow_throw     boolean     not null default true,
   allow_melee     boolean     not null default true,
   streak_monsters boolean     not null default false,
+  teams           int         not null default 0,           -- 0 = free for all, otherwise 2-4 teams
   started         boolean     not null default false,
   host_id         text        not null,
   host_name       text        not null default 'Friend',
@@ -50,6 +51,9 @@ create table if not exists public.rooms (
   start_hour      real        not null default 8,
   updated_at      timestamptz not null default now()
 );
+
+-- for rooms tables created before teams existed
+alter table public.rooms add column if not exists teams int not null default 0;
 
 alter table public.rooms enable row level security;
 
