@@ -1,0 +1,517 @@
+import { fbm, hash2, hashString, smoothstep } from './rng';
+import { APOC_DECOR, APOC_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
+
+export const T = 16; // tile size in px
+const CHEST_RATE = 0.0032; // chance a clear grass tile holds a chest: roughly one per chunk
+export const CHUNK = 16; // tiles per chunk side
+export const CHUNK_PX = T * CHUNK;
+
+export const WATER = 0;
+export const SAND = 1;
+export const GRASS = 2;
+
+const SEA = 0.43;
+const BEACH = 0.45;
+const REGION = 18; // house sites are rolled once per region; small regions make cosy villages
+
+// Source rects inside the provided sprite sheets
+export const TREE_SPRITES = {
+  large: { sx: 96, sy: 1, sw: 32, sh: 46, cw: 10, ch: 6 },
+  medium: { sx: 71, sy: 14, sw: 20, sh: 33, cw: 8, ch: 5 },
+  sapling: { sx: 43, sy: 34, sw: 9, sh: 12, cw: 0, ch: 0 },
+  stump: { sx: 137, sy: 35, sw: 14, sh: 12, cw: 9, ch: 5 },
+};
+export const HOUSE_SPRITE = { sx: 148, sy: 3, sw: 72, sh: 95 };
+const HOUSE_BASE = 86; // wall bottom inside the sprite
+
+export const FORAGE = [
+  { item: 'berry', sx: 80, sy: 16 },
+  { item: 'leek', sx: 80, sy: 48 },
+  { item: 'tuber', sx: 96, sy: 80 },
+];
+
+// Sunnyside mushrooms pop up in the woods instead
+export const MUSHROOMS = [
+  { item: 'mushroom_red', sheet: 'items/mushroom_red' },
+  { item: 'mushroom_blue', sheet: 'items/mushroom_blue' },
+];
+
+const FLOWER_COLORS = ['#ff9ec7', '#ffffff', '#c9a7ff', '#ffd94a', '#ffb38a', '#9fd8ff'];
+
+export class World {
+  constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
+    this.seedStr = String(seedStr);
+    this.seed = hashString(this.seedStr);
+    this.apoc = theme === 'apoc'; // Survival: the ruined, overgrown look from the Apocalypse pack
+    this.waveMode = waves; // one house in the middle instead of a scattering of cottages
+    this.extraRects = []; // movable obstacles (the wave-defense barricades)
+    this.chunks = new Map();
+    this.typeCache = new Map();
+    this.siteCache = new Map();
+    this.treeCache = new Map();
+  }
+
+  elevation(x, y) {
+    return fbm(x / 44, y / 44, this.seed, 4);
+  }
+
+  forest(x, y) {
+    return fbm(x / 20, y / 20, this.seed + 77, 3);
+  }
+
+  type(x, y) {
+    const key = (x + 32768) * 65536 + (y + 32768);
+    let t = this.typeCache.get(key);
+    if (t === undefined) {
+      const e = this.elevation(x, y);
+      // Survival has no water: low ground is patchy dry dirt instead
+      t = this.apoc ? (e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
+      if (this.typeCache.size > 600000) this.typeCache.clear();
+      this.typeCache.set(key, t);
+    }
+    return t;
+  }
+
+  deepness(x, y) {
+    const e = this.elevation(x, y);
+    return e < SEA - 0.14 ? 2 : e < SEA - 0.07 ? 1 : 0;
+  }
+
+  // is the ground for a house at this site (in tiles) all meadow?
+  siteIsClear(sx, sy) {
+    for (let y = sy - 8; y <= sy + 4; y++) {
+      for (let x = sx - 2; x <= sx + 7; x++) {
+        if (this.type(x, y) !== GRASS || this.elevation(x, y) < BEACH + 0.02) return false;
+      }
+    }
+    return true;
+  }
+
+  // Wave Defense: the one house, as close to the centre of the world as the meadows allow
+  waveBase() {
+    if (!this.base) {
+      this.base = { x: -2, y: 3 };
+      search: for (let r = 0; r < 120; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            if (this.siteIsClear(dx - 2, dy + 3)) {
+              this.base = { x: dx - 2, y: dy + 3 };
+              break search;
+            }
+          }
+        }
+      }
+    }
+    return this.base;
+  }
+
+  // A cottage is rolled per region and only kept if the ground around it is all meadow.
+  houseSite(rx, ry) {
+    const key = `${rx},${ry}`;
+    if (this.siteCache.has(key)) return this.siteCache.get(key);
+    let site = null;
+    if (this.waveMode) {
+      const b = this.waveBase();
+      if (Math.floor(b.x / REGION) === rx && Math.floor(b.y / REGION) === ry) site = b;
+    } else if (hash2(rx, ry, this.seed + 5) < 0.8) {
+      const sx = rx * REGION + 3 + Math.floor(hash2(rx, ry, this.seed + 6) * (REGION - 12));
+      const sy = ry * REGION + 9 + Math.floor(hash2(rx, ry, this.seed + 7) * (REGION - 14));
+      if (this.siteIsClear(sx, sy)) site = { x: sx, y: sy };
+    }
+    this.siteCache.set(key, site);
+    return site;
+  }
+
+  isCleared(x, y) {
+    const rx = Math.floor(x / REGION);
+    const ry = Math.floor(y / REGION);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        const s = this.houseSite(rx + i, ry + j);
+        if (s && x >= s.x - 3 && x <= s.x + 8 && y >= s.y - 9 && y <= s.y + 5) return true;
+      }
+    }
+    return false;
+  }
+
+  // Trees live on a 2x2 tile grid so their bases never overlap.
+  treeAt(bx, by) {
+    const key = `${bx},${by}`;
+    if (this.treeCache.has(key)) return this.treeCache.get(key);
+    let tree = null;
+    const x = bx * 2;
+    const y = by * 2;
+    const f = this.forest(x + 1, y + 1);
+    const p = 0.02 + 0.55 * smoothstep(0.5, 0.66, f);
+    if (hash2(bx, by, this.seed + 11) < p) {
+      let ok = !this.isCleared(x, y);
+      for (let j = 0; j < 2 && ok; j++) {
+        for (let i = 0; i < 2; i++) {
+          if (this.type(x + i, y + j) !== GRASS || this.elevation(x + i, y + j) < BEACH + 0.015) ok = false;
+        }
+      }
+      if (ok) {
+        const r = hash2(bx, by, this.seed + 12);
+        const kind = r < 0.5 ? 'large' : r < 0.8 ? 'medium' : r < 0.93 ? 'sapling' : 'stump';
+        const jx = (hash2(bx, by, this.seed + 13) - 0.5) * 8;
+        const jy = hash2(bx, by, this.seed + 14) * 6;
+        tree = { kind, x: Math.round(bx * 32 + 16 + jx), y: Math.round(by * 32 + 20 + jy) };
+      }
+    }
+    this.treeCache.set(key, tree);
+    return tree;
+  }
+
+  // Wrecks, containers and other junk, on the same 2x2 grid the trees use
+  addApocProps(chunk, x0, y0) {
+    const s = this.seed;
+    for (let by = y0 / 2; by < (y0 + CHUNK) / 2; by++) {
+      for (let bx = x0 / 2; bx < (x0 + CHUNK) / 2; bx++) {
+        if (hash2(bx, by, s + 71) > 0.02 || this.treeAt(bx, by)) continue;
+        const x = bx * 2;
+        const y = by * 2;
+        if (this.isCleared(x, y) || this.type(x, y) !== GRASS || this.type(x + 1, y + 1) !== GRASS) continue;
+        const prop = APOC_PROPS[Math.floor(hash2(bx, by, s + 72) * APOC_PROPS.length)];
+        const { w, h } = apocSize(prop.key);
+        const px = bx * 32 + 16;
+        const py = by * 32 + 24;
+        chunk.objects.push({ kind: 'tree', sheet: `apoc/${prop.key}`, sx: 0, sy: 0, sw: w, sh: h, x: px, y: py });
+        if (prop.solid) {
+          const ch = Math.max(5, Math.min(14, Math.round(h * 0.4)));
+          chunk.rects.push({ x: px - w / 2 + 2, y: py - ch - 1, w: Math.max(6, w - 4), h: ch });
+        }
+      }
+    }
+  }
+
+  // supply fridges, things to pick up, and scattered ground details for one tile
+  addApocTile(chunk, x, y, t, r) {
+    const s = this.seed;
+    if (this.treeAt(x >> 1, y >> 1)) return;
+    if (t === GRASS && !this.isCleared(x, y)) {
+      const spot = this.elevation(x, y) > BEACH + 0.02;
+      const rr = hash2(x, y, s + 31);
+      if (spot && rr < CHEST_RATE) {
+        chunk.objects.push({ kind: 'chest', inter: 'chest', apoc: 'fridge', id: `c${x},${y}`, x: x * T + 8, y: y * T + 14 });
+        chunk.rects.push({ x: x * T + 1, y: y * T + 6, w: 14, h: 7 });
+        return;
+      }
+      if (spot && rr < 0.011) {
+        const kind = FORAGE_APOC[Math.floor(hash2(x, y, s + 32) * FORAGE_APOC.length)];
+        chunk.objects.push({ kind: 'forage', inter: 'forage', forage: kind, id: `f${x},${y}`, x: x * T + 8, y: y * T + 14 });
+        return;
+      }
+    }
+    if (r < (t === GRASS ? 0.11 : 0.05)) {
+      const total = APOC_DECOR.reduce((n, d) => n + d[1], 0);
+      let pick = hash2(x, y, s + 73) * total;
+      let key = APOC_DECOR[0][0];
+      for (const [k, w] of APOC_DECOR) {
+        pick -= w;
+        if (pick <= 0) {
+          key = k;
+          break;
+        }
+      }
+      if (t !== GRASS && !key.startsWith('rock') && key !== 'stick') key = 'rock6';
+      chunk.decor.push({
+        kind: 'img',
+        key,
+        x: x * T + 8 + Math.floor((hash2(x, y, s + 74) - 0.5) * 8),
+        y: y * T + 13 + Math.floor((hash2(x, y, s + 75) - 0.5) * 6),
+      });
+    }
+  }
+
+  getChunk(cx, cy) {
+    const key = `${cx},${cy}`;
+    let chunk = this.chunks.get(key);
+    if (!chunk) {
+      chunk = this.buildChunk(cx, cy);
+      this.chunks.set(key, chunk);
+    }
+    return chunk;
+  }
+
+  buildChunk(cx, cy) {
+    const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    const s = this.seed;
+
+    for (let by = y0 / 2; by < (y0 + CHUNK) / 2; by++) {
+      for (let bx = x0 / 2; bx < (x0 + CHUNK) / 2; bx++) {
+        const tree = this.treeAt(bx, by);
+        if (!tree) continue;
+        if (this.apoc) {
+          const kind = APOC_TREES[tree.kind];
+          const key = kind.keys[Math.floor(hash2(tree.x, tree.y, s + 15) * kind.keys.length)];
+          const { w, h } = apocSize(key);
+          chunk.objects.push({ kind: 'tree', sheet: `apoc/${key}`, sx: 0, sy: 0, sw: w, sh: h, x: tree.x, y: tree.y });
+          if (kind.cw) chunk.rects.push({ x: tree.x - kind.cw / 2, y: tree.y - kind.ch - 2, w: kind.cw, h: kind.ch });
+          continue;
+        }
+        const spr = TREE_SPRITES[tree.kind];
+        chunk.objects.push({ kind: 'tree', sheet: 'trees', sx: spr.sx, sy: spr.sy, sw: spr.sw, sh: spr.sh, x: tree.x, y: tree.y });
+        if (spr.cw) chunk.rects.push({ x: tree.x - spr.cw / 2, y: tree.y - spr.ch - 2, w: spr.cw, h: spr.ch });
+      }
+    }
+
+    if (this.apoc) this.addApocProps(chunk, x0, y0);
+
+    for (let y = y0; y < y0 + CHUNK; y++) {
+      for (let x = x0; x < x0 + CHUNK; x++) {
+        const t = this.type(x, y);
+        const r = hash2(x, y, s + 21);
+        if (this.apoc) {
+          this.addApocTile(chunk, x, y, t, r);
+          continue;
+        }
+        if (t === GRASS && !this.treeAt(x >> 1, y >> 1) && !this.isCleared(x, y)) {
+          const spot = this.elevation(x, y) > BEACH + 0.02;
+          const rr = hash2(x, y, s + 31);
+          if (spot && rr < CHEST_RATE) {
+            chunk.objects.push({ kind: 'chest', inter: 'chest', id: `c${x},${y}`, x: x * T + 8, y: y * T + 14 });
+            chunk.rects.push({ x: x * T + 1, y: y * T + 6, w: 14, h: 7 });
+            continue;
+          }
+          if (spot && rr < 0.013) {
+            const kinds = this.forest(x, y) > 0.56 ? MUSHROOMS : FORAGE;
+            const kind = kinds[Math.floor(hash2(x, y, s + 32) * kinds.length)];
+            chunk.objects.push({ kind: 'forage', inter: 'forage', forage: kind, id: `f${x},${y}`, x: x * T + 8, y: y * T + 14 });
+            continue;
+          }
+        }
+        if (t === GRASS) {
+          if (this.treeAt(x >> 1, y >> 1)) continue;
+          const px = x * T + Math.floor(hash2(x, y, s + 22) * 10) + 2;
+          const py = y * T + Math.floor(hash2(x, y, s + 23) * 10) + 2;
+          const near = this.forest(x, y) < 0.5 ? 0.09 : 0.04;
+          if (r < near) {
+            const color = FLOWER_COLORS[Math.floor(hash2(x, y, s + 24) * FLOWER_COLORS.length)];
+            chunk.decor.push({ kind: 'flower', x: px, y: py, color });
+          } else if (r < near + 0.08) {
+            chunk.decor.push({ kind: 'tuft', x: px, y: py });
+          }
+        } else if (t === SAND && r < 0.05) {
+          chunk.decor.push({ kind: 'pebble', x: x * T + Math.floor(hash2(x, y, s + 25) * 11) + 2, y: y * T + Math.floor(hash2(x, y, s + 26) * 11) + 2 });
+        }
+      }
+    }
+
+    // Cottage + its stepping-stone path
+    const rx = Math.floor(cx * CHUNK / REGION);
+    const ry = Math.floor(cy * CHUNK / REGION);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        const site = this.houseSite(rx + i, ry + j);
+        if (!site) continue;
+        if (Math.floor(site.x / CHUNK) !== cx || Math.floor(site.y / CHUNK) !== cy) continue;
+        const left = site.x * T;
+        const base = site.y * T;
+        const id = `h${left},${base}`;
+        if (this.apoc) {
+          // Survival's base is a wrecked bus: a solid block in the middle of the barricade ring
+          const bus = apocSize('bus');
+          chunk.objects.push({ kind: 'tree', id, sheet: 'apoc/bus', sx: 0, sy: 0, sw: bus.w, sh: bus.h, x: left + bus.w / 2, y: base });
+          chunk.rects.push({ x: left + 2, y: base - 22, w: bus.w - 4, h: 20 });
+          continue;
+        }
+        chunk.objects.push({ kind: 'house', id, sheet: 'house', ...HOUSE_SPRITE, x: left + HOUSE_SPRITE.sw / 2, y: base, ox: left, oy: base - HOUSE_BASE });
+        // Walls all round, with a 16px doorway in the front wall (the door is at x 41-56 of the sprite)
+        chunk.rects.push(
+          { x: left + 2, y: base - 42, w: HOUSE_SPRITE.sw - 4, h: 8 }, // back wall
+          { x: left + 2, y: base - 42, w: 6, h: 40 }, // left wall
+          { x: left + HOUSE_SPRITE.sw - 8, y: base - 42, w: 6, h: 40 }, // right wall
+          { x: left + 2, y: base - 10, w: 38, h: 8 }, // front wall, left of the door
+          { x: left + 56, y: base - 10, w: 14, h: 8 }, // front wall, right of the door
+        );
+        // the doorway and its sill, which a stranger may not step into
+        chunk.doors.push({ id, x: left + 38, y: base - 36, w: 20, h: 38 });
+        // the cosy indoors: standing here hides you
+        chunk.zones.push({ id, x: left + 8, y: base - 34, w: HOUSE_SPRITE.sw - 16, h: 26 });
+        for (let k = 0; k < 3; k++) {
+          chunk.objects.push({
+            kind: 'stone',
+            ground: true,
+            sheet: 'stones',
+            sx: k * 16,
+            sy: 0,
+            sw: 16,
+            sh: 16,
+            ox: left + 40 + Math.round((hash2(site.x, k, s + 41) - 0.5) * 4),
+            oy: base + 8 + k * 15,
+            x: 0,
+            y: 0,
+          });
+        }
+      }
+    }
+    return chunk;
+  }
+
+  animalSpawns(cx, cy) {
+    const out = [];
+    if (this.apoc) return out; // no friendly farm animals in the apocalypse
+    if (hash2(cx, cy, this.seed + 51) > 0.45) return out;
+    const n = 1 + Math.floor(hash2(cx, cy, this.seed + 52) * 3);
+    const cow = hash2(cx, cy, this.seed + 53) < 0.3;
+    for (let i = 0; i < n; i++) {
+      const tx = cx * CHUNK + Math.floor(hash2(cx, cy * 7 + i, this.seed + 54) * CHUNK);
+      const ty = cy * CHUNK + Math.floor(hash2(cx * 7 + i, cy, this.seed + 55) * CHUNK);
+      if (this.type(tx, ty) !== GRASS || this.treeAt(tx >> 1, ty >> 1) || this.isCleared(tx, ty)) continue;
+      const variant = Math.floor(hash2(tx, ty, this.seed + 56) * 2);
+      out.push({
+        id: `${cx},${cy},${i}`,
+        type: cow ? 'cow' : 'chicken',
+        variant,
+        x: tx * T + 8,
+        y: ty * T + 12,
+      });
+    }
+    return out;
+  }
+
+  // `wadeable` lets heroes paddle through water; skeletons and animals still treat it as a wall
+  // `skipExtra` ignores the wave barricades, for things that are shot over the walls
+  isBlocked(l, t, w, h, wadeable = false, skipExtra = false) {
+    if (!wadeable) {
+      const x0 = Math.floor(l / T);
+      const x1 = Math.floor((l + w - 1) / T);
+      const y0 = Math.floor(t / T);
+      const y1 = Math.floor((t + h - 1) / T);
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          if (this.type(x, y) === WATER) return true;
+        }
+      }
+    }
+    if (!skipExtra) for (const r of this.extraRects) {
+      if (l < r.x + r.w && l + w > r.x && t < r.y + r.h && t + h > r.y) return true;
+    }
+    const ccx = Math.floor((l + w / 2) / CHUNK_PX);
+    const ccy = Math.floor((t + h / 2) / CHUNK_PX);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        for (const r of this.getChunk(ccx + i, ccy + j).rects) {
+          if (l < r.x + r.w && l + w > r.x && t < r.y + r.h && t + h > r.y) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // the indoor area of a house at this point, if any
+  // the doorway of a house, if (x, y) is standing in it
+  doorAt(x, y) {
+    const ccx = Math.floor(x / CHUNK_PX);
+    const ccy = Math.floor(y / CHUNK_PX);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        for (const d of this.getChunk(ccx + i, ccy + j).doors) {
+          if (x >= d.x && x <= d.x + d.w && y >= d.y && y <= d.y + d.h) return d;
+        }
+      }
+    }
+    return null;
+  }
+
+  houseAt(x, y) {
+    const ccx = Math.floor(x / CHUNK_PX);
+    const ccy = Math.floor(y / CHUNK_PX);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        for (const z of this.getChunk(ccx + i, ccy + j).zones) {
+          if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return z;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Houses around the middle of the world, nearest to the centre first. Everyone computes the
+  // same list, so a player's slot number is enough to give each of them a different home.
+  houseList() {
+    if (!this.homes) {
+      const sites = [];
+      for (let ry = -8; ry <= 8; ry++) {
+        for (let rx = -8; rx <= 8; rx++) {
+          const s = this.houseSite(rx, ry);
+          if (s) sites.push(s);
+        }
+      }
+      sites.sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y));
+      this.homes = sites;
+    }
+    return this.homes;
+  }
+
+  // A tight group of `count` houses for a room's players to live in. Every client works out the
+  // same group; `pick` (from the room code) chooses between the few most compact ones.
+  homeCluster(count, pick) {
+    const all = this.houseList();
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const groups = all.slice(0, 16).map((anchor) => {
+      const group = [...all].sort((a, b) => dist(a, anchor) - dist(b, anchor)).slice(0, count);
+      let span = 0;
+      for (const a of group) for (const b of group) span = Math.max(span, dist(a, b));
+      return { group, span };
+    });
+    groups.sort((a, b) => a.span - b.span || a.group[0].x - b.group[0].x || a.group[0].y - b.group[0].y);
+    return groups[pick % Math.min(3, groups.length)].group;
+  }
+
+  // the doorstep, on the stepping stones in front of the door
+  homePoint(site) {
+    return this.apoc ? { x: site.x * T + 30, y: site.y * T + 14 } : { x: site.x * T + 48, y: site.y * T + 14 };
+  }
+
+  // a 5x5 patch of clear grass around this tile
+  isOpenMeadow(dx, dy) {
+    for (let j = -2; j <= 2; j++) {
+      for (let i = -2; i <= 2; i++) {
+        if (this.type(dx + i, dy + j) !== GRASS || this.treeAt((dx + i) >> 1, (dy + j) >> 1)) return false;
+      }
+    }
+    return true;
+  }
+
+  findSpawn() {
+    for (let radius = 0; radius < 300; radius++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          if (this.isOpenMeadow(dx, dy)) return { x: dx * T + 8, y: dy * T + 12 };
+        }
+      }
+    }
+    return { x: 8, y: 12 };
+  }
+
+  // A skeleton camp, if this chunk has one: three of them stand guard on an open patch of meadow.
+  // The same chunk always gives the same answer for a seed.
+  campAt(cx, cy) {
+    if (hash2(cx, cy, this.seed + 71) > 0.2) return null;
+    const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 72) * (CHUNK - 8));
+    const ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 73) * (CHUNK - 8));
+    if (Math.hypot(tx, ty) < 36) return null; // keep the neighbourhood around the first houses calm
+    if (this.type(tx, ty) !== GRASS || !this.isOpenMeadow(tx, ty) || this.isCleared(tx, ty)) return null;
+    return { x: tx * T + 8, y: ty * T + 12 };
+  }
+
+  // A different open meadow spot every time, within a couple hundred tiles of the world's centre
+  randomSpawn() {
+    for (let i = 0; i < 400; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 6 + Math.random() * 150;
+      const tx = Math.round(Math.cos(ang) * dist);
+      const ty = Math.round(Math.sin(ang) * dist);
+      if (!this.isOpenMeadow(tx, ty) || this.isCleared(tx, ty)) continue;
+      const x = tx * T + 8;
+      const y = ty * T + 12;
+      if (!this.isBlocked(x - 4, y - 5, 8, 5)) return { x, y };
+    }
+    return this.findSpawn();
+  }
+}

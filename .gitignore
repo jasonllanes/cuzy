@@ -1,0 +1,19 @@
+# dependencies and build output
+node_modules/
+dist/
+*.log
+
+# Only the game itself is committed. Everything else at the project root (the huge raw asset
+# packs, zips, .aseprite/.psd sources, the gallery) stays on this machine; the sprites the game
+# actually loads live in public/assets and are committed.
+/*
+!/.gitignore
+!/README.md
+!/index.html
+!/package.json
+!/package-lock.json
+!/vite.config.js
+!/src/
+!/public/
+!/server/
+!/scripts/

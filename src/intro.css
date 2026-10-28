@@ -1,0 +1,54 @@
+/* ---------- opening scene ---------- */
+.intro { position: absolute; inset: 0; z-index: 60; overflow: hidden; animation: intro-in 0.5s ease-out; }
+@keyframes intro-in { from { opacity: 0; } }
+.intro-bg { position: absolute; inset: 0; }
+.intro.sky .intro-bg { background: linear-gradient(#5fb4ea 0%, #a8dcf5 55%, #e6f6ff 100%); }
+.intro.night .intro-bg { background: linear-gradient(#0b0f1f 0%, #1a2038 55%, #2b2c3c 100%); }
+.intro-cloud { position: absolute; height: 34px; border-radius: 40px; background: #fff; box-shadow: 30px -14px 0 4px #fff, 64px 2px 0 0 #fff; opacity: 0.92; animation: cloud-by linear infinite; }
+.intro-cloud.a { top: 14%; width: 110px; animation-duration: 9s; }
+.intro-cloud.b { top: 30%; width: 80px; animation-duration: 6s; animation-delay: -2s; }
+.intro-cloud.c { top: 62%; width: 120px; animation-duration: 5s; animation-delay: -1s; opacity: 0.8; }
+.intro-cloud.d { top: 46%; width: 70px; animation-duration: 7.5s; animation-delay: -5s; }
+@keyframes cloud-by { from { left: 110%; } to { left: -35%; } }
+.intro-vehicle { position: absolute; left: 50%; top: 40%; width: min(300px, 55vw); transform: translateX(-50%); animation: bob 1.6s ease-in-out infinite alternate; }
+.intro-vehicle svg { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+@keyframes bob { from { transform: translate(-50%, -6px) rotate(-1.5deg); } to { transform: translate(-50%, 8px) rotate(1.5deg); } }
+.intro.sky.arriving .intro-vehicle { animation: bob 1.6s ease-in-out infinite alternate, descend 3.2s ease-in forwards; }
+@keyframes descend { to { top: 58%; width: min(210px, 40vw); } }
+.intro-ground { position: absolute; left: 0; right: 0; bottom: -45%; height: 45%; background: repeating-linear-gradient(90deg, #7fc96b 0 60px, #8fd478 60px 120px); box-shadow: inset 0 6px 0 #5fa854; }
+.intro.sky.arriving .intro-ground { animation: ground-up 3.2s ease-in forwards; }
+@keyframes ground-up { to { bottom: 0; height: 40%; } }
+
+/* survival: a night drive */
+.intro-moon { position: absolute; top: 9%; right: 12%; width: 54px; height: 54px; border-radius: 50%; background: #f3efd2; box-shadow: 0 0 40px 10px rgba(243, 239, 210, 0.25); }
+.intro-trees { position: absolute; left: 0; right: 0; background-repeat: repeat-x; image-rendering: pixelated; }
+.intro-trees.far { bottom: 34%; height: 90px; opacity: 0.55; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='90'><g fill='%23121826'><polygon points='20,90 40,20 60,90'/><polygon points='70,90 95,35 120,90'/><polygon points='110,90 135,10 160,90'/></g></svg>"); background-size: 160px 90px; animation: scroll-x 14s linear infinite; }
+.intro-trees.near { bottom: 27%; height: 130px; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='130'><g fill='%23080b14'><polygon points='10,130 40,20 70,130'/><polygon points='90,130 125,45 160,130'/><polygon points='150,130 185,5 220,130'/></g></svg>"); background-size: 220px 130px; animation: scroll-x 5s linear infinite; }
+@keyframes scroll-x { to { background-position-x: -1760px; } }
+.intro-road { position: absolute; left: 0; right: 0; bottom: 0; height: 28%; background: #23252d; border-top: 6px solid #3a3d48; }
+.intro-road i { position: absolute; left: 0; right: 0; top: 46%; height: 8px; background: repeating-linear-gradient(90deg, #e8e0a0 0 50px, transparent 50px 120px); background-size: 120px 8px; animation: dash-by 0.45s linear infinite; }
+@keyframes dash-by { to { background-position-x: -120px; } }
+.intro.night .intro-vehicle { top: auto; bottom: 14%; width: min(280px, 50vw); animation: car-bump 0.35s ease-in-out infinite alternate; }
+@keyframes car-bump { from { transform: translate(-50%, 0); } to { transform: translate(-50%, -3px); } }
+.intro-beam { position: absolute; left: 92%; top: 40%; width: 300px; height: 70px; background: linear-gradient(90deg, rgba(255, 238, 170, 0.55), rgba(255, 238, 170, 0)); clip-path: polygon(0 40%, 100% 0, 100% 100%, 0 60%); pointer-events: none; }
+.intro-bus { position: absolute; bottom: 26%; right: -30%; width: 150px; height: 66px; background: #6b5b4a; border: 4px solid #3f352b; border-radius: 6px; box-shadow: inset 0 18px 0 -6px #8a7a66; opacity: 0; }
+.intro.night.arriving .intro-bus { animation: bus-in 3.2s ease-out forwards; }
+@keyframes bus-in { to { right: 12%; opacity: 1; } }
+.intro.night.arriving .intro-trees.near { animation-duration: 12s; }
+.intro.night.arriving .intro-road i { animation-duration: 1.2s; }
+
+/* the narrating bot */
+.intro-talk { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); width: min(640px, 92vw); padding: 12px 18px 14px; z-index: 2; }
+.intro.night .intro-talk { bottom: auto; top: 6%; }
+.intro-bot { font: 700 0.85rem var(--pixel); color: var(--rose-dark); margin-bottom: 4px; }
+.intro-talk p { margin: 0; min-height: 2.8em; font: 600 1.1rem var(--body); color: var(--ink); line-height: 1.4; }
+.intro-caret { opacity: 0.5; animation: blink 0.8s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.intro-skip { position: absolute; right: 16px; bottom: 16px; z-index: 3; opacity: 0.85; }
+.intro.night .intro-skip { bottom: auto; top: 16px; }
+
+/* after skipping: black, until the others have arrived */
+.intro-wait { position: absolute; inset: 0; z-index: 60; background: #000; color: #f6ecd8; display: grid; place-content: center; gap: 8px; text-align: center; font: 700 1.6rem var(--pixel); }
+.intro-wait small { font: 400 0.9rem var(--body); opacity: 0.6; }
+.intro-fade { position: absolute; inset: 0; z-index: 60; background: #000; pointer-events: none; animation: fade-out 0.7s ease-out forwards; }
+@keyframes fade-out { to { opacity: 0; } }

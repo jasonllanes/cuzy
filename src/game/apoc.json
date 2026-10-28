@@ -1,0 +1,302 @@
+{
+ "char_idle_down": {
+  "w": 78,
+  "h": 16
+ },
+ "char_idle_up": {
+  "w": 66,
+  "h": 16
+ },
+ "char_idle_side": {
+  "w": 72,
+  "h": 16
+ },
+ "char_idle_left": {
+  "w": 72,
+  "h": 16
+ },
+ "char_run_down": {
+  "w": 78,
+  "h": 17
+ },
+ "char_run_up": {
+  "w": 78,
+  "h": 17
+ },
+ "char_run_side": {
+  "w": 84,
+  "h": 17
+ },
+ "char_run_left": {
+  "w": 84,
+  "h": 17
+ },
+ "wall_h": {
+  "w": 16,
+  "h": 14
+ },
+ "wall_v": {
+  "w": 8,
+  "h": 16
+ },
+ "rwall_h": {
+  "w": 16,
+  "h": 14
+ },
+ "rwall_v": {
+  "w": 8,
+  "h": 16
+ },
+ "pick_bandage": {
+  "w": 5,
+  "h": 7
+ },
+ "pick_canned": {
+  "w": 7,
+  "h": 7
+ },
+ "pick_soup": {
+  "w": 5,
+  "h": 7
+ },
+ "bat": {
+  "w": 11,
+  "h": 12
+ },
+ "icon_bandage": {
+  "w": 12,
+  "h": 12
+ },
+ "icon_canned": {
+  "w": 12,
+  "h": 12
+ },
+ "icon_soup": {
+  "w": 9,
+  "h": 14
+ },
+ "icon_medkit": {
+  "w": 15,
+  "h": 12
+ },
+ "icon_rock": {
+  "w": 11,
+  "h": 8
+ },
+ "icon_wall": {
+  "w": 13,
+  "h": 12
+ },
+ "tree_spruce": {
+  "w": 16,
+  "h": 29
+ },
+ "tree_normal": {
+  "w": 21,
+  "h": 30
+ },
+ "tree_big": {
+  "w": 34,
+  "h": 52
+ },
+ "tree_pine": {
+  "w": 27,
+  "h": 49
+ },
+ "tree_birch": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_oak": {
+  "w": 39,
+  "h": 45
+ },
+ "tree_small": {
+  "w": 24,
+  "h": 36
+ },
+ "bush1": {
+  "w": 15,
+  "h": 13
+ },
+ "bush2": {
+  "w": 28,
+  "h": 13
+ },
+ "grass3": {
+  "w": 16,
+  "h": 15
+ },
+ "grass4": {
+  "w": 16,
+  "h": 11
+ },
+ "grass5": {
+  "w": 16,
+  "h": 14
+ },
+ "flowers_red": {
+  "w": 16,
+  "h": 14
+ },
+ "flower_yellow": {
+  "w": 7,
+  "h": 8
+ },
+ "rock6": {
+  "w": 10,
+  "h": 7
+ },
+ "rock7": {
+  "w": 14,
+  "h": 13
+ },
+ "stick": {
+  "w": 10,
+  "h": 7
+ },
+ "stump": {
+  "w": 15,
+  "h": 12
+ },
+ "mushroom": {
+  "w": 10,
+  "h": 8
+ },
+ "puddle": {
+  "w": 25,
+  "h": 13
+ },
+ "bus": {
+  "w": 61,
+  "h": 31
+ },
+ "van": {
+  "w": 43,
+  "h": 27
+ },
+ "car_blue": {
+  "w": 25,
+  "h": 37
+ },
+ "car_red": {
+  "w": 38,
+  "h": 19
+ },
+ "container_v": {
+  "w": 24,
+  "h": 43
+ },
+ "container_h": {
+  "w": 41,
+  "h": 26
+ },
+ "barrel": {
+  "w": 12,
+  "h": 16
+ },
+ "bin": {
+  "w": 29,
+  "h": 23
+ },
+ "fridge": {
+  "w": 16,
+  "h": 28
+ },
+ "pallet": {
+  "w": 13,
+  "h": 14
+ },
+ "cart": {
+  "w": 12,
+  "h": 16
+ },
+ "cardboard": {
+  "w": 11,
+  "h": 9
+ },
+ "hydrant": {
+  "w": 10,
+  "h": 15
+ },
+ "stopsign": {
+  "w": 7,
+  "h": 25
+ },
+ "bg": {
+  "w": 384,
+  "h": 272
+ },
+ "z_small_walk_down": {
+  "w": 72,
+  "h": 16
+ },
+ "z_small_walk_up": {
+  "w": 78,
+  "h": 16
+ },
+ "z_small_walk_side": {
+  "w": 78,
+  "h": 15
+ },
+ "z_small_walk_left": {
+  "w": 78,
+  "h": 15
+ },
+ "z_small_death_side": {
+  "w": 96,
+  "h": 14
+ },
+ "z_small_death_left": {
+  "w": 96,
+  "h": 14
+ },
+ "z_axe_walk_down": {
+  "w": 96,
+  "h": 20
+ },
+ "z_axe_walk_up": {
+  "w": 96,
+  "h": 23
+ },
+ "z_axe_walk_side": {
+  "w": 168,
+  "h": 19
+ },
+ "z_axe_walk_left": {
+  "w": 168,
+  "h": 19
+ },
+ "z_axe_death_side": {
+  "w": 162,
+  "h": 18
+ },
+ "z_axe_death_left": {
+  "w": 162,
+  "h": 18
+ },
+ "z_big_walk_down": {
+  "w": 128,
+  "h": 24
+ },
+ "z_big_walk_up": {
+  "w": 128,
+  "h": 24
+ },
+ "z_big_walk_side": {
+  "w": 128,
+  "h": 24
+ },
+ "z_big_walk_left": {
+  "w": 128,
+  "h": 24
+ },
+ "z_big_death_side": {
+  "w": 203,
+  "h": 23
+ },
+ "z_big_death_left": {
+  "w": 203,
+  "h": 23
+ }
+}
