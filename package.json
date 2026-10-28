@@ -8,7 +8,7 @@
     "gallery": "node scripts/build-gallery.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && gh-pages -d dist"
+    "deploy": "vite build && gh-pages -t -d dist"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
