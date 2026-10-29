@@ -76,7 +76,7 @@ export const FREE_UPGRADES = [
   },
 ];
 
-export const SUPPLY_CAP = 9;
+export const SUPPLY_CAP = 99;
 export const SHIELD_CAP = 3;
 
 // One-off purchases that stock the quick slots at the bottom of the screen

@@ -128,7 +128,7 @@ export function rollMonsterLoot(def, diff, theme = 'cozy') {
   const roll = (id, chance, min = 1, max = 1) => {
     if (Math.random() < chance) out.push({ id, qty: min + Math.floor(Math.random() * (max - min + 1)) });
   };
-  const scarce = theme === 'apoc' ? 0.7 : 1; // Survival hands out less help
+  const scarce = theme === 'apoc' ? 0.4 : 1; // Survival hands out much less healing, and plenty of wall material instead
   const heal = theme === 'apoc' ? 'hppack' : 'heart'; // Survival: a Health Pack goes in your quick slot
   roll(heal, def.boss ? 1 : big ? Math.min(1, diff.heal * 2.2 * scarce) : diff.heal * scarce);
   if (def.boss) roll(heal, 1);
@@ -137,7 +137,7 @@ export function rollMonsterLoot(def, diff, theme = 'cozy') {
   if (theme === 'apoc') {
     // scavenged supplies instead of trinkets
     roll('soupcan', big ? 0.5 : 0.1);
-    roll('barricade', def.boss ? 1 : big ? 0.4 : 0.07, 1, def.boss ? 3 : 1);
+    roll('barricade', def.boss ? 1 : big ? 0.75 : 0.3, 1, def.boss ? 4 : big ? 2 : 1); // barricades drop far more often than Health Packs
     return out;
   }
   roll('rock', big ? 0.9 : 0.34, 1, big ? 3 : 2);

@@ -53,6 +53,8 @@ export class World {
     this.waveMode = waves; // one house in the middle instead of a scattering of cottages
     this.extraRects = []; // movable obstacles (the wave-defense barricades)
     this.chunks = new Map();
+    this.felled = new Set(); // trees that have been cut down ("bx,by")
+    this.treeHp = new Map(); // damage taken so far by trees that are still standing
     this.typeCache = new Map();
     this.siteCache = new Map();
     this.dsites = new Map(); // dungeon entrances
@@ -321,6 +323,46 @@ export class World {
     }
   }
 
+  // how many hits a tree takes before it falls
+  treeMaxHp(kind) {
+    return { large: 8, medium: 6, sapling: 3, stump: 2 }[kind] || 6;
+  }
+
+  // the cuttable trees near a point (a tree's trunk is at its base)
+  treesNear(x, y, reach) {
+    const out = [];
+    const ccx = Math.floor(x / CHUNK_PX);
+    const ccy = Math.floor(y / CHUNK_PX);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        for (const o of this.getChunk(ccx + i, ccy + j).objects) {
+          if (!o.tkey) continue;
+          if (Math.hypot(o.x - x, o.y - 5 - y) <= reach) out.push(o);
+        }
+      }
+    }
+    return out;
+  }
+
+  // Damage a tree. Returns the hit points it has left (0: it fell, and is gone from the world).
+  hurtTree(o, dmg) {
+    const max = this.treeMaxHp(o.tk);
+    const left = (this.treeHp.get(o.tkey) ?? max) - dmg;
+    if (left > 0) {
+      this.treeHp.set(o.tkey, left);
+      return left;
+    }
+    this.treeHp.delete(o.tkey);
+    this.felled.add(o.tkey);
+    for (const c of this.chunks.values()) {
+      if (c.objects.some((x) => x.tkey === o.tkey)) {
+        c.objects = c.objects.filter((x) => x.tkey !== o.tkey);
+        c.rects = c.rects.filter((x) => x.tkey !== o.tkey);
+      }
+    }
+    return 0;
+  }
+
   getChunk(cx, cy) {
     const key = `${cx},${cy}`;
     let chunk = this.chunks.get(key);
@@ -343,19 +385,21 @@ export class World {
       for (let bx = x0 / 2; bx < (x0 + CHUNK) / 2; bx++) {
         const tree = this.treeAt(bx, by);
         if (!tree) continue;
+        const tkey = `${bx},${by}`;
+        if (this.felled.has(tkey)) continue;
         if (this.apoc) {
           const kind = APOC_TREES[tree.kind];
           const keys = this.frost && tree.kind !== 'sapling' && tree.kind !== 'stump' ? FROST_TREES : kind.keys; // only pines survive the cold
           let key = keys[Math.floor(hash2(tree.x, tree.y, s + 15) * keys.length)];
           if (this.mapInfo?.trees && key !== 'stump') key = `${key}__${this.mapInfo.trees}`; // this map's own colours
           const { w, h } = apocSize(key);
-          chunk.objects.push({ kind: 'tree', sheet: `apoc/${key}`, sx: 0, sy: 0, sw: w, sh: h, x: tree.x, y: tree.y });
-          if (kind.cw) chunk.rects.push({ x: tree.x - kind.cw / 2, y: tree.y - kind.ch - 2, w: kind.cw, h: kind.ch });
+          chunk.objects.push({ kind: 'tree', tkey, tk: tree.kind, sheet: `apoc/${key}`, sx: 0, sy: 0, sw: w, sh: h, x: tree.x, y: tree.y });
+          if (kind.cw) chunk.rects.push({ tkey, x: tree.x - kind.cw / 2, y: tree.y - kind.ch - 2, w: kind.cw, h: kind.ch });
           continue;
         }
         const spr = TREE_SPRITES[tree.kind];
-        chunk.objects.push({ kind: 'tree', sheet: 'trees', sx: spr.sx, sy: spr.sy, sw: spr.sw, sh: spr.sh, x: tree.x, y: tree.y });
-        if (spr.cw) chunk.rects.push({ x: tree.x - spr.cw / 2, y: tree.y - spr.ch - 2, w: spr.cw, h: spr.ch });
+        chunk.objects.push({ kind: 'tree', tkey, tk: tree.kind, sheet: 'trees', sx: spr.sx, sy: spr.sy, sw: spr.sw, sh: spr.sh, x: tree.x, y: tree.y });
+        if (spr.cw) chunk.rects.push({ tkey, x: tree.x - spr.cw / 2, y: tree.y - spr.ch - 2, w: spr.cw, h: spr.ch });
       }
     }
 

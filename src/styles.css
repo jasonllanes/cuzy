@@ -1160,3 +1160,7 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .guide-keys { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .guide-keys .hint { grid-column: 1 / -1; }
 .guide-keys kbd { margin-right: 6px; }
+
+.supply-slot { position: relative; overflow: hidden; }
+.supply-cd { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(60, 50, 90, 0.45); pointer-events: none; }
+.coin-chip.coin-drop { cursor: pointer; font: inherit; }

@@ -107,9 +107,9 @@ export function chestOdds(id) {
 
 // What a supply fridge can hold in Survival
 export const LOOT_APOC = [
-  ['hppack', 5, 1, 2],
-  ['soupcan', 5, 1, 2],
-  ['barricade', 3, 1, 2],
+  ['hppack', 2, 1, 2],
+  ['soupcan', 3, 1, 2],
+  ['barricade', 8, 1, 3],
   ['coin', 3, 2, 5],
 ];
 
@@ -121,4 +121,14 @@ export function rollLoot(r1, r2, table = LOOT) {
     if (pick <= 0) return { item, qty: min + Math.floor(r2 * (max - min + 1)) };
   }
   return { item: 'acorn', qty: 1 };
+}
+
+// A slot holds up to 99 of anything (a sword just the one). Coins are not backpack items at all: they live in your purse.
+for (const [id, def] of Object.entries(ITEMS)) {
+  if (id === 'sword') continue;
+  if (id === 'coin') {
+    delete def.throw; // coins can be dropped, never thrown
+    continue;
+  }
+  def.stack = 99;
 }

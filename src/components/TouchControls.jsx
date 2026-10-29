@@ -182,6 +182,8 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
     home: hud.recallCd ? hud.recallCd / 20 : 0,
     shield: hud.shieldCd ? hud.shieldCd / 10 : 0,
     invis: hud.invisCd ? hud.invisCd / 25 : 0,
+    hp: hud.cds?.hp ? hud.cds.hp / 6 : 0,
+    stam: hud.cds?.stam ? hud.cds.stam / 5 : 0,
     attack: hud.dashCd ? Math.min(1, hud.dashCd / 1.2) : 0,
   };
   const taps = { chat: onChat, shop: onShop };

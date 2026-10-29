@@ -1,6 +1,6 @@
 import { CHUNK_PX, WATER } from './world';
 import { sfx } from './sfx';
-import { POWER_SLOW_TIME } from './waves';
+import { BOSS_WIND, POWER_SLOW_TIME } from './waves';
 import { ITEMS, breaksOnImpact, iconOf, throwDamage, throwStats } from './items';
 import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
@@ -15,8 +15,11 @@ const CAMP_LEASH = 200; // how far from their post the guards will follow
 const CAMP_RESPAWN = 150; // seconds before a wiped-out camp is guarded again
 
 // Wild creatures from the ENEMY pack that roam the free world: ground things by day, flyers and hounds by night
-const WILD_DAY = ['jelly', 'redcap', 'hand'];
-const WILD_NIGHT = ['bat', 'bat', 'eye', 'hound', 'scarab', 'redcap'];
+const WILD_DAY = ['jelly', 'redcap', 'hand', 'shrieker'];
+// night is meaner: ranged archers and watchers, and zombies shamble out of the dark
+const WILD_NIGHT = ['bat', 'bat', 'eye', 'hound', 'scarab', 'redcap', 'archer', 'watcher', 'ghoul', 'z_small', 'z_small', 'z_axe', 'z_runner', 'z_armor'];
+// some flyers that spit from a distance, besides the shooters in MONSTERS
+const RANGED_EXTRA = { eye: { range: 72, rate: 2.6 }, ghastly: { range: 80, rate: 2.8 } };
 // [item, chance, min, max]
 const WILD_LOOT = [
   ['heart', 0.15, 1, 1],
@@ -128,6 +131,8 @@ export class Combat {
     this.kills = kills;
     this.skeletons = [];
     this.wilds = [];
+    this.wildShots = []; // what the ranged monsters spit and shoot
+    this.treeBars = []; // the health bar of a tree you have just hit
     this.wildT = 8;
     this.camps = new Map(); // chunk key -> { on, killed, until }
     this.campT = 0;
@@ -393,6 +398,9 @@ export class Combat {
         this.damageSkeleton(s, sp.dmg, cx, cy, 160);
       }
     }
+    for (const o of this.g.world.treesNear(cx, cy, sp.r + 8)) {
+      if (!sp.hit.has(`t${o.tkey}`) && reached(o.x, o.y - 5)) this.chopTrees(o.x, o.y - 5, 1, sp.dmg, null, 0, sp.hit);
+    }
     for (const m of this.monstersNear(cx, cy, sp.r)) {
       if (sp.hit.has(`m${m.id}`) || !reached(m.x, bodyY(m))) continue;
       sp.hit.add(`m${m.id}`);
@@ -440,6 +448,7 @@ export class Combat {
         this.damageSkeleton(s, d.dmg, cx - Math.cos(d.a) * 10, cy - Math.sin(d.a) * 10, 190);
       }
     }
+    this.chopTrees(cx, cy, 17, d.dmg, null, 0, d.hit); // a dash cuts through trees too
     for (const m of this.monstersNear(cx, cy, 17)) {
       if (d.hit.has(`m${m.id}`)) continue;
       d.hit.add(`m${m.id}`);
@@ -692,6 +701,7 @@ export class Combat {
   // ---------- simulation ----------
 
   update(dt) {
+    for (const k in this.g.cds) this.g.cds[k] = Math.max(0, this.g.cds[k] - dt);
     this.swingCd -= dt;
     this.throwCd -= dt;
     this.invuln -= dt;
@@ -862,6 +872,21 @@ export class Combat {
       if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
     }
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
+    this.updateWildShots(dt);
+  }
+
+  updateWildShots(dt) {
+    const p = this.g.player;
+    this.wildShots = this.wildShots.filter((s) => {
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.life -= dt;
+      if (!this.hidden && !this.g.dead && Math.hypot(p.x - s.x, p.y - 6 - s.y) < 8) {
+        this.hurtPlayer(s.dmg, s.x - s.vx, s.y - s.vy, { by: s.by });
+        return false;
+      }
+      return s.life > 0 && !this.g.world.isBlocked(s.x - 1, s.y - 1, 2, 2);
+    });
   }
 
   // every so often: a bulk spawn of one kind (five bats and so on), and at night a boss that burns up at dawn
@@ -872,6 +897,12 @@ export class Combat {
       const pool = night > 0.15 ? ['bat', 'bat', 'hound', 'scarab', 'redcap'] : ['jelly', 'redcap', 'hand'];
       this.spawnPack(pool[Math.floor(Math.random() * pool.length)], 5);
     }
+    if (night > 0.5 && !this.zombieNight) {
+      this.zombieNight = true;
+      this.spawnPack('z_small', 5, '🧟 Zombies are shambling out of the dark!');
+    } else if (night < 0.1) {
+      this.zombieNight = false;
+    }
     const boss = this.wilds.some((w) => w.nightBoss && w.state !== 'dead');
     if (night > 0.6 && !boss && !this.nightBossDone) {
       this.nightBossDone = true;
@@ -881,7 +912,7 @@ export class Combat {
     }
   }
 
-  spawnPack(type, n) {
+  spawnPack(type, n, message = null) {
     const { world, player: p, home } = this.g;
     const def = MONSTERS[type];
     const flyer = def.kind === 'fly';
@@ -898,11 +929,11 @@ export class Combat {
         const tx = Math.floor(x / 16);
         const ty = Math.floor(y / 16);
         if (!flyer && (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4))) continue;
-        this.wilds.push(this.makeWild(type, x, y, 1));
+        this.wilds.push(this.makeWild(type, x, y, Math.max(1, rollMonsterLevel(this.dayLevel()) - 1)));
         made++;
       }
       if (made) {
-        this.g.onToast?.(`${type === 'bat' ? '🦇' : '👹'} A swarm of ${made} ${def.name}s is coming for you!`);
+        this.g.onToast?.(message || `${type === 'bat' ? '🦇' : '👹'} A swarm of ${made} ${def.name}s is coming for you!`);
         sfx.play('wave');
         return;
       }
@@ -922,16 +953,25 @@ export class Combat {
       w.hp = w.max = Math.round(w.max * 2.2);
       w.nightBoss = true;
       this.wilds.push(w);
-      this.g.onToast?.('🌑 A night boss has risen! Survive until sunrise… it burns in daylight.');
-      sfx.play('wave');
+      this.g.announceBoss('🌑 THE NIGHT BOSS HAS BEEN SUMMONED', `${MONSTERS[type].name} · follow the red arrow · it burns at sunrise`);
       return;
     }
     this.nightBossDone = false; // nowhere to put it; try again
   }
 
+  // the tougher the days get, the higher the levels that can show up (and at night, two more)
+  dayLevel() {
+    return Math.min(10, 1 + (this.g.day - 1) + (this.g.darkness() > 0.5 ? 2 : 0));
+  }
+
+  // how much meaner the world is today: grows every day, and again after dark
+  threat() {
+    return (1 + 0.06 * (this.g.day - 1)) * (1 + 0.4 * this.g.darkness());
+  }
+
   makeWild(type, x, y, lv) {
     const def = MONSTERS[type];
-    const hp = Math.max(1, Math.round(def.hp * lvHp(lv)));
+    const hp = Math.max(1, Math.round(def.hp * lvHp(lv) * this.threat()));
     return {
       lv, id: `w${this.nextId++}`, wild: true, type, x, y, hp, max: hp, state: 'move', t: 0,
       anim: Math.random() * 3, face: 1, atk: 0, cd: 0.8, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0, phase: Math.random() * 6,
@@ -952,8 +992,7 @@ export class Combat {
       const tx = Math.floor(x / 16);
       const ty = Math.floor(y / 16);
       if (!flyer && (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4))) continue;
-      const day = Math.min(10, 1 + Math.floor((this.g.day - 1) * 0.8) + (this.g.darkness() > 0.5 ? 1 : 0));
-      this.wilds.push(this.makeWild(type, x, y, rollMonsterLevel(day)));
+      this.wilds.push(this.makeWild(type, x, y, rollMonsterLevel(this.dayLevel())));
       return;
     }
   }
@@ -1004,19 +1043,34 @@ export class Combat {
     }
     w.cd -= dt;
     w.atk = Math.max(0, w.atk - dt);
-    const aggro = (w.nightBoss ? 180 : 100) + this.g.darkness() * 50;
+    const rng = def.kind === 'shoot' ? def : RANGED_EXTRA[w.type];
+    const dark = this.g.darkness();
+    if (w.nightBoss && this.nightBossSkill(w, def, dt, dist, dx, dy, step)) return true;
+    const aggro = Math.max(w.nightBoss ? 180 : 100, rng ? rng.range + 24 : 0) + dark * 50;
+    const hitNow = Math.max(1, Math.round(def.dmg * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * dark)));
+    const by = { kind: 'monster', id: w.id, name: w.nightBoss ? `the night boss ${def.name}` : def.name };
     if (dist < aggro && !this.hidden && !this.g.dead) {
       w.face = dx >= 0 ? 1 : -1;
-      const speed = def.speed * 1.25;
+      w.dirv = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 2 : 3) : dy > 0 ? 0 : 1;
+      const speed = def.speed * 1.25 * (1 + 0.25 * dark); // faster in the dark
       // bats swoop in on a weaving line
       const weave = w.type === 'bat' ? Math.sin(w.anim * 5 + w.phase) * 0.7 : 0;
       const ux = dx / dist;
       const uy = dy / dist;
-      if (dist > 14) step((ux - uy * weave) * speed * dt, (uy + ux * weave) * speed * dt);
+      if (rng) {
+        // ranged: keep a distance and fire from there
+        if (dist > rng.range * 0.85) step(ux * speed * dt, uy * speed * dt);
+        else if (dist < rng.range * 0.4) step(-ux * speed * 0.7 * dt, -uy * speed * 0.7 * dt);
+        if (dist < rng.range && w.cd <= 0) {
+          w.cd = rng.rate * (0.8 + Math.random() * 0.4);
+          w.atk = 0.3;
+          this.wildShots.push({ x: w.x, y: w.y - 6, vx: ux * 95, vy: uy * 95, life: 1.8, dmg: hitNow, by });
+        }
+      } else if (dist > 14) step((ux - uy * weave) * speed * dt, (uy + ux * weave) * speed * dt);
       else if (w.cd <= 0) {
         w.cd = 1.2;
         w.atk = 0.2;
-        this.hurtPlayer(Math.max(1, Math.round(def.dmg * lvDmg(w.lv || 1))), w.x, w.y, { by: { kind: 'monster', id: w.id, name: w.nightBoss ? `the night boss ${def.name}` : def.name } });
+        this.hurtPlayer(hitNow, w.x, w.y, { by });
       }
     } else {
       w.wanderT -= dt;
@@ -1029,6 +1083,67 @@ export class Combat {
       }
       step(w.wx * dt, w.wy * dt);
       if (w.wx) w.face = w.wx >= 0 ? 1 : -1;
+      if (w.wx || w.wy) w.dirv = Math.abs(w.wx) > Math.abs(w.wy) ? (w.wx > 0 ? 2 : 3) : w.wy > 0 ? 0 : 1;
+    }
+    return true;
+  }
+
+  // coins that burst out for everyone in the room: whoever touches a piece first takes it
+  shareCoins(x, y, total, pieces) {
+    const n = Math.min(pieces, total);
+    for (let k = 0; k < n; k++) {
+      const qty = Math.floor(total / n) + (k < total % n ? 1 : 0);
+      const lid = `${this.g.mp?.you ?? 'me'}-c${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}${k}`;
+      const a = Math.random() * Math.PI * 2;
+      const drop = { x, y: y - 4, z: 8, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, vz: 110, fly: true, burst: true, id: 'coin', qty, age: 0, net: lid, nopick: 0.4 };
+      this.drops.push(drop);
+      this.g.mp?.net.send({ t: 'fx', kind: 'loot', lid, x, y: y - 4, qty });
+    }
+  }
+
+  // The night boss winds up a skill with a red mark on the ground, then dashes or spins its blade all round it
+  nightBossSkill(w, def, dt, dist, dx, dy, step) {
+    const scale = def.scale || 1;
+    const radius = 30 + 14 * scale;
+    const hit = (mult) => this.hurtPlayer(Math.max(1, Math.round(def.dmg * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * this.g.darkness()) * mult)), w.x, w.y, { by: { kind: 'monster', id: w.id, name: `the night boss ${def.name}` } });
+    w.skT = (w.skT ?? 3) - dt;
+    let sk = w.skill;
+    if (!sk) {
+      if (w.skT > 0 || dist > 190 || this.hidden || this.g.dead) return false;
+      w.skill = { kind: Math.random() < 0.5 ? 'dash' : 'spiral', phase: 0, t: 0, prog: 0, ang: Math.atan2(dy, dx), hit: false };
+      return true;
+    }
+    sk.t += dt;
+    w.face = Math.cos(sk.ang) >= 0 ? 1 : -1;
+    if (sk.phase === 0) {
+      sk.prog = Math.min(1, sk.t / BOSS_WIND);
+      if (sk.t >= BOSS_WIND) {
+        sk.phase = 1;
+        sk.t = 0;
+        sk.prog = 0;
+        w.atk = 0.3;
+        if (sk.kind === 'spiral' && dist < radius + 6) hit(1.6);
+      }
+      return true;
+    }
+    if (sk.kind === 'dash') {
+      sk.prog = Math.min(1, sk.t / 0.4);
+      step(Math.cos(sk.ang) * 250 * dt, Math.sin(sk.ang) * 250 * dt);
+      if (!sk.hit && dist < 12 + 6 * scale) {
+        sk.hit = true;
+        hit(1.4);
+      }
+      w.atk = Math.max(w.atk, 0.1);
+      if (sk.t >= 0.4) {
+        w.skill = null;
+        w.skT = 5 + Math.random() * 4;
+      }
+    } else {
+      sk.prog = Math.min(1, sk.t / 0.35);
+      if (sk.t >= 0.35) {
+        w.skill = null;
+        w.skT = 5 + Math.random() * 4;
+      }
     }
     return true;
   }
@@ -1042,19 +1157,22 @@ export class Combat {
       w.state = 'dead';
       w.t = 0;
       this.kills++;
-      this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss) * lvXp(w.lv || 1)));
+      this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss) * lvXp(w.lv || 1)), !!(def.boss || w.nightBoss));
       if (w.nightBoss) {
-        // slain before dawn: a real prize
-        for (const [id, qty] of [['coin', 10 + Math.floor(Math.random() * 8)], ['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
+        // slain before dawn: a real prize (the coins can be picked up by everyone in the room)
+        this.shareCoins(w.x, w.y, 10 + Math.floor(Math.random() * 8), 4);
+        for (const [id, qty] of [['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
       }
       for (const [id, chance, min, max] of WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1));
-          this.drops.push({ x: w.x + (Math.random() - 0.5) * 12, y: w.y + (Math.random() - 0.5) * 6, id, qty, age: 0 });
+          if (id === 'coin' && this.g.mp) this.shareCoins(w.x, w.y, qty, 1);
+          else this.drops.push({ x: w.x + (Math.random() - 0.5) * 12, y: w.y + (Math.random() - 0.5) * 6, id, qty, age: 0 });
         }
       }
       return;
     }
+    if (w.nightBoss) return; // the night boss is not knocked back or staggered
     const ang = Math.atan2(w.y - fromY, w.x - fromX);
     w.state = 'hurt';
     w.t = 0;
@@ -1292,6 +1410,34 @@ export class Combat {
     }
   }
 
+  // Cut at the trees in reach. A tree falls after a few hits and leaves a Barricade Box.
+  chopTrees(cx, cy, reach, dmg, a = null, arc = 1.3, hitSet = null) {
+    for (const o of this.g.world.treesNear(cx, cy, reach)) {
+      const key = `t${o.tkey}`;
+      if (hitSet?.has(key)) continue;
+      if (a !== null) {
+        const sx = o.x - cx;
+        const sy = o.y - 5 - cy;
+        if (Math.hypot(sx, sy) > 14 && Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) >= arc) continue;
+      }
+      hitSet?.add(key);
+      const world = this.g.world;
+      const max = world.treeMaxHp(o.tk);
+      const left = world.hurtTree(o, dmg);
+      this.splat(o.x, o.y - 6, '#a8794a', left > 0 ? 1 : 2, cx, cy);
+      sfx.play(left > 0 ? 'thud' : 'chest', 0.7);
+      this.floaters.push({ x: o.x, y: o.y - 30, text: left > 0 ? `-${Math.round(dmg * 10) / 10}` : 'timber!', color: '#c9a06a', t: 0 });
+      if (left > 0) {
+        this.treeBars = this.treeBars.filter((b) => b.key !== o.tkey);
+        this.treeBars.push({ key: o.tkey, x: o.x, y: o.y - o.sh * 0.5 - 6, hp: left, max, t: 0 });
+      } else {
+        this.treeBars = this.treeBars.filter((b) => b.key !== o.tkey);
+        this.drops.push({ x: o.x, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 30, vy: Math.random() * 14, vz: 90, fly: true, burst: true, id: 'barricade', qty: 1, age: 0 });
+        this.g.onToast?.('🪵 The tree fell and left a Barricade Box.');
+      }
+    }
+  }
+
   swordHit(a) {
     const w = this.weapon();
     const eff = w?.effect || 'none';
@@ -1321,6 +1467,7 @@ export class Combat {
         if (d <= reach && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc)) this.strike('rem', r, w, cx, cy, struck);
       }
     }
+    this.chopTrees(cx, cy, reach, this.meleeDmg(), a, arc);
     if (eff === 'shock' && struck.length) this.chain(struck, cx, cy);
   }
 
@@ -1485,6 +1632,7 @@ export class Combat {
   clearEnemies() {
     this.skeletons = [];
     this.wilds = [];
+    this.wildShots = [];
     this.projectiles = [];
     this.swing = null;
     this.dash = null;
@@ -1652,6 +1800,13 @@ export class Combat {
       d.x += (dx / dist) * 120 * dt;
       d.y += (dy / dist) * 120 * dt;
     }
+    if (d.id === 'coin' && dist < (d.burst ? 9 : 7)) {
+      this.g.giveCoins(d.qty);
+      if (d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
+      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪙`, color: '#e0a83a', t: 0 });
+      sfx.play('coin');
+      return false;
+    }
     if (dist < (d.burst ? 9 : 7)) {
       const left = addItem(this.g.inventory, d.id, d.qty);
       if (left === 0 && d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
@@ -1672,6 +1827,7 @@ export class Combat {
     for (const s of this.skeletons) list.push({ kind: 'skeleton', s, y: s.y });
     for (const w of this.wilds) list.push({ kind: 'monster', m: w, y: w.y });
     for (const p of this.projectiles) list.push({ kind: 'projectile', p, y: p.y + 6 });
+    for (const s of this.wildShots) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'wshot' }, y: s.y + 6 });
     for (const p of this.remoteShots) list.push({ kind: 'projectile', p, y: p.y + 6 });
     for (const d of this.drops) if (!d.ins) list.push({ kind: 'drop', d, y: d.y });
     if (this.swing) list.push({ kind: 'swing', y: this.g.player.y + 0.5 });
@@ -1722,6 +1878,14 @@ export class Combat {
       ctx.fillStyle = '#fff3b0';
       ctx.fillRect(-5, -0.7, 7, 1.4);
       ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.id === 'wshot') {
+      // a monster's spit: a small glowing green orb
+      ctx.fillStyle = 'rgba(140,230,90,0.35)';
+      ctx.beginPath();
+      ctx.arc(Math.round(o.p.x), Math.round(o.p.y - 2), 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#b6f26a';
+      ctx.fillRect(Math.round(o.p.x) - 1, Math.round(o.p.y - 2) - 1, 3, 3);
     } else if (o.kind === 'projectile') this.drawIcon(ctx, o.p.id, o.p.x, o.p.y - 8, o.p.rot);
     else if (o.kind === 'drop') this.drawDrop(ctx, o.d, t);
     else if (o.kind === 'swing') this.drawSwing(ctx);
@@ -2007,6 +2171,17 @@ export class Combat {
   }
 
   drawOverlay(ctx, camX, camY, zoom, t) {
+    // a tree you have hit shows how much wood it has left
+    this.treeBars = this.treeBars.filter((b) => (b.t += 1 / 60) < 3);
+    for (const b of this.treeBars) {
+      const sx = (b.x - camX) * zoom;
+      const sy = (b.y - camY) * zoom;
+      const w = zoom * 14;
+      ctx.fillStyle = 'rgba(40,24,20,0.8)';
+      ctx.fillRect(sx - w / 2 - 1, sy - 1, w + 2, zoom * 2.2 + 2);
+      ctx.fillStyle = '#c9a06a';
+      ctx.fillRect(sx - w / 2, sy, w * Math.max(0.05, b.hp / b.max), zoom * 2.2);
+    }
     // floating numbers
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

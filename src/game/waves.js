@@ -9,6 +9,11 @@ const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
 const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
 const MAX_ALIVE = 45;
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
+export const BARRICADE_COST = 4; // a Barricade Box from the shop
+export const REPAIR_COST = 2; // per destroyed barricade planted back
+export const BOSS_WIND = 1.15; // seconds the red mark shows before a boss skill lands
+const BOSS_DASH_SPEED = 250;
+const BOSS_DASH_TIME = 0.4;
 const POWER_SLOW = 0.35; // monsters move and strike at this fraction of their normal pace while it lasts
 const SNAPSHOT_EVERY = 0.125; // Wave Defense and Survival snapshots per second to the room: a few less keeps busy rooms under Supabase's message limit
 const HOUSE_SOFTNESS = 0.35; // the house shrugs off hits better than a single barricade does
@@ -67,6 +72,7 @@ export class WaveSim {
     Object.assign(this, layout(this.world.waveBase(), this.theme));
     this.monsters = [];
     this.barricades = [];
+    this.wrecks = []; // where a barricade stood until it was destroyed (not the ones you picked up yourself)
     this.shots = [];
     this.allies = [];
     this.kills = {}; // monsters defeated per player (id), 'ally' for your helpers
@@ -127,6 +133,7 @@ export class WaveSim {
       baseHp: Math.max(0, this.baseHp),
       baseMax: this.baseMax,
       baseLevel: this.baseLevel,
+      wrecks: this.wrecks.length,
       kills: { ...this.kills },
       allies: this.allies.length,
       teamCap: teamCap(this.baseLevel),
@@ -305,6 +312,7 @@ export class WaveSim {
     }
 
     const players = this.g.waveTargets().filter((p) => !p.hidden);
+    if (def.boss && this.bossSkill(m, def, dt, players)) return;
     const speed = def.speed * (m.sp || 1) * (this.enraged ? 1.25 : 1) * slow;
     const scale = def.scale || 1;
     const reach = 8 + scale * 5;
@@ -384,6 +392,73 @@ export class WaveSim {
     }
   }
 
+  // A boss now and then winds up a skill (a red mark shows where it will land), then does it: a short dash, or a spiral slash all round it.
+  // Returns true while the skill is taking over the boss.
+  bossSkill(m, def, dt, players) {
+    const scale = def.scale || 1;
+    const radius = 30 + 14 * scale;
+    let sk = m.skill;
+    m.skT = (m.skT ?? 3.5) - dt;
+    if (!sk) {
+      if (m.skT > 0) return false;
+      let near = null;
+      let nd = 190;
+      for (const p of players) {
+        const d = Math.hypot(p.x - m.x, p.y - m.y);
+        if (d < nd) {
+          nd = d;
+          near = p;
+        }
+      }
+      if (!near) {
+        m.skT = 1;
+        return false;
+      }
+      m.skill = sk = { kind: Math.random() < 0.5 ? 'dash' : 'spiral', phase: 0, t: 0, prog: 0, ang: Math.atan2(near.y - m.y, near.x - m.x), hit: false };
+      return true;
+    }
+    sk.t += dt;
+    m.face = Math.cos(sk.ang) >= 0 ? 1 : -1;
+    if (sk.phase === 0) {
+      sk.prog = Math.min(1, sk.t / BOSS_WIND);
+      if (sk.t >= BOSS_WIND) {
+        sk.phase = 1;
+        sk.t = 0;
+        sk.prog = 0;
+        m.atk = 0.3;
+        if (sk.kind === 'spiral') this.bossHit(m, def, players, (p) => Math.hypot(p.x - m.x, p.y - m.y) < radius + 6, 1.6);
+      }
+      return true;
+    }
+    if (sk.kind === 'dash') {
+      sk.prog = Math.min(1, sk.t / BOSS_DASH_TIME);
+      this.step(m, def, Math.cos(sk.ang) * BOSS_DASH_SPEED * dt, Math.sin(sk.ang) * BOSS_DASH_SPEED * dt);
+      if (!sk.hit) sk.hit = this.bossHit(m, def, players, (p) => Math.hypot(p.x - m.x, p.y - m.y) < 12 + 6 * scale, 1.4);
+      m.atk = Math.max(m.atk, 0.1);
+      if (sk.t >= BOSS_DASH_TIME) this.endSkill(m);
+    } else {
+      sk.prog = Math.min(1, sk.t / 0.35);
+      if (sk.t >= 0.35) this.endSkill(m);
+    }
+    return true;
+  }
+
+  endSkill(m) {
+    m.skill = null;
+    m.skT = 5 + Math.random() * 4;
+  }
+
+  // hurt every hero the test picks; true if anyone was hit
+  bossHit(m, def, players, test, mult) {
+    let any = false;
+    for (const p of players) {
+      if (!test(p)) continue;
+      any = true;
+      this.g.waveHurt(p.id, Math.max(1, Math.round(this.heartDamage(def, m) * mult)), m.x, m.y, { kind: 'monster', id: m.id, name: def.name });
+    }
+    return any;
+  }
+
   step(m, def, dx, dy) {
     const sx = m.x;
     const sy = m.y;
@@ -439,6 +514,7 @@ export class WaveSim {
     b.hp -= amount;
     if (b.hp <= 0) {
       this.barricades = this.barricades.filter((x) => x !== b);
+      if (!this.wrecks.some((r) => Math.hypot(r.x - b.x, r.y - b.y) < 4)) this.wrecks.push({ x: b.x, y: b.y, v: b.v });
       this.syncRects();
       this.emit({ type: 'bbreak', x: b.x, y: b.y });
     }
@@ -489,6 +565,7 @@ export class WaveSim {
       this.emit({ type: 'mdie', name: def.name, x: m.x, y: m.y, boss: !!def.boss, loot: rollMonsterLoot(def, this.diff, this.theme), power, pid: this.wave, lv: m.lv || 1 });
       return;
     }
+    if (def.boss) return; // a boss shrugs hits off: no knock-back, no stagger, it keeps its pace
     const ang = Math.atan2(m.y - 8 - fy, m.x - fx);
     const power = kb * (def.kb ?? 1);
     m.state = 'hurt';
@@ -519,8 +596,26 @@ export class WaveSim {
   placeBarricade(x, y, v = false) {
     if (!this.canPlace(x, y)) return false;
     this.barricades.push({ id: this.nextId++, x, y, hp: this.diff.barricadeHp, max: this.diff.barricadeHp, v: !!v, r: false });
+    this.wrecks = this.wrecks.filter((r) => Math.hypot(r.x - x, r.y - y) >= 6);
     this.syncRects();
     return true;
+  }
+
+  // plant every destroyed barricade back where it stood (as far as the spot is free); returns how many went back
+  repairAll() {
+    let placed = 0;
+    for (const r of [...this.wrecks]) {
+      if (this.placeCheck(r.x, r.y)) continue;
+      this.barricades.push({ id: this.nextId++, x: r.x, y: r.y, hp: this.diff.barricadeHp, max: this.diff.barricadeHp, v: !!r.v, r: false });
+      this.wrecks = this.wrecks.filter((x) => x !== r);
+      this.syncRects();
+      placed++;
+    }
+    return placed;
+  }
+
+  requestRepair() {
+    return this.repairAll();
   }
 
   requestPick(id) {
@@ -646,6 +741,7 @@ export class WaveSim {
   onMessage(k, d, from) {
     if (k === 'hit') this.hitMonster(d.id, d.dmg, d.fx, d.fy, d.kb, false, from);
     else if (k === 'power') this.power(d.kind, from);
+    else if (k === 'repair') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'repair', placed: this.repairAll(), asked: Math.max(0, Math.min(200, Number(d.n) || 0)) } });
     else if (k === 'place') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'place', ok: this.placeBarricade(d.x, d.y, d.v) } });
     else if (k === 'pick') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'pick', ok: this.pickBarricade(d.id) } });
     else if (k === 'recruit') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'recruit', ok: ALLY_KINDS.includes(d.kind) && this.recruit(d.kind), cost: ALLIES[d.kind]?.cost } });
@@ -663,13 +759,14 @@ export class WaveSim {
       qn: this.queue.length,
       wt: this.waveTotal || 0,
       qb: this.queueCounts().map(([t, n]) => [MONSTER_IDS.indexOf(t), n]),
-      m: this.monsters.map((m) => [m.id, MONSTER_IDS.indexOf(m.type), Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10, m.hp, m.max, m.face, m.state === 'dead' ? 2 : m.state === 'hurt' ? 1 : 0, m.atk > 0 ? 1 : 0, m.dirv, m.lv || 1]),
+      m: this.monsters.map((m) => [m.id, MONSTER_IDS.indexOf(m.type), Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10, m.hp, m.max, m.face, m.state === 'dead' ? 2 : m.state === 'hurt' ? 1 : 0, m.atk > 0 ? 1 : 0, m.dirv, m.lv || 1, m.skill ? [m.skill.kind === 'dash' ? 1 : 2, m.skill.phase, Math.round(m.skill.prog * 100) / 100, Math.round(m.skill.ang * 100) / 100] : 0]),
       b: this.barricades.map((b) => [b.id, b.x, b.y, Math.round(b.hp * 10) / 10, b.max, b.v ? 1 : 0, b.r ? 1 : 0]),
       s: this.shots.map((s) => [Math.round(s.x), Math.round(s.y), s.spit ? 1 : 0]),
       a: this.allies.map((a) => [a.id, ALLY_KINDS.indexOf(a.kind), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, a.dir, a.moving ? 1 : 0, a.atk > 0 ? 1 : 0]),
       as: this.ashots.map((s) => [Math.round(s.x), Math.round(s.y)]),
       bl: this.baseLevel,
       k: Object.entries(this.kills),
+      wk: this.wrecks.map((r) => [r.x, r.y, r.v ? 1 : 0]),
     };
   }
 }
@@ -686,6 +783,7 @@ export class WaveMirror {
     Object.assign(this, layout(this.world.waveBase(), this.theme));
     this.monsters = [];
     this.barricades = [];
+    this.wrecks = []; // where a barricade stood until it was destroyed (not the ones you picked up yourself)
     this.shots = [];
     this.allies = [];
     this.kills = {}; // monsters defeated per player (id), 'ally' for your helpers
@@ -725,6 +823,7 @@ export class WaveMirror {
       baseLevel: this.baseLevel,
       allies: this.allies.length,
       teamCap: teamCap(this.baseLevel),
+      wrecks: this.wrecks.length,
       kills: { ...this.kills },
       boss: boss ? { hp: boss.hp, max: boss.max, name: MONSTERS[boss.type].name } : null,
       ...this.forecast(this.qn || 0, this.wt || 0, this.qb || []),
@@ -760,11 +859,11 @@ export class WaveMirror {
     this.wt = s.wt;
     this.qb = (s.qb || []).map(([ti, n]) => [MONSTER_IDS[ti], n]);
     const old = new Map(this.monsters.map((m) => [m.id, m]));
-    this.monsters = s.m.map(([id, ti, x, y, hp, max, face, st, atk, dirv, lv]) => {
+    this.monsters = s.m.map(([id, ti, x, y, hp, max, face, st, atk, dirv, lv, sk]) => {
       const m = old.get(id) || { id, x, y, anim: Math.random() * 4, t: 0 };
       const state = st === 2 ? 'dead' : st === 1 ? 'hurt' : 'walk';
       if (state !== m.state) m.t = 0;
-      Object.assign(m, { type: MONSTER_IDS[ti], tx: x, ty: y, hp, max, face, dirv: dirv ?? 0, lv: lv || 1, state, atk: atk ? 0.3 : m.atk || 0 });
+      Object.assign(m, { type: MONSTER_IDS[ti], tx: x, ty: y, hp, max, face, dirv: dirv ?? 0, lv: lv || 1, skill: sk ? { kind: sk[0] === 1 ? 'dash' : 'spiral', phase: sk[1], prog: sk[2], ang: sk[3] } : null, state, atk: atk ? 0.3 : m.atk || 0 });
       return m;
     });
     this.barricades = s.b.map(([id, x, y, hp, max, v, r]) => ({ id, x, y, hp, max, v: !!v, r: !!r }));
@@ -778,6 +877,7 @@ export class WaveMirror {
     this.ashots = (s.as || []).map(([x, y]) => ({ x, y }));
     this.baseLevel = s.bl || 0;
     this.kills = Object.fromEntries(s.k || []);
+    this.wrecks = (s.wk || []).map(([x, y, v]) => ({ x, y, v: !!v }));
     this.syncRects();
   }
 
@@ -795,6 +895,11 @@ export class WaveMirror {
   power(kind) {
     this.g.mp?.net.send({ t: 'w', to: 'host', k: 'power', d: { kind } });
     return true;
+  }
+
+  // a guest asks the host to plant the destroyed barricades back; the answer comes as an ack
+  requestRepair(n) {
+    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'repair', d: { n } });
   }
 
   placeCheck(x, y) {

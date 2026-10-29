@@ -637,7 +637,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <span>🔍</span>
           <button className="btn small-btn" aria-label="Zoom in" onClick={() => gameRef.current?.zoomBy(1)}>+</button>
         </div>
-        <div className="coin-chip" title={waves ? 'Coins for upgrades and helpers' : 'Coins for the shop'}>🪙 {hud.coins}</div>
+        <button type="button" className="coin-chip coin-drop" onClick={() => hud.coins > 0 && setQty({ kind: 'coins', max: hud.coins, id: 'coin' })} title={`${waves ? 'Coins for upgrades and helpers' : 'Coins for the shop'}. Click to drop some on the ground.`}>🪙 {hud.coins}</button>
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
         {(!mobile || hudMenuOpen) && (
           <>
@@ -766,7 +766,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {(!waves || survival) && <SupplyBar supplies={hud.supplies || { hp: 0, stam: 0, shield: 0 }} onUse={(k) => gameRef.current?.useSupply(k)} />}
+      {(!waves || survival) && <SupplyBar cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0, shield: 0 }} onUse={(k) => gameRef.current?.useSupply(k)} />}
       {banner && !hud.celeb && (
         <div key={banner.id} className={`kill-banner tier-${banner.tier} ${banner.mine ? 'mine' : ''}`} role="status">
           <b>{banner.title}</b>
@@ -844,10 +844,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <QtyPicker
           id={qty.id}
           max={qty.max}
-          verb={qty.kind === 'drop' ? 'Drop' : 'Move'}
+          verb={qty.kind === 'drop' || qty.kind === 'coins' ? 'Drop' : 'Move'}
           onCancel={() => setQty(null)}
           onConfirm={(n) => {
-            if (qty.kind === 'drop') gameRef.current?.dropItem(qty.side, qty.i, n);
+            if (qty.kind === 'coins') gameRef.current?.dropCoins(n);
+            else if (qty.kind === 'drop') gameRef.current?.dropItem(qty.side, qty.i, n);
             else gameRef.current?.storeMove(qty.side, qty.i, n);
             setQty(null);
           }}

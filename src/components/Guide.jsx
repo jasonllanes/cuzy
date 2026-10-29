@@ -5,7 +5,7 @@ import { Effects } from './Inventory';
 
 const SKELETON_DROPS = ['coin', 'acorn', 'rock', 'gold', 'gem'];
 const APOC_ONLY = ['bandage', 'canned', 'soup', 'medkit'];
-const SURVIVAL_ITEMS = ['sword', 'barricade', 'hppack', 'soupcan', 'coin'];
+const SURVIVAL_ITEMS = ['sword', 'barricade', 'hppack', 'soupcan'];
 
 const range = (min, max) => (min === max ? `×${min}` : `×${min}–${max}`);
 
@@ -99,7 +99,7 @@ const TITLES = { free: '🌳 Free Roam guide', survival: '☠️ Survival guide'
 export default function Guide({ onClose, mode = 'free' }) {
   const [tab, setTab] = useState('play');
   const worth = (def) => (def.heal || 0) + (def.energy || 0) * 2;
-  const pool = Object.entries(ITEMS).filter(([id]) => (mode === 'survival' ? SURVIVAL_ITEMS.includes(id) : !APOC_ONLY.includes(id)));
+  const pool = Object.entries(ITEMS).filter(([id]) => id !== 'coin' && (mode === 'survival' ? SURVIVAL_ITEMS.includes(id) : !APOC_ONLY.includes(id)));
   const rows = pool.sort((a, b) => Number(isConsumable(b[1])) - Number(isConsumable(a[1])) || worth(b[1]) - worth(a[1]));
   const tabs = [['play', 'How to play'], ['keys', 'Controls'], ['items', mode === 'survival' ? 'Items' : 'All items']];
 

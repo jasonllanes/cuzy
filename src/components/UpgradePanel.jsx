@@ -1,6 +1,7 @@
 import { ALLIES, ALLY_KINDS, MAX_ALLIES, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
 import { MAX_LEVEL, UPGRADES, upgradeCost } from '../game/upgrades';
+import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
 export default function UpgradePanel({ hud, game, onClose, survival = false }) {
@@ -41,6 +42,22 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
               </div>
             );
           })}
+        </div>
+
+        <div className="recruit-note">
+          <b>🧱 Barricades</b> (a barricade you set down stays put until zombies destroy it)
+          <div className="recruit-list">
+            <div className="recruit-chip hire">
+              <span><b>📦 Barricade Box</b><small>One more wall to set down with Q or left click.</small></span>
+              <button className="btn go small-btn" disabled={hud.coins < BARRICADE_COST} onClick={() => game.buyBarricade()}>🪙 {BARRICADE_COST}</button>
+            </div>
+            <div className="recruit-chip hire">
+              <span><b>🔧 Repair all barricades</b><small>{hud.wave?.wrecks ? `${hud.wave.wrecks} destroyed: plants them back where they stood (shown as red ghosts). Walls you picked up yourself are left alone.` : 'Nothing destroyed. Walls that break are remembered here.'}</small></span>
+              <button className="btn go small-btn" disabled={!hud.wave?.wrecks || hud.coins < hud.wave.wrecks * REPAIR_COST} onClick={() => game.repairAllBarricades()}>
+                {hud.wave?.wrecks ? `🪙 ${hud.wave.wrecks * REPAIR_COST}` : 'None'}
+              </button>
+            </div>
+          </div>
         </div>
 
         {survival && hud.gunsOwned && (
