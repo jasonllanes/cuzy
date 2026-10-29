@@ -1,0 +1,45 @@
+/* The ending scene: a painted sky over the game, a narrator, then the numbers */
+.ending { position: absolute; inset: 0; z-index: 60; overflow: hidden; display: grid; justify-items: center; align-content: end; padding: 0 16px 6vh; color: #fff; animation: ending-in 1s ease-out both; }
+@keyframes ending-in { from { opacity: 0; } to { opacity: 1; } }
+.ending-sky { position: absolute; inset: 0; }
+.ending.victory .ending-sky, .ending.round .ending-sky { background: linear-gradient(#2a3a6e 0%, #8a5a9a 28%, #f08a6a 58%, #ffd27a 82%, #ffe9b0 100%); }
+.ending.defeat .ending-sky { background: linear-gradient(#0c0a14 0%, #2a1020 45%, #5a1a22 80%, #8a2a1e 100%); }
+.ending-sun { position: absolute; left: 50%; width: 110px; height: 110px; margin-left: -55px; border-radius: 50%; background: radial-gradient(circle, #fff6c8 30%, #ffd46a 60%, rgba(255, 190, 80, 0) 72%); }
+.ending-sun.rise { bottom: 20%; animation: sun-rise 9s ease-out both; }
+.ending-sun.sink { bottom: 30%; background: radial-gradient(circle, #ff9a6a 30%, #c4402a 60%, rgba(160, 40, 30, 0) 72%); animation: sun-sink 9s ease-in both; }
+@keyframes sun-rise { from { transform: translateY(160px); } to { transform: translateY(-40px); } }
+@keyframes sun-sink { from { transform: translateY(-20px); } to { transform: translateY(180px); } }
+.ending-hills { position: absolute; left: -5%; right: -5%; bottom: 0; }
+.ending-hills.far { height: 34%; background: #3a2f55; clip-path: polygon(0 60%, 12% 30%, 26% 55%, 40% 20%, 58% 50%, 74% 25%, 88% 52%, 100% 35%, 100% 100%, 0 100%); opacity: 0.85; }
+.ending-hills.near { height: 24%; background: #231c36; clip-path: polygon(0 45%, 18% 70%, 34% 30%, 52% 62%, 70% 28%, 86% 60%, 100% 40%, 100% 100%, 0 100%); }
+.ending.defeat .ending-hills.far { background: #2a1822; }
+.ending.defeat .ending-hills.near { background: #140d16; }
+.ending-base { position: absolute; left: 50%; bottom: 17%; transform: translateX(-50%); font-size: 80px; line-height: 1; filter: drop-shadow(0 6px 0 rgba(0, 0, 0, 0.35)); animation: ending-pop 1.2s 0.4s both; }
+.ending-base img { image-rendering: pixelated; width: 162px; height: auto; display: block; }
+.ending-base.wrecked { filter: grayscale(0.6) brightness(0.55) drop-shadow(0 6px 0 rgba(0, 0, 0, 0.45)); }
+.ending-smoke { position: absolute; left: 50%; bottom: 80%; width: 14px; height: 14px; border-radius: 50%; background: rgba(200, 200, 210, 0.5); box-shadow: 0 -16px 0 -2px rgba(190, 190, 200, 0.4), 6px -34px 0 -3px rgba(180, 180, 190, 0.3); animation: smoke 3s ease-out infinite; }
+@keyframes smoke { from { transform: translateY(0); opacity: 0.9; } to { transform: translateY(-60px); opacity: 0; } }
+@keyframes ending-pop { from { transform: translate(-50%, 30px) scale(0.8); opacity: 0; } to { transform: translate(-50%, 0) scale(1); opacity: 1; } }
+.ending-trophy { position: absolute; left: 50%; bottom: 20%; transform: translateX(-50%); font-size: 96px; filter: drop-shadow(0 0 22px rgba(255, 210, 90, 0.9)); animation: trophy-bob 2.2s ease-in-out infinite; }
+@keyframes trophy-bob { 0%, 100% { transform: translate(-50%, 0) rotate(-4deg); } 50% { transform: translate(-50%, -10px) rotate(4deg); } }
+.ending-bits { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.ending-bits i { position: absolute; top: -20px; border-radius: 2px; opacity: 0.95; animation: bit-fall linear infinite; }
+.ending-bits i.ember { background: #ff8a3c; border-radius: 50%; box-shadow: 0 0 6px #ff5a1f; top: auto; bottom: -10px; animation-name: ember-rise; }
+@keyframes bit-fall { to { transform: translateY(110vh) rotate(540deg); } }
+@keyframes ember-rise { from { transform: translateY(0); opacity: 0.9; } to { transform: translateY(-80vh) translateX(30px); opacity: 0; } }
+.ending-title { position: absolute; top: 9vh; left: 0; right: 0; margin: 0; text-align: center; font: 800 clamp(1.6rem, 5vw, 3rem) var(--pixel); color: #fff; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.45), 0 0 24px rgba(255, 220, 140, 0.55); transition: opacity 1s; }
+.ending.defeat .ending-title { text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6), 0 0 24px rgba(255, 70, 50, 0.5); }
+.ending-talk { position: relative; width: min(620px, 94%); padding: 12px 16px; color: var(--ink); background: var(--paper); }
+.ending-bot { font: 800 0.8rem var(--pixel); color: var(--rose-dark); margin-bottom: 4px; }
+.ending-talk p { margin: 0; font-size: 1.05rem; min-height: 3.2em; }
+.ending-card { position: relative; width: min(560px, 94%); display: grid; gap: 10px; padding: 14px 18px; color: var(--ink); background: var(--paper); animation: ending-pop-up 0.5s both; }
+@keyframes ending-pop-up { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.ending-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ending-stat { display: grid; gap: 2px; background: #fff; border: 3px solid var(--wood); border-radius: 12px; padding: 6px 10px; text-align: center; }
+.ending-stat span { font-size: 0.75rem; color: var(--ink-soft); }
+.ending-stat b { font: 800 1.5rem var(--pixel); color: var(--rose-dark); }
+.ending-board h3 { margin: 0 0 4px; font: 800 0.85rem var(--pixel); }
+.ending-row { display: flex; justify-content: space-between; padding: 3px 8px; border-radius: 8px; background: #fff7ea; margin-bottom: 3px; font-size: 0.9rem; }
+.ending-row.me { background: #fff0f3; border: 2px solid var(--rose); }
+.ending-btn { justify-self: center; min-width: 220px; }
+@media (max-width: 640px) { .ending-base { font-size: 56px; } .ending-base img { width: 120px; } .ending-trophy { font-size: 70px; } .ending-title { top: 5vh; } }

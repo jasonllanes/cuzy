@@ -4,9 +4,9 @@ import { randomName } from '../game/rng';
 import SpritePreview from './SpritePreview';
 import WorldBackdrop from './WorldBackdrop';
 import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
-import { MAX_BOTS } from '../game/bots';
-import AudioSettings from './AudioSettings';
 import MenuHome from './MenuHome';
+import MusicButton from './MusicButton';
+import MapPreview from './MapPreview';
 import { FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
@@ -17,7 +17,7 @@ const STEPS = [
   ['game', 'Game'],
   ['who', 'Players'],
   ['hero', 'Hero'],
-  ['play', 'Play'],
+  ['play', 'Map'],
 ];
 
 function useLobby(net) {
@@ -40,13 +40,12 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const inviting = !!invite && !fullMenu;
   const [step, setStep] = useState('name');
   const [view, setView] = useState('home'); // the main menu, or 'wizard' (the setup pages), 'settings', 'about', 'exit'
-  const [showSettings, setShowSettings] = useState(false);
   const stepIndex = STEPS.findIndex(([id]) => id === step);
   const [name, setName] = useState(initial.name);
 
   // two kinds of game: the cozy Free Roam world (which can also host a wave defense), and Survival
   const [gameType, setGameType] = useState(initial.mode === 'survival' ? 'survival' : 'free');
-  const [freeMode, setFreeMode] = useState(initial.mode === 'waves' ? 'waves' : initial.bots ? 'ai' : 'free');
+  const freeMode = 'free'; // Free Roam is just Roam here: Wave Defense and vs AI are not offered any more
   const [mode, setMode] = useState(invite ? 'together' : 'solo');
   const [aiCount, setAiCount] = useState(initial.bots || 3);
   // 'ai' is a solo-only Free Roam flavour: an ordinary fight world with computer rivals
@@ -73,15 +72,24 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const [freeMap, setFreeMap] = useState(FREE_MAPS.find((m) => m.seed === splitSeed(initial.seed).base)?.id || FREE_MAPS[0].id);
   const [survMap, setSurvMap] = useState(splitSeed(initial.seed).map); // Survival's map, kept in the seed after a ~
   // the map you pick decides the world seed (maps are named, not typed in)
-  const seed = gameMode === 'survival' ? joinSeed(SURVIVAL_BASE, survMap) : FREE_MAPS.find((m) => m.id === freeMap).seed;
+  // "Random map": a map picked at random (and a fresh layout of it) each time the menu is opened or the card is pressed
+  const [dice, setDice] = useState(() => Math.random());
+  const survPick = survMap === 'random' ? SURVIVAL_MAPS[Math.floor(dice * SURVIVAL_MAPS.length)].id : survMap;
+  const freePick = freeMap === 'random' ? FREE_MAPS[Math.floor(dice * FREE_MAPS.length)] : FREE_MAPS.find((m) => m.id === freeMap) || FREE_MAPS[0];
+  const seed = gameMode === 'survival' ? joinSeed(SURVIVAL_BASE, survPick) : freePick.seed;
   // a fresh roll of the dice every time the menu opens, so the same map is not the same world twice
-  const [fresh, setFresh] = useState(true);
-  const [roll] = useState(() => Math.random().toString(36).slice(2, 6));
-  const rolledSeed = !fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survMap) : `${seed}@${roll}`;
+  const [fresh, setFresh] = useState(false); // off: the map exactly as it is. On: the same map with the objects, trees and obstacles generated afresh
+  const [roll, setRoll] = useState(() => Math.random().toString(36).slice(2, 6));
+  const newRoll = () => Math.random().toString(36).slice(2, 6);
+  const [pv, setPv] = useState(null); // the map preview: { roll } while it is open (roll null: the map exactly as it is)
+  const rolledSeed = !fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survPick) : `${seed}@${roll}`;
+  // the seed the preview shows: the map as it will be played, or (after "Generate another") a freshly rolled layout of it
+  const previewSeed = pv ? (pv.roll ? (gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${pv.roll}`, survPick) : `${seed}@${pv.roll}`) : seed) : seed;
+  const pickedName = gameMode === 'survival' ? SURVIVAL_MAPS.find((m) => m.id === survPick)?.name : freePick.name;
   const [hovered, setHovered] = useState(null);
   const [code, setCode] = useState(invite);
   const [roomName, setRoomName] = useState('');
-  const [max, setMax] = useState(4);
+  const [max, setMax] = useState(5);
   const [lateJoin, setLateJoin] = useState(true);
   // how a Free Roam round is won: first to 10 player kills, or first to 15 monster kills (handy for trying the winner screen)
   const [winBy, setWinBy] = useState(initial.winBy === 'monsters' ? 'monsters' : 'duel');
@@ -141,7 +149,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     setBusy(true);
     setError('');
     try {
-      onEnterRoom(profile(), await net.create({ name: `${myName()}'s meadow`, seed: fullSeed(), max: 4, pvp: true, mode: 'free', difficulty, winBy, allowLate: true, player: { name: myName(), hero: activeHeroId } }));
+      onEnterRoom(profile(), await net.create({ name: `${myName()}'s meadow`, seed: fullSeed(), max: 5, pvp: true, mode: 'free', difficulty, winBy, allowLate: true, player: { name: myName(), hero: activeHeroId } }));
     } catch (err) {
       // no room available (offline, or the rooms table is not set up): say so, and play without one if asked again
       if (noRoomOk) {
@@ -178,7 +186,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     const pickHero = (id) => setHero(id);
     return (
       <div className="menu">
-        <WorldBackdrop assets={assets} seed={invited?.seed || seed} />
+        <MusicButton />
+        <WorldBackdrop assets={assets} seed={invited?.seed || rolledSeed} />
         <div className="cloud c1" />
         <div className="cloud c2" />
         <form className="panel menu-card" onSubmit={joinInvited}>
@@ -233,7 +242,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     };
     return (
       <div className="menu">
-        <WorldBackdrop assets={assets} seed={seed} />
+        <MusicButton />
+        <WorldBackdrop assets={assets} seed={rolledSeed} />
         <div className="cloud c1" />
         <div className="cloud c2" />
         <div className="cloud c3" />
@@ -251,7 +261,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
 
   return (
     <div className="menu">
-      <WorldBackdrop assets={assets} seed={seed} />
+        <MusicButton />
+      <WorldBackdrop assets={assets} seed={rolledSeed} />
       <div className="cloud c1" />
       <div className="cloud c2" />
       <div className="cloud c3" />
@@ -423,66 +434,14 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
               <button type="button" className="summary-chip" onClick={() => go('hero')} title="Change hero">🧍 {activeHero.label}</button>
             </div>
 
-            {!survival && (
-              <div className="mode-tabs" role="radiogroup" aria-label="Free Roam mode">
-                <button type="button" role="radio" aria-checked={gameMode === 'free' && !vsAi} className={`mode-tab ${gameMode === 'free' && !vsAi ? 'active' : ''}`} onClick={() => setFreeMode('free')}>
-                  🌳 Roam
-                </button>
-                <button type="button" role="radio" aria-checked={freeMode === 'waves'} className={`mode-tab ${freeMode === 'waves' ? 'active' : ''}`} onClick={() => setFreeMode('waves')}>
-                  🌊 Wave defense
-                </button>
-                {mode === 'solo' && (
-                  <button type="button" role="radio" aria-checked={freeMode === 'ai'} className={`mode-tab ${freeMode === 'ai' ? 'active' : ''}`} onClick={() => setFreeMode('ai')}>
-                    🤖 vs AI
-                  </button>
-                )}
-              </div>
-            )}
-            {gameMode === 'free' && (
-              <>
-                <div className="sub-label">How do you win?</div>
-                <div className="diff-row" role="radiogroup" aria-label="Win condition">
-                  <button type="button" role="radio" aria-checked={winBy === 'duel'} className={`diff-chip ${winBy === 'duel' ? 'on' : ''}`} onClick={() => setWinBy('duel')}>
-                    <b>⚔️ Player kills</b>
-                    <small>First to 10 wins</small>
-                  </button>
-                  <button type="button" role="radio" aria-checked={winBy === 'monsters'} className={`diff-chip ${winBy === 'monsters' ? 'on' : ''}`} onClick={() => setWinBy('monsters')}>
-                    <b>👹 Monster kills</b>
-                    <small>First to 15 wins</small>
-                  </button>
-                </div>
-              </>
-            )}
-            {vsAi && (
-              <div className="wave-setup">
-                <p className="hint">⚔️ Fight computer rivals: swords and throws hurt. {winBy === 'monsters' ? <>The first to <b>15 monster kills</b> wins.</> : <>The first to <b>10 kills</b> wins.</>} Rivals fight each other too!</p>
-                <div className="ai-count">
-                  <span>How many rivals?</span>
-                  <button type="button" className="btn small-btn" aria-label="Fewer rivals" disabled={aiCount <= 1} onClick={() => setAiCount((n) => Math.max(1, n - 1))}>−</button>
-                  <b>{aiCount}</b>
-                  <button type="button" className="btn small-btn" aria-label="More rivals" disabled={aiCount >= MAX_BOTS} onClick={() => setAiCount((n) => Math.min(MAX_BOTS, n + 1))}>+</button>
-                </div>
-                <div className="sub-label">AI skill</div>
-                <div className="diff-row" role="radiogroup" aria-label="AI skill">
-                  {DIFFICULTY_IDS.map((id) => (
-                    <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} onClick={() => setDifficulty(id)}>
-                      <b>{DIFFICULTY[id].name}</b>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {gameMode !== 'free' && (
+            {gameMode === 'survival' && (
               <div className="wave-setup">
                 <p className="hint">
-                  {gameMode === 'survival' ? (
-                    <>Survive <b>10 waves</b> of zombies around a camper RV, with a monster boss at the end.</>
-                  ) : (
-                    <>Hold the house at the centre of the world through <b>10 waves</b> of monsters, with a boss at the end.</>
-                  )}
+                  Survive <b>10 waves</b> of zombies around a camper RV, with a monster boss at the end.
                   {mode === 'together' ? ' Everyone in the room defends the same base.' : ''}
+                  {' '}The host can change the difficulty at any time in the room settings.
                 </p>
-                {gameMode === 'survival' && <p className="hint">👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5 and {DIFFICULTY[difficulty].boss10} on wave 10.</p>}
+                <p className="hint">👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5 and {DIFFICULTY[difficulty].boss10} on wave 10.</p>
                 <div className="diff-row" role="radiogroup" aria-label="Difficulty">
                   {DIFFICULTY_IDS.map((id) => (
                     <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} onClick={() => setDifficulty(id)}>
@@ -494,7 +453,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
               </div>
             )}
 
-            <span className="sub-label">Map</span>
+            <span className="sub-label">Choose a map</span>
             <div className="map-grid" role="radiogroup" aria-label="Map">
               {(gameMode === 'survival' ? SURVIVAL_MAPS : FREE_MAPS).map((m) => {
                 const on = gameMode === 'survival' ? survMap === m.id : freeMap === m.id;
@@ -505,11 +464,22 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                   </button>
                 );
               })}
+              <button type="button" role="radio" aria-checked={(gameMode === 'survival' ? survMap : freeMap) === 'random'} className={`diff-chip map-card ${(gameMode === 'survival' ? survMap : freeMap) === 'random' ? 'on' : ''}`} onClick={() => { setDice(Math.random()); if (gameMode === 'survival') setSurvMap('random'); else setFreeMap('random'); }}>
+                <b>🎲 Random map</b>
+                <small>
+                  {(gameMode === 'survival' ? survMap : freeMap) === 'random'
+                    ? `Picked: ${gameMode === 'survival' ? SURVIVAL_MAPS.find((m) => m.id === survPick)?.name : freePick.name}. Press again for another.`
+                    : 'Picks one of the maps above at random. Press it to roll.'}
+                </small>
+              </button>
             </div>
             <label className="check-row">
-              <input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> 🎲 New layout every game <small>(same map style, but different trees, houses, wrecks and spawn each time)</small>
+              <input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> 🎲 Generate a new layout <small>(the same map, but its trees, obstacles, houses and objects are placed differently every game; leave it off to play the map as it is)</small>
             </label>
-            <p className="hint">The world drifting by behind this card is the map style you picked.</p>
+            <div className="preview-row">
+              <button type="button" className="btn" onClick={() => setPv({ roll: fresh ? roll : null })}>👁 Preview the map</button>
+              <small>See the whole map full screen and walk around it. You can generate another one there before you decide.</small>
+            </div>
 
             {mode === 'together' && (
               <div className="together">
@@ -582,14 +552,35 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
 
             <div className="nav-row">
               <button type="button" className="btn ghost" onClick={() => go('hero')}>← Back</button>
-              {mode === 'solo' && <button type="submit" className="btn go" disabled={busy}>{soloRoom ? 'Open my room ➜' : 'Begin adventure ➜'}</button>}
+              {mode === 'solo' && <button type="submit" className="btn go" disabled={busy}>{soloRoom ? 'Open the room ➜' : 'Begin adventure ➜'}</button>}
             </div>
           </section>
         )}
 
-        {showSettings && <AudioSettings />}
-        <button type="button" className="settings-toggle" onClick={() => setShowSettings((v) => !v)}>⚙ Settings</button>
       </form>
+      {pv && (
+        <MapPreview
+          assets={assets}
+          net={net}
+          seed={previewSeed}
+          mode={gameMode}
+          name={myName()}
+          hero={activeHeroId}
+          label={pickedName}
+          onRegenerate={() => {
+            if ((gameMode === 'survival' ? survMap : freeMap) === 'random') setDice(Math.random()); // the random card rolls a different map too
+            setPv({ roll: newRoll() });
+          }}
+          onUse={() => {
+            if (pv.roll) {
+              setFresh(true);
+              setRoll(pv.roll);
+            }
+            setPv(null);
+          }}
+          onClose={() => setPv(null)}
+        />
+      )}
     </div>
   );
 }

@@ -144,6 +144,12 @@ export class Net {
     return true;
   }
 
+  // take another seat in the waiting room
+  moveSlot(n) {
+    this.send({ t: 'slot', slot: n });
+    return true;
+  }
+
   leave() {
     this.roomCode = null;
     this.send({ t: 'leave' });

@@ -774,7 +774,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .diff-chip.on { border-color: var(--rose); background: #fff0f3; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-weight: 700; color: var(--ink); cursor: pointer; }
-.check-row input { width: 18px; height: 18px; accent-color: var(--rose); }
+.check-row input { flex: none; width: 20px; height: 20px; min-width: 20px; padding: 0; margin: 0; accent-color: var(--rose); cursor: pointer; }
 .check-row small { font-weight: 400; color: var(--ink-soft); }
 .wait-late { justify-content: center; }
 
@@ -1116,13 +1116,13 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .mobile-ui .overlay > .pause-card { grid-template-columns: 1fr 1fr; grid-template-areas: 'h h' 'p p' 'a b' 'c b'; gap: 6px 14px; padding: 10px 16px; min-width: 0; text-align: left; align-content: start; }
 .mobile-ui .pause-card > h2 { grid-area: h; text-align: center; font-size: 1.2rem; }
 .mobile-ui .pause-card > .hint { grid-area: p; text-align: center; margin: 0; }
-.mobile-ui .pause-card .pause-a { grid-area: a; gap: 6px; }
+.mobile-ui .pause-card .pm-grid { grid-area: a; gap: 6px; }
 .mobile-ui .pause-card .pause-b { grid-area: b; gap: 6px; }
-.mobile-ui .pause-card .pause-c { grid-area: c; gap: 6px; }
-.mobile-ui .pause-card .pause-a:empty { display: none; }
+.mobile-ui .pause-card .pm-foot { grid-area: c; gap: 6px; }
+.mobile-ui .pause-card .pm-grid:empty { display: none; }
 .mobile-ui .pause-card .btn { padding: 6px 10px; font-size: 0.8rem; }
 .mobile-ui .overlay > .pause-card { align-items: start; grid-template-rows: auto auto auto 1fr; }
-.mobile-ui .pause-card .pause-a, .mobile-ui .pause-card .pause-c, .mobile-ui .pause-card .pause-b { align-content: start; }
+.mobile-ui .pause-card .pm-grid, .mobile-ui .pause-card .pm-foot, .mobile-ui .pause-card .pause-b { align-content: start; }
 
 /* the sprint line: from the top of the joystick straight up to a lock */
 .joystick .run-line { position: absolute; left: 50%; bottom: 100%; width: 6px; height: 46px; margin-left: -3px; border-radius: 3px; background: repeating-linear-gradient(to top, rgba(255, 250, 240, 0.75) 0 6px, rgba(255, 250, 240, 0.25) 6px 12px); pointer-events: none; }
@@ -1194,3 +1194,67 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .tp-swatch.on { border-color: var(--rose); }
 .about-card { max-width: min(640px, 94vw); max-height: 88vh; }
 .about-card .about-page { max-height: 80vh; }
+
+/* ---------- menus: the music note, the map preview ---------- */
+.music-btn { position: fixed; top: 12px; right: 14px; z-index: 30; width: 46px; height: 46px; display: grid; place-items: center; font-size: 1.4rem; background: var(--paper); border: 3px solid var(--wood); border-radius: 50%; box-shadow: 0 4px 0 var(--wood-dark); cursor: pointer; padding: 0; }
+.music-btn.off { opacity: 0.7; filter: grayscale(0.4); }
+.music-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--wood-dark); }
+.preview-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.preview-row small { color: var(--ink-soft); flex: 1; min-width: 180px; }
+.map-preview { position: fixed; inset: 0; z-index: 200; background: #000; }
+.map-preview > .game, .map-preview > div:first-child { position: absolute; inset: 0; }
+.mp-bar { position: absolute; z-index: 230; left: 50%; bottom: 150px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 8px 12px; width: max-content; max-width: 94vw; }
+.mp-bar b { font: 700 0.95rem var(--pixel); color: var(--ink); }
+.mp-loading { position: absolute; z-index: 240; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px; background: radial-gradient(circle, #62c9bb, #2a7f86); color: #fff; font: 700 1.3rem var(--pixel); animation: ending-in 0.3s both; }
+.mp-spinner { width: 54px; height: 54px; border: 6px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- in the game: where everything sits ---------- */
+.skills.left { left: auto; right: calc(50% + 300px); }
+.skills.left.with-gun { right: calc(50% + 384px); }
+.skills.right { left: calc(50% + 440px); }
+.supply-bar { right: auto; left: calc(50% + 300px); }
+@media (max-width: 1100px) {
+  .skills.left { right: auto; left: 12px; bottom: 100px; }
+  .skills.left.with-gun { left: 12px; bottom: 170px; }
+  .skills.right { left: auto; right: 14px; bottom: 100px; }
+  .supply-bar { left: auto; right: 14px; bottom: 170px; }
+}
+.recall-top { top: 6px; right: calc(50% + 150px); position: absolute; overflow: hidden; display: flex; align-items: center; gap: 8px; padding: 5px 14px; font: 700 0.9rem var(--pixel); color: var(--ink); background: var(--paper); border: 3px solid var(--wood); border-radius: 999px; box-shadow: 0 3px 0 var(--wood-dark); cursor: pointer; z-index: 5; white-space: nowrap; }
+.recall-top kbd { font: 700 0.65rem var(--pixel); background: #fff; border: 2px solid var(--wood); border-radius: 6px; padding: 0 5px; }
+.recall-top b { color: var(--rose-dark); }
+.recall-top.active { border-color: #5aaee8; box-shadow: 0 0 0 3px rgba(90, 174, 232, 0.35), 0 3px 0 #3a86c0; }
+.recall-top.cooling span { opacity: 0.6; }
+.recall-cd { position: absolute; left: 0; bottom: 0; height: 4px; background: rgba(238, 124, 152, 0.7); transition: width 0.15s linear; }
+.game.mobile .recall-top { display: none; }
+.avatar { display: inline-block; vertical-align: middle; image-rendering: pixelated; margin-right: 4px; }
+.avatar.blank { display: inline-grid; place-items: center; font-size: 0.8rem; }
+.score-who { display: inline-flex; align-items: center; min-width: 0; }
+
+/* ---------- the menu ---------- */
+.pause-card { width: min(460px, 94vw); }
+.pm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pm-grid .btn { width: 100%; padding-left: 0.5rem; padding-right: 0.5rem; }
+.pm-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pm-foot .btn.go { grid-column: 1 / -1; }
+.pm-foot .btn { width: 100%; }
+.confirm-overlay { z-index: 70; }
+.confirm-card { width: min(420px, 92vw); padding: 22px 26px; display: grid; gap: 10px; text-align: center; animation: pop 0.25s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.confirm-icon { font-size: 2.6rem; }
+.confirm-card h2 { margin: 0; font: 700 1.3rem var(--pixel); color: var(--rose); }
+.confirm-card p { margin: 0; color: var(--ink-soft); }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.btn.danger { background: #e8647c; border-color: #b84560; box-shadow: 0 4px 0 #8c2f45; color: #fff; }
+
+/* ---------- the waiting room: seats, settings, and the online list on the right ---------- */
+.waiting-card { width: min(1080px, 96vw); max-width: none; }
+.wait-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.wait-main { display: grid; gap: 14px; min-width: 0; }
+.wait-side { position: sticky; top: 0; }
+.side-box { margin: 0; }
+.wait-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.wait-slot.seat { position: relative; padding: 0; }
+.seat-btn { all: unset; box-sizing: border-box; width: 100%; height: 100%; min-height: 120px; display: grid; place-content: center; justify-items: center; gap: 4px; cursor: pointer; color: var(--ink-soft); }
+.seat-btn:hover .wait-q { color: var(--rose); }
+.seat-menu { position: absolute; z-index: 5; left: 50%; top: calc(100% - 8px); transform: translateX(-50%); display: grid; gap: 6px; padding: 8px; background: var(--paper); border: 3px solid var(--wood); border-radius: 14px; box-shadow: 0 6px 14px rgba(91, 70, 54, 0.3); min-width: 150px; }
+@media (max-width: 860px) { .wait-layout { grid-template-columns: 1fr; } .wait-side { position: static; } }

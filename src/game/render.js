@@ -223,20 +223,23 @@ function renderTidalChunk(world, img, chunk) {
   canvas.width = CHUNK_PX;
   canvas.height = CHUNK_PX;
   const ctx = canvas.getContext('2d');
-  const sheet = img[`maps/${world.tileset}`];
-  // the Crystal Lakes tileset is drawn the other way round: its lake is the shape, with the ground all around it
-  const flip = ['crystal', 'marsh', 'lava', 'beach'].includes(world.tileset) ? 1 : 0;
-  const asphalt = world.tileset === 'asphalt';
-  const land = world.groundSet
-    ? (x, y) => (world.roadAt(x, y) ? (asphalt ? 1 : 0) : asphalt ? 0 : 1) // asphalt: the road is the shape; mountain: the grass is
-    : (x, y) => (world.type(x, y) !== WATER ? 1 - flip : flip);
+  // Crystal Lakes, Mossy Marsh, Magma Fields and Sunny Shores are drawn the other way round: the water is the shape, with the ground all around it
+  const FLIPPED = ['crystal', 'marsh', 'lava', 'beach'];
+  // which of the tileset's two kinds of ground a world tile is: 1 for the "shape" kind, 0 for the one around it
+  const bit = (set, x, y) => {
+    if (set === 'asphalt') return world.roadAt(x, y) ? 1 : 0; // the road is the shape
+    if (set === 'mountain') return world.roadAt(x, y) ? 0 : 1; // the grass is the shape
+    const water = world.type(x, y) === WATER;
+    return FLIPPED.includes(set) ? (water ? 1 : 0) : water ? 0 : 1;
+  };
   for (let ty = 0; ty <= CHUNK; ty++) {
     for (let tx = 0; tx <= CHUNK; tx++) {
       const x = chunk.cx * CHUNK + tx;
       const y = chunk.cy * CHUNK + ty;
-      const key = land(x - 1, y - 1) * 8 + land(x, y - 1) * 4 + land(x - 1, y) * 2 + land(x, y);
+      const set = world.mixed ? world.biomeAt(x, y) : world.tileset; // (in the patchwork map every tile belongs to a region)
+      const key = bit(set, x - 1, y - 1) * 8 + bit(set, x, y - 1) * 4 + bit(set, x - 1, y) * 2 + bit(set, x, y);
       const [c, r] = TIDAL[key];
-      ctx.drawImage(sheet, c * T, r * T, T, T, tx * T - T / 2, ty * T - T / 2, T, T);
+      ctx.drawImage(img[`maps/${set}`], c * T, r * T, T, T, tx * T - T / 2, ty * T - T / 2, T, T);
     }
   }
   drawDecor(ctx, chunk, img);

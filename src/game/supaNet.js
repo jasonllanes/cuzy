@@ -30,7 +30,7 @@ const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -218,6 +218,20 @@ export class SupaNet {
     this.emit({ t: 'invite', from: { id: p.from.id, name: clean(p.from.name, 14), hero: clean(p.from.hero, 32) }, code: clean(p.code, 8).toUpperCase(), roomName: clean(p.roomName, 24) });
   }
 
+  // take another seat in the waiting room (an empty one); everyone is told
+  moveSlot(n) {
+    const me = this.members.get(this.me);
+    if (!me || this.started || !this.channel) return false;
+    const slot = Math.round(Number(n));
+    if (!Number.isInteger(slot) || slot < 0 || slot >= (this.cfg?.max || 0)) return false;
+    if ([...this.members.values()].some((m) => m.id !== this.me && m.slot === slot)) return false;
+    me.slot = slot;
+    this.channel.track(me).catch?.(() => {});
+    this.bcast({ t: 'slot', id: this.me, slot });
+    this.emit({ t: 'slot', id: this.me, slot });
+    return true;
+  }
+
   setStatus(status) {
     this.status = status;
     this.emit({ t: 'status', status });
@@ -275,7 +289,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, streakMonsters, teams, target, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, streakMonsters, teams, target, startMoney, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -296,6 +310,7 @@ export class SupaNet {
       streakMonsters: streakMonsters === true,
       teams: free && [2, 3, 4].includes(Number(teams)) ? Number(teams) : 0, // 0 = free for all
       allowLate: allowLate !== false,
+      startMoney: Math.min(99999, Math.max(0, Math.round(Number(startMoney)) || 0)), // coins everyone starts a round with
       allowCheats: allowCheats === true, // chat commands like -gold 100 (kept in the channel, not in the rooms table)
     };
     cfg.target = clampTarget(target, defaultTarget(cfg.winBy));
@@ -726,6 +741,7 @@ export class SupaNet {
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
         else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
+        else if (m.kind === 'ball') this.bcast({ t: 'fx', id: this.me, kind: 'ball', i: Math.max(0, Math.min(7, Math.round(Number(m.i)) || 0)), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), z: num(m.z), vz: num(m.vz) });
         else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) });
         break;
       case 'leave':
@@ -797,6 +813,11 @@ export class SupaNet {
       case 'teams':
         this.teamMap = { ...msg.teams };
         break;
+      case 'slot': {
+        const mem = this.members.get(msg.id);
+        if (mem && Number.isInteger(msg.slot)) mem.slot = msg.slot;
+        break;
+      }
       case 'hit':
         if (this.cfg?.teams && this.teamMap[msg.from] === this.teamMap[this.me]) return; // no friendly fire
         break;
@@ -959,6 +980,8 @@ export class SupaNet {
     if (typeof m.allowThrow === 'boolean') cfg.allowThrow = m.allowThrow;
     if (typeof m.allowMelee === 'boolean') cfg.allowMelee = m.allowMelee;
     if (typeof m.streakMonsters === 'boolean') cfg.streakMonsters = m.streakMonsters;
+    if (m.startMoney !== undefined && !this.started) cfg.startMoney = Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0));
+    if (['easy', 'medium', 'hard'].includes(m.difficulty)) cfg.difficulty = m.difficulty;
     if (Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
     if (free && m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
     // the rest is decided before the round

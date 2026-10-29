@@ -57,6 +57,7 @@ export function attachRoomServer(httpServer) {
     allowThrow: r.allowThrow,
     allowMelee: r.allowMelee,
     streakMonsters: r.streakMonsters,
+    startMoney: r.startMoney || 0,
     teams: r.teams,
     count: r.players.size,
     started: r.started,
@@ -218,6 +219,16 @@ export function attachRoomServer(httpServer) {
       if (!target || target === ws) return;
       send(target, { t: 'invite', from: { id: ws.id, name: ws.player.name, hero: ws.player.hero }, code: ws.room.code, roomName: ws.room.name });
     },
+    // take another (empty) seat in the waiting room
+    slot(ws, m) {
+      const room = ws.room;
+      if (!room || room.started) return;
+      const n = Math.round(Number(m.slot));
+      if (!Number.isInteger(n) || n < 0 || n >= room.max) return;
+      if ([...room.players.values()].some((p) => p !== ws && p.slot === n)) return;
+      ws.slot = n;
+      sendRoom(room, { t: 'slot', id: ws.id, slot: n });
+    },
     lobby(ws) {
       ws.lobby = true;
       send(ws, { t: 'rooms', rooms: [...rooms.values()].map(summary) });
@@ -242,6 +253,7 @@ export function attachRoomServer(httpServer) {
         allowMelee: m.allowMelee !== false,
         teams: !['waves', 'survival'].includes(m.mode) && [2, 3, 4].includes(Number(m.teams)) ? Number(m.teams) : 0, // 0 = free for all
         streakMonsters: m.streakMonsters === true, // do monster kills count towards kill streaks (and get announced to everyone)?
+        startMoney: Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0)), // coins everyone starts a round with
         allowLate: m.allowLate !== false, // may people join once the round is under way?
         allowCheats: m.allowCheats === true, // may players type chat commands like -gold 100?
         started: false, // a new room waits for its host to press Start
@@ -380,6 +392,8 @@ export function attachRoomServer(httpServer) {
       if (typeof m.allowThrow === 'boolean') room.allowThrow = m.allowThrow;
       if (typeof m.allowMelee === 'boolean') room.allowMelee = m.allowMelee;
       if (typeof m.streakMonsters === 'boolean') room.streakMonsters = m.streakMonsters;
+      if (m.startMoney !== undefined && !room.started) room.startMoney = Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0));
+      if (['easy', 'medium', 'hard'].includes(m.difficulty)) room.difficulty = m.difficulty;
       if (Number.isFinite(Number(m.max))) room.max = Math.min(MAX_PLAYERS, Math.max(2, room.players.size, Math.round(Number(m.max))));
       if (free && m.target !== undefined) room.target = clampTarget(m.target, room.target);
       // the rest is decided before the round
@@ -443,6 +457,7 @@ export function attachRoomServer(httpServer) {
       if (m.kind === 'loot') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) }, ws);
       if (m.kind === 'grab') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'grab', lid: clean(m.lid, 40) }, ws);
       if (m.kind === 'spin') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) }, ws);
+      if (m.kind === 'ball') sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'ball', i: Math.max(0, Math.min(7, Math.round(Number(m.i)) || 0)), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), z: num(m.z), vz: num(m.vz) }, ws);
       // thrown items are only drawn for others; the thrower's client decides if it hit
       if (m.kind === 'throw') {
         sendRoom(ws.room, { t: 'fx', id: ws.id, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) }, ws);

@@ -1,4 +1,5 @@
 import { TEAMS, TEAM_COUNTS } from '../game/teams';
+import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
 
 // One on/off setting, drawn as a switch
 export function Switch({ label, hint, on, disabled, onChange }) {
@@ -27,6 +28,22 @@ export default function RoomSettings({ room, count, editable, onChange }) {
             {[2, 3, 4, 5, 6, 7, 8, 9, 10].filter((n) => n >= count).map((n) => <option key={n} value={n}>{n} players</option>)}
           </select>
         </div>
+        <div className="set-row">
+          <div className="set-label"><b>Startup money</b><small>Coins everyone begins the round with</small></div>
+          <select value={room.startMoney || 0} disabled={!editable || room.started} onChange={(e) => onChange({ startMoney: Number(e.target.value) })}>
+            {[0, 25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n ? `🪙 ${n}` : 'None'}</option>)}
+          </select>
+        </div>
+        {!free && (
+          <div className="set-row">
+            <div className="set-label"><b>Difficulty</b><small>{DIFFICULTY[room.difficulty]?.blurb || 'How tough the waves are'} The host can change it at any time, even in a round.</small></div>
+            <div className="seg">
+              {DIFFICULTY_IDS.map((d) => (
+                <button key={d} type="button" className={room.difficulty === d ? 'on' : ''} disabled={!editable} onClick={() => onChange({ difficulty: d })}>{DIFFICULTY[d].name}</button>
+              ))}
+            </div>
+          </div>
+        )}
         <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too, and everyone sees them' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />
         <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
         <Switch label="Allow cheats?" hint="Players can type commands like -gold 100 or -level 5 in the chat (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />

@@ -62,7 +62,7 @@ function SurvivalGuide() {
       <div><b>⚡ Power-ups</b> Somewhere around the 10th kill of a wave, a glowing orb may drop where a zombie fell (not every wave). Walk over it to use it right away, for the whole team: <b>⏳ Slow-mo</b> makes every zombie crawl for 8 seconds, and <b>💣 Big Blast</b> destroys every ordinary zombie (bosses only lose a fifth of their health). Grab it before it fades.</div>
       <div><b>🛒 Buy ({k('B')})</b> Upgrades (RV, endurance, melee and throw damage, a bigger lantern), <b>guns</b>, and helpers. <b>Thrower and Sharpshooter</b> helpers stand <b>on top of the RV</b> and shoot down; <b>Guards</b> run out on the ground after nearby zombies and slash them. Upgrading the RV makes room for more helpers.</div>
       <div><b>💀 Scoreboard</b> The left side lists who has defeated the most monsters, with a 👑 for the leader. Your helpers' kills count as one line.</div>
-      <div><b>🌦 Maps and weather</b> Each map has its own look and weather: Overgrown Town, Frostbite Pass, Rust Orchard, Dry Plains, Dead Hollow and the indoor Cargo Depot. Leave <i>New layout every game</i> on for a different world every time.</div>
+      <div><b>🌦 Maps and weather</b> Each map has its own look and weather: Overgrown Town, Frostbite Pass, Rust Orchard, Dry Plains, Dead Hollow and the indoor Cargo Depot. Tick <i>Generate a new layout</i> for a different arrangement of trees, obstacles and objects each game, or leave it off to play the map as it is. <i>Random map</i> picks one of the maps for you.</div>
       <div><b>💬 Chat</b> {k('Enter')} chats with everyone online, and messages show at the bottom left. {k('H')} recalls you to the RV.</div>
     </div>
   );

@@ -13,6 +13,8 @@ export const WATER = 0;
 export const SAND = 1;
 export const GRASS = 2;
 
+const BIOMES = ['tidal', 'emerald', 'crystal', 'marsh', 'lava', 'beach', 'asphalt', 'mountain']; // the Patchwork Lands regions
+const BIOME_LOW = { tidal: 0.1, emerald: 0.1, crystal: 0.04, marsh: 0.05, lava: 0.05, beach: 0.05, asphalt: 0, mountain: 0 }; // how far each sinks the ground
 const SEA = 0.43;
 const BEACH = 0.45;
 const REGION = 18; // house sites are rolled once per region; small regions make cosy villages
@@ -47,9 +49,11 @@ export class World {
     this.seed = hashString(this.seedStr);
     // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
     // start of the seed, and a Survival map names it
-    this.tileset = theme === 'apoc' ? mapInfo(splitSeed(this.seedStr).map).tileset || null : /^tidal-/.test(this.seedStr) ? 'tidal' : /^emerald-/.test(this.seedStr) ? 'emerald' : /^crystal-/.test(this.seedStr) ? 'crystal' : /^marsh-/.test(this.seedStr) ? 'marsh' : /^lava-/.test(this.seedStr) ? 'lava' : /^beach-/.test(this.seedStr) ? 'beach' : /^asphalt-/.test(this.seedStr) ? 'asphalt' : /^mountain-/.test(this.seedStr) ? 'mountain' : null;
+    this.tileset = theme === 'apoc' ? mapInfo(splitSeed(this.seedStr).map).tileset || null : /^tidal-/.test(this.seedStr) ? 'tidal' : /^emerald-/.test(this.seedStr) ? 'emerald' : /^crystal-/.test(this.seedStr) ? 'crystal' : /^marsh-/.test(this.seedStr) ? 'marsh' : /^lava-/.test(this.seedStr) ? 'lava' : /^beach-/.test(this.seedStr) ? 'beach' : /^asphalt-/.test(this.seedStr) ? 'asphalt' : /^mountain-/.test(this.seedStr) ? 'mountain' : /^mixed-/.test(this.seedStr) ? 'mixed' : null;
     // asphalt and mountain are not water tilesets: two kinds of walkable ground, laid out as winding roads and paths
     this.groundSet = this.tileset === 'asphalt' || this.tileset === 'mountain';
+    this.mixed = this.tileset === 'mixed'; // the patchwork map: every tileset, in regions side by side
+    this.biomeCache = new Map();
     this.tidal = !!this.tileset && !this.groundSet;
     this.lava = this.tileset === 'lava'; // the "water" here is lava: wading in it burns
     this.apoc = theme === 'apoc'; // Survival: the ruined, overgrown look from the Apocalypse pack
@@ -69,6 +73,50 @@ export class World {
     this.treeCache = new Map();
   }
 
+  // Patchwork Lands: the world is cut into regions (nearest of some scattered points), and each region is one of the tilesets
+  biomeAt(x, y) {
+    const key = (x + 32768) * 65536 + (y + 32768);
+    let b = this.biomeCache.get(key);
+    if (b === undefined) {
+      const S = 44;
+      const cx = Math.floor(x / S);
+      const cy = Math.floor(y / S);
+      let best = Infinity;
+      let pick = 0;
+      for (let j = -1; j <= 1; j++) {
+        for (let i = -1; i <= 1; i++) {
+          const gx = cx + i;
+          const gy = cy + j;
+          const px = (gx + hash2(gx, gy, this.seed + 7001)) * S;
+          const py = (gy + hash2(gx, gy, this.seed + 7002)) * S;
+          const d = (px - x) * (px - x) + (py - y) * (py - y);
+          if (d < best) {
+            best = d;
+            pick = Math.floor(hash2(gx, gy, this.seed + 7003) * BIOMES.length);
+          }
+        }
+      }
+      b = BIOMES[pick];
+      if (this.biomeCache.size > 300000) this.biomeCache.clear();
+      this.biomeCache.set(key, b);
+    }
+    return b;
+  }
+
+  // water only where all the neighbours are in the same region, so a shore never sits on a region's edge
+  biomeCalm(x, y) {
+    const b = this.biomeAt(x, y);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) if (this.biomeAt(x + dx, y + dy) !== b) return false;
+    }
+    return true;
+  }
+
+  // is the water at this tile lava?
+  lavaAt(tx, ty) {
+    return this.lava || (this.mixed && this.biomeAt(tx, ty) === 'lava');
+  }
+
   // the winding roads (or paths) of the asphalt and mountain maps: ridges of two noise fields, so they cross and branch
   roadAt(x, y) {
     const a = fbm(x / 24, y / 24, this.seed + 4141, 3);
@@ -78,6 +126,7 @@ export class World {
 
   elevation(x, y) {
     const e = fbm(x / 44, y / 44, this.seed, 4);
+    if (this.mixed) return e - BIOME_LOW[this.biomeAt(x, y)];
     // the island maps sit lower: a lot more sea, and the land breaks up into islands; the crystal lakes only a little
     return this.tileset === 'crystal' ? e - 0.04 : this.tileset === 'marsh' || this.tileset === 'lava' || this.tileset === 'beach' ? e - 0.05 : this.tidal ? e - 0.1 : e;
   }
@@ -93,7 +142,11 @@ export class World {
     if (t === undefined) {
       const e = this.elevation(x, y);
       // Survival has no water: low ground is patchy dry dirt instead
-      if (this.groundSet) t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS; // (roads are open ground: nothing grows on them, and nothing is water)
+      if (this.mixed) {
+        const b = this.biomeAt(x, y);
+        if (b === 'asphalt' || b === 'mountain') t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS;
+        else t = e < SEA && this.biomeCalm(x, y) ? WATER : e < BEACH ? SAND : GRASS;
+      } else if (this.groundSet) t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS; // (roads are open ground: nothing grows on them, and nothing is water)
       else t = this.depot ? GRASS : this.apoc ? (this.tileset && e < SEA ? WATER : e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
       if (this.typeCache.size > 600000) this.typeCache.clear();
       this.typeCache.set(key, t);

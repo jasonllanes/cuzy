@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import MusicButton from './MusicButton';
 import { heroById } from '../game/heroes';
 import { TEAMS } from '../game/teams';
 import RoomSettings from './RoomSettings';
@@ -32,6 +33,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
   const [host, setHost] = useState(session.host);
   const [teams, setTeams] = useState(() => ({ ...(session.teams || {}), ...Object.fromEntries(session.players.filter((p) => p.team !== null && p.team !== undefined).map((p) => [p.id, p.team])) }));
   const [copied, setCopied] = useState('');
+  const [seatMenu, setSeatMenu] = useState(null); // an empty seat that was tapped: move there, or (for the host) add an AI
   const [lan] = useState(() => net.lan);
 
   useEffect(
@@ -45,6 +47,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         } else if (m.t === 'peer_leave') {
           setPeers((p) => p.filter((x) => x.id !== m.id));
           if (m.host != null) setHost(m.host);
+        } else if (m.t === 'slot') {
+          setPeers((p) => p.map((x) => (x.id === m.id ? { ...x, slot: m.slot } : x)));
         } else if (m.t === 'settings') {
           setRoom(m.room);
         } else if (m.t === 'start') {
@@ -65,11 +69,22 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
 
   const imHost = host === you;
   const ordered = [...peers].sort((a, b) => (a.id === host ? -1 : b.id === host ? 1 : (a.slot ?? 0) - (b.slot ?? 0)));
-  const empty = Math.max(0, room.max - ordered.length);
+  // every seat of the room, by number: who sits in it (anyone with no seat of their own takes the first free one)
+  const seats = Array.from({ length: room.max }, () => null);
+  const homeless = [];
+  for (const p of ordered) {
+    if (Number.isInteger(p.slot) && p.slot >= 0 && p.slot < room.max && !seats[p.slot]) seats[p.slot] = p;
+    else homeless.push(p);
+  }
+  for (const p of homeless) {
+    const free = seats.findIndex((x) => !x);
+    if (free >= 0) seats[free] = p;
+  }
   const hostName = ordered.find((p) => p.id === host)?.name || 'the host';
 
   return (
     <div className="menu">
+      <MusicButton />
       <WorldBackdrop assets={assets} seed={room.seed} />
       <div className="cloud c1" />
       <div className="cloud c2" />
@@ -90,6 +105,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <button type="button" className="btn small-btn" onClick={() => doCopy('link', inviteLink(room.code, lan))}>{copied === 'link' ? 'Link copied!' : '✉️ Invite link'}</button>
         </div>
 
+        <div className="wait-layout">
+          <div className="wait-main">
         {room.teams > 0 && room.mode === 'free' ? (
           <div className="team-cols" style={{ gridTemplateColumns: `repeat(${room.teams}, minmax(0, 1fr))` }} aria-label="Teams">
             {TEAMS.slice(0, room.teams).map((t, ti) => {
@@ -121,49 +138,55 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           </div>
         ) : (
         <div className="wait-grid" aria-label="Players in the room">
-          {ordered.map((p) => {
-            const hero = heroById(p.hero);
+          {seats.map((p, i) => {
+            if (p) {
+              const hero = heroById(p.hero);
+              return (
+                <div className={`wait-slot ${p.id === you ? 'me' : ''}`} key={p.id} style={room.teams > 0 && TEAMS[teams[p.id]] ? { borderColor: TEAMS[teams[p.id]].color } : undefined}>
+                  {p.id === host && <span className="wait-badge">👑 Host</span>}
+                  <SpritePreview img={assets.img} hero={hero} active />
+                  <b className="wait-name">{p.name}{p.id === you ? ' (you)' : ''}</b>
+                  <small>{hero.label}</small>
+                  {room.teams > 0 && (
+                    <div className="team-chips" role="group" aria-label={`${p.name}'s team`}>
+                      {TEAMS.slice(0, room.teams).map((t, ti) => (
+                        <button key={t.name} type="button" className={`team-chip ${teams[p.id] === ti ? 'on' : ''}`} style={{ '--team': t.color }} disabled={p.id !== you} title={p.id === you ? `Join the ${t.name} team` : `${p.name}'s team`} onClick={() => net.send({ t: 'team', team: ti })}>
+                          {t.icon}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
             return (
-              <div className={`wait-slot ${p.id === you ? 'me' : ''}`} key={p.id} style={room.teams > 0 && TEAMS[teams[p.id]] ? { borderColor: TEAMS[teams[p.id]].color } : undefined}>
-                {p.id === host && <span className="wait-badge">👑 Host</span>}
-                <SpritePreview img={assets.img} hero={hero} active />
-                <b className="wait-name">{p.name}{p.id === you ? ' (you)' : ''}</b>
-                <small>{hero.label}</small>
-                {room.teams > 0 && (
-                  <div className="team-chips" role="group" aria-label={`${p.name}'s team`}>
-                    {TEAMS.slice(0, room.teams).map((t, i) => (
-                      <button
-                        key={t.name}
-                        type="button"
-                        className={`team-chip ${teams[p.id] === i ? 'on' : ''}`}
-                        style={{ '--team': t.color }}
-                        disabled={p.id !== you}
-                        title={p.id === you ? `Join the ${t.name} team` : `${p.name}'s team`}
-                        onClick={() => net.send({ t: 'team', team: i })}
-                      >
-                        {t.icon}
-                      </button>
-                    ))}
+              <div className="wait-slot empty seat" key={`e${i}`}>
+                <button type="button" className="seat-btn" onClick={() => setSeatMenu(seatMenu === i ? null : i)} aria-expanded={seatMenu === i}>
+                  <span className="wait-q">＋</span>
+                  <small>Empty seat {i + 1}</small>
+                </button>
+                {seatMenu === i && (
+                  <div className="seat-menu" role="menu">
+                    <button type="button" role="menuitem" className="btn small-btn" onClick={() => { net.moveSlot?.(i); setSeatMenu(null); }}>↪ Move here</button>
+                    {imHost && <button type="button" role="menuitem" className="btn small-btn" disabled title="Computer players in a room are not available yet">🤖 Add AI</button>}
                   </div>
                 )}
               </div>
             );
           })}
-          {Array.from({ length: empty }, (_, i) => (
-            <div className="wait-slot empty" key={`e${i}`}>
-              <span className="wait-q">?</span>
-              <small>Waiting for a friend…</small>
-            </div>
-          ))}
         </div>
         )}
 
-        <section className="settings-panel online-section" aria-label="Players online">
+        <RoomSettings room={room} count={ordered.length} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+
+          </div>
+          <aside className="wait-side">
+        <section className="settings-panel online-section side-box" aria-label="Players online">
           <h3>🌐 Online now <small>invite anyone who has the game open</small></h3>
           <OnlinePlayers net={net} assets={assets} onJoinRoom={onJoinRoom} />
         </section>
-
-        <RoomSettings room={room} count={ordered.length} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+          </aside>
+        </div>
 
         <div className="nav-row">
           <button type="button" className="btn ghost" onClick={onLeave}>← Leave room</button>

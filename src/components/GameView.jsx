@@ -28,6 +28,8 @@ import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
 import TrainingPanel from './TrainingPanel';
 import AboutContent from './AboutContent';
+import Avatar from './Avatar';
+import EndingScene from './EndingScene';
 import { GUNS, RECALL_CD, SHIELD_CD } from '../game/combat';
 import { setTheme } from '../game/items';
 import RoomPanel from './RoomPanel';
@@ -143,7 +145,7 @@ function Meter({ icon, label, value, tone, text }) {
   );
 }
 
-export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom, training = false, trainingMap, onTrainingMap, onTrainingHero }) {
+export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom, training = false, preview = false, trainingMap, onTrainingMap, onTrainingHero }) {
   const canvasRef = useRef(null);
   const miniRef = useRef(null);
   const gameRef = useRef(null);
@@ -172,9 +174,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [statsOpen, setStatsOpen] = useState(false); // phones: the stats panel slides in from the left
   const [hudMenuOpen, setHudMenuOpen] = useState(false); // phones: the buttons down the right edge fold away
   const roomSetRef = useRef(false);
+  const [confirm, setConfirm] = useState(null); // 'quit' or 'reset': asked before it happens
   const [aboutOpen, setAboutOpen] = useState(false); // About and credits, from the in-game menu
   const aboutRef = useRef(false);
   aboutRef.current = aboutOpen;
+  const confirmRef = useRef(null);
+  confirmRef.current = confirm;
   useEffect(() => {
     if (!gameRef.current) return;
     gameRef.current.touchMode = mobile;
@@ -306,6 +311,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     });
     gameRef.current = game;
     game.touchMode = getControls() === 'mobile';
+    if (preview) {
+      game.combat.god = true; // the map preview: walk about as you like
+      if (game.wave) game.wave.timer = 1e9; // (and no zombies come)
+    }
     if (training) {
       game.cheats = true; // (God mode starts off, so lava, monsters and grenades can actually hurt you; switch it on in the training panel)
     }
@@ -457,7 +466,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       } else if (e.code === 'KeyP' && !e.repeat && (!modal || (pausedRef.current && !session))) {
         pauseRef.current();
       } else if (e.code === 'Escape') {
-        if (aboutRef.current) setAboutOpen(false);
+        if (confirmRef.current) setConfirm(null);
+        else if (aboutRef.current) setAboutOpen(false);
         else if (roomSetRef.current) setRoomSetOpen(false);
         else if (storeRef.current) setStoreOpen(false);
         else if (upgRef.current) setUpgOpen(false);
@@ -479,6 +489,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     [net],
   );
 
+  // whose avatar to show in the scoreboards
+  const heroOf = (id) => (String(id) === String(session?.you ?? 'me') ? profile.hero : peers.find((p) => String(p.id) === String(id))?.hero);
   const addLog = (name, text, extra = {}) => setChatLog((l) => [...l.slice(-5), { id: Math.random(), name, text, ...extra }]);
   const sendChat = (e) => {
     e.preventDefault();
@@ -577,8 +589,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           {hud.stats && <Stats s={hud.stats} upg={hud.upg} />}
           <div className="hud-line">🎁 {hud.treasures} &nbsp; 🍓 {hud.foraged} &nbsp; 💀 {hud.kills}</div>
         </div>
-        <button className="btn guide-btn" onClick={() => setGuideOpen(true)} title="Field guide: what every item gives">
-          📖 Guide <kbd>G</kbd>
+        <button className="btn guide-btn" onClick={() => setChatOpen(true)} title="Chat with everyone online">
+          💬 Chat <kbd>Enter</kbd>
         </button>
         {waves && hud.wave?.kills && Object.keys(hud.wave.kills).length > 0 && (
           <div className="scoreboard panel small kill-board">
@@ -591,7 +603,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
                 const name = id === 'ally' ? '🤝 Helpers' : mine ? profile.name : peers.find((p) => String(p.id) === id)?.name || 'Survivor';
                 return (
                   <div key={id} className={`score-row ${mine ? 'me' : ''}`}>
-                    <span>{i === 0 ? '👑 ' : ''}{name}</span>
+                    <span className="score-who">{id !== 'ally' && <Avatar assets={assets} id={heroOf(id)} />}{i === 0 ? '👑 ' : ''}{name}</span>
                     <b>{n}</b>
                   </div>
                 );
@@ -601,7 +613,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {!session && hud.mkills && (
           <div className="scoreboard panel small">
             <div className="score-title">👹 First to {hud.mkills.target} monster kills</div>
-            <div className="score-row me"><span>{profile.name}</span><b>{hud.mkills.count}</b><i style={{ width: `${Math.min(100, (hud.mkills.count / hud.mkills.target) * 100)}%` }} /></div>
+            <div className="score-row me"><span className="score-who"><Avatar assets={assets} id={profile.hero} />{profile.name}</span><b>{hud.mkills.count}</b><i style={{ width: `${Math.min(100, (hud.mkills.count / hud.mkills.target) * 100)}%` }} /></div>
           </div>
         )}
         {!pvp && hud.fight && !hud.mkills && (
@@ -609,7 +621,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <div className="score-title">⚔️ First to {hud.fight.target} kills</div>
             {[...hud.fight.scores].sort((a, b) => b.kills - a.kills).map((s) => (
               <div key={s.id} className={`score-row ${s.me ? 'me' : ''}`}>
-                <span>{s.name}</span>
+                <span className="score-who"><Avatar assets={assets} id={s.me ? profile.hero : s.hero} />{s.name}</span>
                 <b>{s.kills}</b>
                 <i style={{ width: `${Math.min(100, (s.kills / hud.fight.target) * 100)}%` }} />
               </div>
@@ -631,7 +643,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             })}
             {[...scores].sort((a, b) => b.kills - a.kills).map((s) => (
               <div key={s.id} className={`score-row ${s.id === session.you ? 'me' : ''}`} style={s.team !== null && s.team !== undefined && TEAMS[s.team] ? { borderLeft: `4px solid ${TEAMS[s.team].color}` } : undefined}>
-                <span>{s.name}</span>
+                <span className="score-who"><Avatar assets={assets} id={heroOf(s.id)} />{s.name}</span>
                 <b>{s.kills}</b>
                 <i style={{ width: `${Math.min(100, (s.kills / (live || session.room).target) * 100)}%` }} />
               </div>
@@ -641,7 +653,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       </div>
 
       <div className="hud hud-right">
-        <canvas ref={miniRef} width={80} height={80} className="minimap" onClick={() => setMapOpen(true)} title="Click or press M for the big map" />
+        <canvas ref={miniRef} width={80} height={80} className="minimap" onClick={() => setMapOpen(true)} title="Click the map to see all of it (or press M)" />
         <div className="zoom-box panel small">
           <button className="btn small-btn" aria-label="Zoom out" onClick={() => gameRef.current?.zoomBy(-1)}>−</button>
           <span>🔍</span>
@@ -652,11 +664,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {(!mobile || hudMenuOpen) && (
           <>
         {!mobile && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
-        <button className="btn small-btn" onClick={() => setMapOpen(true)}>🗺️ Map <kbd>M</kbd></button>
-        <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat <kbd>Enter</kbd></button>
-        {!mobile && <button className="btn small-btn" onClick={() => gameRef.current?.switchWeapon()} title={survival ? 'Switch gun' : 'Switch sword'}>🔁 Weapon <kbd>Tab</kbd></button>}
+        {mobile && <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat</button>}
         {((session && isHost) || (!session && mode === 'free')) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
-        <button className="btn small-btn" onClick={() => { setGuideOpen(true); setHudMenuOpen(false); }}>📖 Guide <kbd>G</kbd></button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu <kbd>Esc</kbd></button>
           </>
         )}
@@ -667,13 +676,25 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} />}
-      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q/E turn wall' : ''} · 1-9/wheel select · Tab switch weapon· E eat · B buy · M map · G guide</div>}
+      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q/E turn wall' : ''} · 1-9/wheel select · Tab switch weapon· E eat · B buy · M map</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
         </div>
       )}
-      <div className="hud skills">
+      <button
+        type="button"
+        className={`hud recall-top ${hud.recallT > 0 ? 'active' : ''} ${hud.recallCd > 0 ? 'cooling' : ''}`}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => gameRef.current?.combat?.startRecall()}
+        title={waves ? 'Stand still for 2.5 seconds to teleport back to the base' : 'Stand still for 2.5 seconds to teleport back home'}
+      >
+        <span>🏡 Teleport Home</span>
+        <kbd>H</kbd>
+        {hud.recallCd > 0 && <b>{Math.ceil(hud.recallCd)}s</b>}
+        <i className="recall-cd" style={{ width: `${Math.min(100, (hud.recallCd / RECALL_CD) * 100)}%` }} />
+      </button>
+      <div className={`hud skills left ${survival ? 'with-gun' : ''}`}>
         {(waves || hud.util === 'shield' || !hud.util) && (
         <button
           className={`skill ${hud.shieldT > 0 ? 'active' : ''} ${hud.shieldCd > 0 ? 'cooling' : 'ready'}`}
@@ -700,17 +721,6 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             {hud.invisCd > 0 && <span className="skill-num">{Math.ceil(hud.invisCd)}</span>}
           </button>
         )}
-        <button
-          className={`skill ${hud.recallT > 0 ? 'active' : ''} ${hud.recallCd > 0 ? 'cooling' : 'ready'}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => gameRef.current?.combat?.startRecall()}
-          title={waves ? 'Recall: stand still for 2.5 seconds to teleport back to the base' : 'Recall: stand still for 2.5 seconds to teleport back home'}
-        >
-          <span className="skill-icon">🏡</span>
-          <kbd>H</kbd>
-          <span className="skill-cd" style={{ height: `${Math.min(100, (hud.recallCd / RECALL_CD) * 100)}%` }} />
-          {hud.recallCd > 0 && <span className="skill-num">{Math.ceil(hud.recallCd)}</span>}
-        </button>
         {waves && (
           <button
             className="skill ready"
@@ -724,10 +734,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </button>
         )}
         {!waves && hud.weapons && (
-          <button className="skill weapon-skill" onClick={() => setUpgOpen(true)} title={`${weaponById(hud.weapons.equipped).name}: change swords in the shop (B)`}>
+          <button className="skill weapon-skill" onMouseDown={(e) => e.preventDefault()} onClick={() => gameRef.current?.switchWeapon()} title={`${weaponById(hud.weapons.equipped).name}: press to switch swords (Tab)`}>
             <span className="wicon sm" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(weaponById(hud.weapons.equipped))}.png)` }} />
+            <kbd>Tab</kbd>
           </button>
         )}
+      </div>
+      <div className="hud skills right">
         <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? 'Hold left click, then release to use your sword skill' : 'Sword skill: buy the Dash or the Spiral Sword in the shop (B)'}>
           <span className="skill-icon">{hud.activeSkill === 'spiral' ? '🌀' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? 'hold click' : 'locked'}</small>
@@ -750,20 +763,29 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <b>{formatClock(hud.hour)}</b>
         <small>Day {hud.day}</small>
       </div>
-      {waves && hud.wave && <WaveHud w={hud.wave} difficulty={difficulty} withRoom={!!session} survival={survival} />}
+      {waves && hud.wave && <WaveHud w={hud.wave} difficulty={live?.difficulty || difficulty} withRoom={!!session} survival={survival} />}
       {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && (
-        <div className="overlay">
-          <div className="panel result-card">
-            <div className="trophy">{hud.wave.phase === 'victory' ? '🏆' : '💔'}</div>
-            <h2>{hud.wave.phase === 'victory' ? 'The base held! You win!' : 'The base fell…'}</h2>
-            <p>
-              {hud.wave.phase === 'victory'
-                ? 'All 10 waves defeated, and the Crushing Cyclops too. Well defended!'
-                : `You made it to wave ${hud.wave.wave} of ${hud.wave.total}. Rebuild and try again!`}
-            </p>
-            <button className="btn go" onClick={() => (session ? net.send({ t: 'tolobby' }) : onExit())}>{session ? 'Back to the room' : 'Back to the menu'}</button>
-          </div>
-        </div>
+        <EndingScene
+          kind={hud.wave.phase}
+          survival={survival}
+          name={profile.name}
+          stats={[
+            { icon: '🌊', label: 'Wave reached', value: hud.wave.wave, text: (n) => `${n} / ${hud.wave.total}` },
+            { icon: '💀', label: 'Monsters defeated', value: hud.kills || 0 },
+            { icon: '⭐', label: 'Your level', value: hud.level || 1 },
+            { icon: '🪙', label: 'Coins left', value: hud.coins || 0 },
+            { icon: '☀️', label: 'Days survived', value: hud.day || 1 },
+          ]}
+          board={Object.entries(hud.wave.kills || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([id, n]) => {
+              const me = id === String(session?.you ?? 'me');
+              return { name: id === 'ally' ? '🤝 Helpers' : me ? profile.name : peers.find((p) => String(p.id) === id)?.name || 'Survivor', n, me };
+            })}
+          boardTitle="💀 Most monsters defeated"
+          continueLabel={session ? 'Back to the room' : 'Back to the menu'}
+          onContinue={() => (session ? net.send({ t: 'tolobby' }) : onExit())}
+        />
       )}
       {hud.dead && (
         <div className="death-overlay">
@@ -805,13 +827,16 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </Hotbar>
       {hud.celeb && (
-        <div className="winner-banner">
-          <div className="winner-card panel">
-            <div className="trophy">🏆</div>
-            <h2>{hud.celeb.mine ? 'You win the round!' : `${hud.celeb.name} wins the round!`}</h2>
-            <p>{hud.celeb.sub}</p>
-          </div>
-        </div>
+        <EndingScene
+          key="round-end"
+          kind="round"
+          name={profile.name}
+          winner={hud.celeb.name}
+          mine={!!hud.celeb.mine}
+          board={[...scores].sort((a, b) => (b.kills || 0) - (a.kills || 0)).map((s) => ({ name: s.name, n: s.kills || 0, me: String(s.id) === String(session?.you) }))}
+          boardTitle="⚔️ Final scores"
+          auto
+        />
       )}
       {upgOpen && (waves
         ? <UpgradePanel hud={hud} game={gameRef.current} survival={survival} onClose={() => setUpgOpen(false)} />
@@ -864,7 +889,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           }}
         />
       )}
-      {training && <TrainingPanel game={gameRef} assets={assets} initial={profile.hero} map={trainingMap} onMap={onTrainingMap} onHero={onTrainingHero} onExit={onExit} />}
+      {training && !preview && <TrainingPanel game={gameRef} assets={assets} initial={profile.hero} map={trainingMap} onMap={onTrainingMap} onHero={onTrainingHero} onExit={onExit} />}
       {guideOpen && <Guide mode={survival ? 'survival' : waves ? 'waves' : 'free'} onClose={() => setGuideOpen(false)} />}
       {onlineOpen && (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOnlineOpen(false)}>
@@ -899,6 +924,40 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         </div>
       )}
 
+      {confirm && (
+        <div className="overlay confirm-overlay" onPointerDown={(e) => e.target === e.currentTarget && setConfirm(null)}>
+          <div className="panel confirm-card" role="alertdialog" aria-label={confirm === 'quit' ? 'Quit?' : 'Reset the world?'}>
+            <div className="confirm-icon">{confirm === 'quit' ? '🚪' : '⚠️'}</div>
+            <h2>{confirm === 'quit' ? 'Are you going to quit?' : 'Are you sure you want to reset the world?'}</h2>
+            <p>
+              {confirm === 'quit'
+                ? session
+                  ? isHost
+                    ? 'You will leave the room, and the host role passes to another player.'
+                    : 'You will leave the room.'
+                  : 'Your progress on this map is saved.'
+                : 'This will remove all your skills, items and upgrades, and take you back to the basic character you started with.'}
+            </p>
+            <div className="confirm-actions">
+              <button className="btn" onClick={() => setConfirm(null)}>{confirm === 'quit' ? 'No, stay' : 'No, keep playing'}</button>
+              <button
+                className="btn go danger"
+                onClick={() => {
+                  if (confirm === 'quit') onExit();
+                  else {
+                    gameRef.current?.resetProgress();
+                    pushToast('The world was reset: back to the basic character.');
+                  }
+                  setConfirm(null);
+                  setPaused(false);
+                }}
+              >
+                {confirm === 'quit' ? 'Yes, quit' : 'Yes, reset it'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {aboutOpen && (
         <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && setAboutOpen(false)}>
           <div className="panel menu-card about-card">
@@ -912,34 +971,27 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       {paused && (
         <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && setPaused(false)}>
           <div className="panel pause-card">
-            <h2>Taking a breather</h2>
+            <h2>Menu</h2>
             <p className="hint">{session ? 'The room keeps going while you are in this menu.' : 'The game is paused. Your progress is saved for this map.'}</p>
-            <div className="pause-a">
-            <button className="btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
-            <button className="btn" onClick={() => { setPaused(false); setOnlineOpen(true); }} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
-            {session && <button className="btn" onClick={() => { setPaused(false); pauseRef.current(); }} title="The host pauses the game for everyone">⏸ Pause <kbd>P</kbd></button>}
-            {isHost && !roomPause && <button className="btn" onClick={() => { net.send({ t: 'pause', on: true }); setPaused(false); }}>⏸ Pause the game for everyone</button>}
-            {((session && isHost) || (!session && mode === 'free')) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
+            <div className="pm-grid">
+              <button className="btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+              <button className="btn" onClick={() => { setPaused(false); setOnlineOpen(true); }} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
+              <button className="btn" onClick={() => { setPaused(false); setGuideOpen(true); }}>📖 Guide <kbd>G</kbd></button>
+              <button className="btn" onClick={() => { setPaused(false); setAboutOpen(true); }}>ℹ️ About &amp; credits</button>
+              {((session && isHost) || (!session && mode === 'free')) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
+              {session && <button className="btn" onClick={() => { setPaused(false); pauseRef.current(); }} title="The host pauses the game for everyone">⏸ Pause <kbd>P</kbd></button>}
+              {isHost && !roomPause && <button className="btn" onClick={() => { net.send({ t: 'pause', on: true }); setPaused(false); }}>⏸ Pause for everyone</button>}
             </div>
             <div className="pause-b">
-            <button className="btn" onClick={() => { setPaused(false); setAboutOpen(true); }}>📖 About &amp; credits</button>
-            <h3 className="settings-h">⚙ Settings</h3>
-            <AudioSettings />
-            <ScreenSettings />
-            {mobile && <ControlsLayout />}
+              <h3 className="settings-h">⚙ Settings</h3>
+              <AudioSettings />
+              <ScreenSettings />
+              {mobile && <ControlsLayout />}
             </div>
-            <div className="pause-c">
-            <button className="btn go" onClick={() => setPaused(false)}>Keep exploring</button>
-            <button className="btn" onClick={onExit}>Back to hero select</button>
-            <button
-              className="btn ghost"
-              onClick={() => {
-                gameRef.current?.resetProgress();
-                setPaused(false);
-              }}
-            >
-              Reset this world's progress
-            </button>
+            <div className="pm-foot">
+              <button className="btn go" onClick={() => setPaused(false)}>Continue</button>
+              <button className="btn" onClick={() => setConfirm('quit')}>🚪 Quit</button>
+              <button className="btn ghost" onClick={() => setConfirm('reset')}>↺ Reset this world</button>
             </div>
           </div>
         </div>

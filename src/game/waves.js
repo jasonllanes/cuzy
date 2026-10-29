@@ -165,6 +165,16 @@ export class WaveSim {
 
   // ---------- main loop ----------
 
+  // the host changed the difficulty: it applies to everything that happens from now on, and the base keeps the same share of its health
+  setDifficulty(id) {
+    const d = DIFFICULTY[id];
+    if (!d || d === this.diff) return;
+    const share = this.baseMax > 0 ? this.baseHp / this.baseMax : 1;
+    this.diff = d;
+    this.baseMax = Math.round(d.baseHp * (1 + 0.3 * this.baseLevel));
+    this.baseHp = Math.max(1, Math.round(share * this.baseMax));
+  }
+
   // Power-ups, from anyone in the room. Slow-mo drags every monster down for a while; the Big Blast wipes out
   // the ordinary ones outright and only dents a boss.
   power(kind, by = null) {
@@ -898,6 +908,10 @@ export class WaveMirror {
   power(kind) {
     this.g.mp?.net.send({ t: 'w', to: 'host', k: 'power', d: { kind } });
     return true;
+  }
+
+  setDifficulty(id) {
+    if (DIFFICULTY[id]) this.diff = DIFFICULTY[id];
   }
 
   // a guest asks the host to plant the destroyed barricades back; the answer comes as an ack

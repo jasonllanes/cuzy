@@ -20,6 +20,7 @@ export const SURVIVAL_MAPS = [
   { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea.', ground: 'bg', trees: null, climate: 'dry', tileset: 'beach' },
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Cracked asphalt roads winding through a dark wasteland.', ground: 'bg', trees: null, climate: 'mild', tileset: 'asphalt' },
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain' },
+  { id: 'mixed', icon: '🧩', name: 'Patchwork Lands', blurb: 'A mix of every other map, side by side: islands, lakes, marsh, lava, beach and roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
 ];
 
 // Free Roam (and Wave Defense) maps: each is a hand-picked world with a name. The seed behind it is fixed.
@@ -32,6 +33,7 @@ export const FREE_MAPS = [
   { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea: a beach with open water all around.', seed: 'beach-482' },
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Dark cracked asphalt roads winding through a dark blue wasteland.', seed: 'asphalt-358' },
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads and mountain paths.', seed: 'mountain-206' },
+  { id: 'mixed', icon: '🧩', name: 'Patchwork Lands', blurb: 'A mix of all the other maps: islands, lakes, marsh, lava, beach, roads and paths, side by side.', seed: 'mixed-640' },
   { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush green islands with flowers, ringed by earthen cliffs and deep teal sea.', seed: 'emerald-615' },
 ];
 

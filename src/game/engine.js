@@ -2,6 +2,7 @@ import { CHUNK_PX, GRASS, SAND, T, WATER } from './world';
 import { ITEMS, LOOT_APOC, isConsumable, rollLoot, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
+import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
 import { BARRICADE_COST, BARRICADE_RECT, REPAIR_COST, WaveMirror, WaveSim } from './waves';
 import { ALLIES } from './allies';
@@ -211,6 +212,7 @@ export class Game {
     this.inventory = sanitize(saved?.inventory);
     // coins live in a purse, not in the backpack (older saves had them as items: move them over)
     this.coins = Math.max(0, Math.floor(Number(saved?.coins) || 0));
+    if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
     for (const k of saved?.felled || []) this.world.felled.add(String(k)); // trees you cut down stay down
     if (saved?.felled?.length) this.world.chunks.clear();
     for (let i = 0; i < this.inventory.length; i++) {
@@ -233,6 +235,7 @@ export class Game {
     }
     this.collected = new Set(saved?.collected || []);
     this.combat = demo ? null : new Combat(this, assets.img, saved?.kills || 0);
+    this.balls = null; // (beach balls, on the maps with a sea: made once the game has its home and world)
     // solo vs AI: computer rivals in the free world
     this.bots = !demo && !session && mode === 'free' && bots > 0 ? new Bots(this, bots, difficulty) : null;
     // Free Roam keeps its shop upgrades and quick-slot supplies with the seed's save
@@ -489,6 +492,10 @@ export class Game {
     this.emitStorage();
     this.supplies = { hp: 0, stam: 0 };
     this.skills = { shield: false, invis: false, dash: false, spiral: false, equipped: 'dash', equippedUtil: null };
+    this.world.felled.clear(); // the trees you cut down grow back
+    this.world.treeHp.clear();
+    this.world.chunks.clear();
+    this.stamina = 1;
     this.combat?.refreshMaxHp(true);
     if (this.combat) {
       this.combat.kills = 0;
@@ -2084,6 +2091,7 @@ export class Game {
       this.cheats = !!m.room.allowCheats; // the host can switch cheats on or off
       this.rules = { melee: m.room.allowMelee !== false, throw: m.room.allowThrow !== false };
       if (this.mp) this.mp.streakMonsters = !!m.room.streakMonsters;
+      if (m.room.difficulty) this.wave?.setDifficulty(m.room.difficulty); // the host can change the difficulty mid-round
     } else if (m.t === 'teams') {
       this.teamMap = { ...m.teams };
     } else if (m.t === 'state') {
@@ -2119,6 +2127,8 @@ export class Game {
       // a fallen rival's coins
       const a = Math.random() * Math.PI * 2;
       this.combat.drops.push({ x: m.x, y: m.y, z: 8, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, vz: 110, fly: true, burst: true, id: 'coin', qty: Math.max(1, Math.min(99999, m.qty | 0)), age: 0, net: m.lid, nopick: 0.8 });
+    } else if (m.t === 'fx' && m.kind === 'ball') {
+      this.balls?.adopt(m);
     } else if (m.t === 'fx' && m.kind === 'grab') {
       this.combat.drops = this.combat.drops.filter((d) => d.net !== m.lid);
     } else if (m.t === 'fx' && m.kind === 'throw') {
@@ -2340,7 +2350,7 @@ export class Game {
       // a mount has its own, bigger stamina pool: sprinting tires the animal and spares you
       const m = this.mount;
       const tired = m ? m.exhausted : this.exhausted;
-      if (this.inWater && this.world.lava && !this.dead) {
+      if (this.inWater && this.world.lavaAt(Math.floor(p.x / T), Math.floor((p.y - 2) / T)) && !this.dead) {
         // swimming in lava: it burns, over and over, until you climb out
         this.lavaT = (this.lavaT ?? 0) - dt;
         if (this.lavaT <= 0) {
@@ -2436,6 +2446,8 @@ export class Game {
       this.updateCelebration(dt);
       this.updateWallHold(dt);
       this.combat.update(dt);
+      if (!this.balls && !this.demo && this.home) this.balls = new Balls(this);
+      this.balls?.update(dt);
       if (!this.inside && !this.dungeon) this.bots?.update(dt);
       this.wave?.update(dt);
       if (this.mp) {
@@ -3155,7 +3167,7 @@ export class Game {
     const [vx, vy] = DIR_VEC[p.dir];
     const x = p.x + vx * 10;
     const y = p.y - 2 + vy * 10;
-    if (this.world.lava || this.world.type(Math.floor(x / T), Math.floor(y / T)) !== WATER) return null; // (nobody drinks lava)
+    if (this.world.lavaAt(Math.floor(x / T), Math.floor(y / T)) || this.world.type(Math.floor(x / T), Math.floor(y / T)) !== WATER) return null; // (nobody drinks lava)
     return { inter: 'water', x: p.x + vx * 6, y: p.y + vy * 6 + 4 };
   }
 
@@ -3399,6 +3411,7 @@ export class Game {
     if (!this.demo) {
       drawList.push({ kind: 'player', y: this.player.y + (this.mount ? 0.2 : 0) });
       this.combat.collect(drawList);
+      this.balls?.collect(drawList);
       for (const r of this.remotes.values()) if (!r.hidden) drawList.push({ kind: 'remote', r, y: r.y });
       if (this.bots) for (const s of this.bots.shots) drawList.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'rock', rot: s.rot }, y: s.y + 6 });
     }
@@ -3488,6 +3501,9 @@ export class Game {
           break;
         case 'barricade':
           this.drawBarricade(ctx, o.b);
+          break;
+        case 'ball':
+          this.balls.draw(ctx, this.img, o.b);
           break;
         case 'ally':
           this.drawAlly(ctx, o.a);

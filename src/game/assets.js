@@ -17,7 +17,7 @@ const NAMES = [
   'items/crate_top',
   'interior/farm', 'interior/modern',
   'dev/chars',
-  'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/asphalt', 'maps/mountain',
+  'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/asphalt', 'maps/mountain', 'props/beach_ball',
   ...Array.from({ length: 40 }, (_, i) => `weapons/w${String(i + 1).padStart(2, '0')}`),
   ...MONSTER_SPRITES.map((n) => `monsters/${n}`),
   ...APOC_KEYS.map((k) => `apoc/${k}`),

@@ -134,7 +134,7 @@ export default function App() {
   // the host pressed Start: everyone gets the fresh roster, scores and clock
   const startRound = (m) => {
     wipeSave(m.room?.seed || session?.room?.seed || profile.seed); // every round starts from nothing again
-    setSession((s) => ({ ...s, room: m.room || s.room, teams: m.teams || {}, host: m.host, players: m.players, scores: m.scores, clock: m.clock, clockAt: performance.now() }));
+    setSession((s) => ({ ...s, room: m.room || s.room, teams: m.teams || {}, host: m.host, players: m.players, slot: m.players?.find((p) => p.id === s.you)?.slot ?? s.slot, scores: m.scores, clock: m.clock, clockAt: performance.now() }));
     setLobby(false);
   };
 
