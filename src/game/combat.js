@@ -1,5 +1,6 @@
 import { CHUNK_PX, WATER } from './world';
 import { sfx } from './sfx';
+import { POWER_SLOW_TIME } from './waves';
 import { ITEMS, breaksOnImpact, iconOf, throwDamage, throwStats } from './items';
 import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
@@ -66,11 +67,22 @@ const THROW_COST_FREE = 0.11;
 const THROW_COST_ITEM = 0.16;
 const THROW_REGEN = 0.32;
 // Survival: right click fires the pistol. The throw meter doubles as the magazine, and refills while you let go.
-const GUN_COST = 0.1; // ten shots from full
+
 const GUN_REGEN = 0.2;
-const GUN_RATE = 0.27; // seconds between shots
+
 const BULLET_SPEED = 340;
 const BULLET_LIFE = 0.55; // about 12 tiles
+// the three guns: how much magazine a shot uses, seconds between shots, bullets per shot, spread (radians), damage, range
+export const GUNS = {
+  pistol: { name: 'Pistol', icon: '🔫', mag: 12, reload: 1.2, rate: 0.5, pellets: 1, spread: 0, dmg: 2, life: BULLET_LIFE, price: 0, blurb: 'Steady and accurate. 12 rounds.' },
+  shotgun: { name: 'Shotgun', icon: '💥', mag: 6, reload: 2, rate: 0.85, pellets: 5, spread: 0.36, dmg: 2, life: 0.3, price: 60, blurb: 'Five pellets per shot, deadly up close. 6 shells.' },
+  smg: { name: 'Machine gun', icon: '🔥', mag: 40, reload: 2.2, rate: 0.085, pellets: 1, spread: 0.1, dmg: 1, life: 0.5, price: 90, blurb: 'Sprays bullets while you hold. 40 rounds.' },
+};
+export const POWERS = {
+  slowmo: { name: 'Slow-mo', icon: '⏳', color: '#7ea8ff', blurb: 'Monsters crawl and strike slowly for a few seconds.' },
+  blast: { name: 'Big Blast', icon: '💣', color: '#ff9a3c', blurb: 'Wipes out every ordinary monster at once.' },
+};
+export const GUN_ORDER =['pistol', 'shotgun', 'smg'];
 const THROW_UNLOCK = 0.35; // once empty, wait until it refills this far
 export const RECALL_TIME = 2.5;
 export const RECALL_CD = 20;
@@ -131,6 +143,13 @@ export class Combat {
     this.dots = []; // burning targets
     this.bolts = []; // chain lightning arcs, for show
     this.throwCd = 0;
+    this.gun = 'pistol';
+    this.owned = { pistol: true }; // the others are bought in the shop
+    this.ammo = { pistol: GUNS.pistol.mag, shotgun: GUNS.shotgun.mag, smg: GUNS.smg.mag };
+    this.reloadT = 0; // seconds of reloading left
+    this.idleT = 0;
+    this.slowT = 0; // Slow-mo still running, for the screen tint
+    this.blastT = 0; // the flash of a Big Blast
     this.hold = null; // {t} while the left button is down
     this.dash = null;
     this.dashCd = 0;
@@ -476,7 +495,7 @@ export class Combat {
   activateShield() {
     if (this.shieldCd > 0) return;
     if (this.g.activeUtil() !== 'shield') {
-      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (Tab).' : 'Buy the Shield in the shop first (Tab).');
+      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'Buy the Shield in the shop first (B).');
       return;
     }
     this.shieldT = SHIELD_DUR;
@@ -490,7 +509,7 @@ export class Combat {
   activateInvis() {
     if (this.invisCd > 0 || this.invisT > 0) return;
     if (this.g.activeUtil() !== 'invis') {
-      this.g.onToast?.(this.g.skills.invis ? 'Equip Invisibility in the shop (Tab).' : 'Buy Invisibility in the shop first (Tab).');
+      this.g.onToast?.(this.g.skills.invis ? 'Equip Invisibility in the shop (B).' : 'Buy Invisibility in the shop first (B).');
       return;
     }
     this.invisT = INVIS_DUR;
@@ -546,30 +565,65 @@ export class Combat {
   // Survival: the pistol. Bullets fly fast and straight, and hit like the throwing items do.
   shootGun() {
     if (this.throwCd > 0) return;
-    if (this.tLocked) {
-      this.throwCd = 0.25;
+    const gun = GUNS[this.gun] || GUNS.pistol;
+    if (this.reloadT > 0) return;
+    if (this.ammo[this.gun] <= 0) {
+      this.reloadT = gun.reload;
       return;
     }
     const a = this.aim();
     const [cx, cy] = this.center();
-    this.tEnergy -= GUN_COST;
-    if (this.tEnergy <= 0.001) {
-      this.tEnergy = 0;
-      this.tLocked = true; // out of bullets: reloads on its own
-    }
+    this.ammo[this.gun]--;
+    this.idleT = 0;
+    if (this.ammo[this.gun] <= 0) this.reloadT = gun.reload; // empty: reloads on its own
     this.revealT = 1.5;
-    const shot = {
-      x: cx + Math.cos(a) * 12, y: cy + Math.sin(a) * 12,
-      vx: Math.cos(a) * BULLET_SPEED, vy: Math.sin(a) * BULLET_SPEED,
-      id: 'bullet', dmg: 2 + this.throwBonus(), life: BULLET_LIFE, rot: 0, free: true,
-    };
-    this.projectiles.push(shot);
-    this.muzzleT = 0.07;
+    for (let i = 0; i < gun.pellets; i++) {
+      // the shotgun fans its pellets out evenly with a little wobble; the machine gun just wanders
+      const off = gun.pellets > 1 ? (i / (gun.pellets - 1) - 0.5) * gun.spread * 2 + (Math.random() - 0.5) * 0.06 : (Math.random() - 0.5) * gun.spread;
+      const b = a + off;
+      const shot = {
+        x: cx + Math.cos(b) * 12, y: cy + Math.sin(b) * 12,
+        vx: Math.cos(b) * BULLET_SPEED, vy: Math.sin(b) * BULLET_SPEED,
+        id: 'bullet', dmg: gun.dmg + this.throwBonus(), life: gun.life, rot: 0, free: true,
+      };
+      this.projectiles.push(shot);
+      this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
+    }
+    this.muzzleT = this.gun === 'shotgun' ? 0.11 : 0.07;
     this.muzzleA = a;
-    sfx.play('gun', 0.8);
-    this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
-    this.throwCd = GUN_RATE;
+    sfx.play('gun', this.gun === 'smg' ? 0.5 : 0.8);
+    this.throwCd = gun.rate;
     this.faceAim(a);
+  }
+
+  // A power-up picked up in a wave: Slow-mo (monsters crawl) or Big Blast (ordinary monsters die at once)
+  usePower(kind) {
+    const p = POWERS[kind];
+    if (!this.g.wave || !p || !this.g.wave.power(kind)) return;
+    if (kind === 'slowmo') this.slowT = POWER_SLOW_TIME;
+    else this.blastT = 0.5;
+    sfx.play(kind === 'blast' ? 'shield' : 'dash');
+    this.g.onToast?.(`${p.icon} ${p.name}!`);
+  }
+
+  // switch to the next gun (Survival)
+  cycleGun() {
+    if (!this.g.wave || !this.g.world.apoc) return;
+    const have = GUN_ORDER.filter((id) => this.owned[id]);
+    if (have.length < 2) {
+      this.g.onToast?.('Buy the Shotgun or Machine gun in the shop (B) to switch.');
+      return;
+    }
+    this.equipGun(have[(have.indexOf(this.gun) + 1) % have.length]);
+  }
+
+  equipGun(id) {
+    if (!this.owned[id]) return;
+    this.gun = id;
+    this.reloadT = this.ammo[id] <= 0 ? GUNS[id].reload : 0;
+    this.throwCd = Math.max(this.throwCd, 0.15);
+    this.g.onToast?.(`${GUNS[this.gun].icon} ${GUNS[this.gun].name}`);
+    sfx.play('block', 0.5);
   }
 
   // the pistol in your hand, turned the way you are aiming, and the flash when it fires
@@ -651,8 +705,19 @@ export class Combat {
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.recallCd = Math.max(0, this.recallCd - dt);
     this.updateRecall(dt);
+    this.slowT = Math.max(0, this.slowT - dt);
+    this.blastT = Math.max(0, this.blastT - dt);
     if (this.g.wave) {
       this.tEnergy = Math.min(1, this.tEnergy + (this.g.world.apoc ? GUN_REGEN : THROW_REGEN) * dt);
+      if (this.g.world.apoc) {
+        const gun = GUNS[this.gun];
+        if (this.reloadT > 0) {
+          this.reloadT -= dt;
+          if (this.reloadT <= 0) this.ammo[this.gun] = gun.mag;
+        } else if (this.ammo[this.gun] < gun.mag && (this.idleT += dt) > 2) {
+          this.reloadT = gun.reload; // not shooting for a while: top the magazine up
+        }
+      }
       this.muzzleT = Math.max(0, (this.muzzleT || 0) - dt);
       if (this.tLocked && this.tEnergy >= THROW_UNLOCK) this.tLocked = false;
     }
@@ -1466,6 +1531,16 @@ export class Combat {
       }
       return true;
     }
+    if (d.pw) {
+      // a power-up: walk into it and it goes off (for everybody in the wave)
+      if (d.age > 30) return false;
+      if (dist < 8) {
+        this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net });
+        this.usePower(d.pw);
+        return false;
+      }
+      return true;
+    }
     if (SUPPLY_ITEMS[d.id]) {
       // quick-slot supplies go straight to their own slot
       const key = SUPPLY_ITEMS[d.id];
@@ -1571,6 +1646,26 @@ export class Combat {
   drawDrop(ctx, d, t) {
     ctx.fillStyle = 'rgba(60,40,30,0.2)';
     ctx.fillRect(Math.round(d.x - 3), Math.round(d.y), 6, 2);
+    if (d.pw) {
+      // a glowing orb that bobs, and blinks when it is about to fade
+      if (d.age > 24 && Math.sin(t * 16) > 0) return;
+      const p = POWERS[d.pw];
+      const y = Math.round(d.y - 9 + Math.sin(t * 4) * 2);
+      const r = 7 + Math.sin(t * 6) * 1.2;
+      ctx.fillStyle = `${p.color}55`;
+      ctx.beginPath();
+      ctx.arc(Math.round(d.x), y, r + 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(Math.round(d.x), y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.icon, Math.round(d.x), y + 1);
+      return;
+    }
     if (d.id === 'heart' && this.g.world.apoc) {
       // Survival: the health pickup is a bandage
       if (d.age > 32 && Math.sin(t * 16) > 0) return;

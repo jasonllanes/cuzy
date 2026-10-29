@@ -8,6 +8,8 @@ const PREP_BETWEEN = 14;
 const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
 const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
 const MAX_ALIVE = 45;
+export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
+const POWER_SLOW = 0.35; // monsters move and strike at this fraction of their normal pace while it lasts
 const SNAPSHOT_EVERY = 0.125; // Wave Defense and Survival snapshots per second to the room: a few less keeps busy rooms under Supabase's message limit
 const HOUSE_SOFTNESS = 0.35; // the house shrugs off hits better than a single barricade does
 export const BARRICADE_RECT = (b) => ({ x: b.x - 8, y: b.y - 14, w: 16, h: 16 });
@@ -151,7 +153,26 @@ export class WaveSim {
 
   // ---------- main loop ----------
 
+  // Power-ups, from anyone in the room. Slow-mo drags every monster down for a while; the Big Blast wipes out
+  // the ordinary ones outright and only dents a boss.
+  power(kind) {
+    if (this.phase === 'victory' || this.phase === 'defeat') return false;
+    if (kind === 'slowmo') {
+      this.slowT = POWER_SLOW_TIME;
+      return true;
+    }
+    if (kind === 'blast') {
+      for (const m of this.monsters) {
+        if (m.state === 'dead') continue;
+        this.hitMonster(m.id, MONSTERS[m.type].boss ? m.max * 0.2 : 9999, m.x, m.y + 10, 160, true);
+      }
+      return true;
+    }
+    return false;
+  }
+
   update(dt) {
+    if (this.slowT > 0) this.slowT -= dt;
     if (this.phase !== 'victory' && this.phase !== 'defeat') {
       this.updateFlow(dt);
       this.updateShots(dt);
@@ -199,6 +220,9 @@ export class WaveSim {
     this.fightT = 0;
     this.surged = false;
     this.enraged = false;
+    // somewhere around the 10th kill of the wave, a power-up may drop (not every wave)
+    this.killN = 0;
+    this.powerAt = Math.random() < 0.75 ? Math.min(7 + Math.floor(Math.random() * 6), Math.max(3, Math.floor(this.waveTotal * 0.6))) : 0;
     this.phase = 'fight';
     const bosses = this.queue.filter((t) => MONSTERS[t].boss).length;
     this.emit({ type: 'start', wave: this.wave, boss: this.wave === TOTAL_WAVES, bosses });
@@ -262,7 +286,8 @@ export class WaveSim {
     m.anim += dt;
     m.t += dt;
     if (m.state === 'dead') return;
-    m.cd -= dt;
+    const slow = this.slowT > 0 ? POWER_SLOW : 1;
+    m.cd -= dt * slow;
     m.atk = Math.max(0, m.atk - dt);
 
     if (m.state === 'hurt') {
@@ -277,7 +302,7 @@ export class WaveSim {
     }
 
     const players = this.g.waveTargets().filter((p) => !p.hidden);
-    const speed = def.speed * (m.sp || 1) * (this.enraged ? 1.25 : 1);
+    const speed = def.speed * (m.sp || 1) * (this.enraged ? 1.25 : 1) * slow;
     const scale = def.scale || 1;
     const reach = 8 + scale * 5;
 
@@ -455,7 +480,8 @@ export class WaveSim {
     if (m.hp <= 0) {
       m.state = 'dead';
       m.t = 0;
-      this.emit({ type: 'mdie', name: def.name, x: m.x, y: m.y, boss: !!def.boss, loot: rollMonsterLoot(def, this.diff, this.theme) });
+      const power = ++this.killN === this.powerAt ? (Math.random() < 0.5 ? 'slowmo' : 'blast') : undefined;
+      this.emit({ type: 'mdie', name: def.name, x: m.x, y: m.y, boss: !!def.boss, loot: rollMonsterLoot(def, this.diff, this.theme), power, pid: this.wave });
       return;
     }
     const ang = Math.atan2(m.y - 8 - fy, m.x - fx);
@@ -606,6 +632,7 @@ export class WaveSim {
   // messages from guests
   onMessage(k, d, from) {
     if (k === 'hit') this.hitMonster(d.id, d.dmg, d.fx, d.fy, d.kb);
+    else if (k === 'power') this.power(d.kind);
     else if (k === 'place') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'place', ok: this.placeBarricade(d.x, d.y, d.v) } });
     else if (k === 'pick') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'pick', ok: this.pickBarricade(d.id) } });
     else if (k === 'recruit') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'recruit', ok: ALLY_KINDS.includes(d.kind) && this.recruit(d.kind), cost: ALLIES[d.kind]?.cost } });
@@ -746,6 +773,11 @@ export class WaveMirror {
 
   hitMonster(id, dmg, fx, fy, kb) {
     this.g.mp?.net.send({ t: 'w', to: 'host', k: 'hit', d: { id, dmg, fx, fy, kb } });
+  }
+
+  power(kind) {
+    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'power', d: { kind } });
+    return true;
   }
 
   placeCheck(x, y) {

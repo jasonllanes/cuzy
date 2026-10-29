@@ -38,7 +38,7 @@ export default function ShopPanel({ hud, game, onClose }) {
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="panel upgrades shop">
         <header className="inv-head">
-          <h2>🛒 Shop</h2>
+          <h2>🛒 Buy</h2>
           <span className="lvl-chip" title="Character level: kill monsters and players for XP">⭐ Lv {hud.level || 1} <i><b style={{ width: `${Math.min(100, ((hud.xp || 0) / (hud.xpNeed || 40)) * 100)}%` }} /></i> {hud.xp || 0}/{hud.xpNeed || 40} XP</span>
           <span className="coin-chip big">🪙 {coins}</span>
           <button className="btn small-btn" onClick={onClose} aria-label="Close shop">✕</button>

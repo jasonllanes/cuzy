@@ -26,7 +26,7 @@ import { hp100 } from '../game/stats';
 import { mapNameOf } from '../game/maps';
 import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
-import { RECALL_CD, SHIELD_CD } from '../game/combat';
+import { GUNS, RECALL_CD, SHIELD_CD } from '../game/combat';
 import { setTheme } from '../game/items';
 import RoomPanel from './RoomPanel';
 import UpgradePanel from './UpgradePanel';
@@ -414,8 +414,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         gameRef.current?.useSupply('hp');
       } else if (e.code === 'KeyX' && !e.repeat && !modal && !waves) {
         gameRef.current?.useSupply('stam');
-      } else if (e.code === 'Tab' || e.code === 'KeyU') {
-        // Tab opens the shop (Upgrades in Wave Defense and Survival)
+      } else if (e.code === 'Tab') {
+        // Tab switches weapon: the next gun in Survival, the next sword in the Free Roam
+        e.preventDefault();
+        if (!e.repeat && !modal) gameRef.current?.switchWeapon();
+      } else if (e.code === 'KeyB' || e.code === 'KeyU') {
+        // B opens the shop (Upgrades in Wave Defense and Survival)
         e.preventDefault();
         if (!e.repeat && !mapRef.current && !pausedRef.current && !guideRef.current && !storeRef.current) setUpgOpen((o) => !o);
       } else if (e.code === 'KeyM') {
@@ -590,14 +594,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
         {(!mobile || hudMenuOpen) && (
           <>
-        {!mobile && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>{waves ? '⬆ Upgrades' : '🛒 Shop'} <kbd>Tab</kbd></button>}
-        <button className="btn small-btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+        {!mobile && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
         <button className="btn small-btn" onClick={() => setMapOpen(true)}>🗺️ Map <kbd>M</kbd></button>
-        <button className="btn small-btn" onClick={() => setOnlineOpen(true)} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
+        <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat <kbd>Enter</kbd></button>
+        {!mobile && <button className="btn small-btn" onClick={() => gameRef.current?.switchWeapon()} title={survival ? 'Switch gun' : 'Switch sword'}>🔁 Weapon <kbd>Tab</kbd></button>}
         {((session && isHost) || (!session && mode === 'free')) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
-        <button className="btn small-btn" onClick={() => pauseRef.current()} title={session ? 'The host pauses the game for everyone' : 'Pause the game'}>⏸ Pause <kbd>P</kbd></button>
-        <button className="btn small-btn" onClick={() => { setGuideOpen(true); setHudMenuOpen(false); }}>📖 Guide</button>
-        <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu</button>
+        <button className="btn small-btn" onClick={() => { setGuideOpen(true); setHudMenuOpen(false); }}>📖 Guide <kbd>G</kbd></button>
+        <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu <kbd>Esc</kbd></button>
           </>
         )}
       </div>
@@ -607,7 +610,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} />}
-      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · E eat · Tab shop · M map · G guide</div>}
+      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · Tab switch weapon· E eat · B buy · M map · G guide</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -619,7 +622,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           className={`skill ${hud.shieldT > 0 ? 'active' : ''} ${hud.shieldCd > 0 ? 'cooling' : 'ready'}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => gameRef.current?.combat?.activateShield()}
-          title={!waves && !hud.util ? 'Utility skill: buy the Shield or Invisibility in the shop (Tab)' : 'Shield: blocks all damage for 3 seconds (10 second cooldown)'}
+          title={!waves && !hud.util ? 'Utility skill: buy the Shield or Invisibility in the shop (B)' : 'Shield: blocks all damage for 3 seconds (10 second cooldown)'}
         >
           <span className="skill-icon">{!waves && !hud.util ? '🔒' : '🛡️'}</span>
           <kbd>F</kbd>
@@ -664,22 +667,26 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </button>
         )}
         {!waves && hud.weapons && (
-          <button className="skill weapon-skill" onClick={() => setUpgOpen(true)} title={`${weaponById(hud.weapons.equipped).name}: change swords in the shop (Tab)`}>
+          <button className="skill weapon-skill" onClick={() => setUpgOpen(true)} title={`${weaponById(hud.weapons.equipped).name}: change swords in the shop (B)`}>
             <span className="wicon sm" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(weaponById(hud.weapons.equipped))}.png)` }} />
           </button>
         )}
-        <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? 'Hold left click, then release to use your sword skill' : 'Sword skill: buy the Dash or the Spiral Sword in the shop (Tab)'}>
+        <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? 'Hold left click, then release to use your sword skill' : 'Sword skill: buy the Dash or the Spiral Sword in the shop (B)'}>
           <span className="skill-icon">{hud.activeSkill === 'spiral' ? '🌀' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? 'hold click' : 'locked'}</small>
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'spiral' ? 1.4 : 1.2)) * 100)}%` }} />
         </div>
       </div>
       {waves && (
-        <div className={`hud throw-meter ${hud.tLocked ? 'locked' : ''}`}>
-          <span>{survival ? (hud.tLocked ? '🔫 Reloading…' : '🔫 Pistol') : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
-          <div className="throw-track"><div className="throw-fill" style={{ width: `${hud.tEnergy * 100}%` }} /></div>
+        <div className={`hud throw-meter ${survival ? (hud.reloading ? 'locked' : '') : hud.tLocked ? 'locked' : ''}`}>
+          <span>{survival ? (hud.reloading ? '🔄 Reloading…' : `${GUNS[hud.gun]?.icon || '🔫'} ${hud.ammo ?? 0} / ${GUNS[hud.gun]?.mag || 12}`) : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
+          <div className="throw-track">
+            <div className="throw-fill" style={{ width: `${survival ? (hud.reloading ? hud.reload : (hud.ammo ?? 0) / (GUNS[hud.gun]?.mag || 12)) * 100 : hud.tEnergy * 100}%` }} />
+          </div>
         </div>
       )}
+      {waves && hud.slowT > 0 && <div className="slowmo-tint" aria-hidden="true" />}
+      {waves && hud.blastT > 0 && <div className="blast-flash" aria-hidden="true" style={{ opacity: Math.min(1, hud.blastT * 2) }} />}
       <div className="hud weather-chip" title="Sky and time">
         {hud.dungeon ? <span>🕳️ {hud.dungeon}</span> : hud.weather && !hud.weather.indoors ? <span>{hud.weather.icon} {hud.weather.name}</span> : <span>🏠 Indoors</span>}
         <span className="wc-sep">·</span>
@@ -731,7 +738,15 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           if (s.qty > 1) setQty({ kind: 'drop', side: 'inv', i, max: s.qty, id: s.id });
           else gameRef.current?.dropItem('inv', i, 1);
         }}
-      />
+      >
+        {survival && hud.gun && (
+          <button type="button" className="gun-slot" onClick={() => gameRef.current?.switchWeapon()} title={`${GUNS[hud.gun].name}: click or press Tab to switch`}>
+            <span>{GUNS[hud.gun].icon}</span>
+            <small>{GUNS[hud.gun].name}</small>
+            <kbd>Tab</kbd>
+          </button>
+        )}
+      </Hotbar>
       {hud.celeb && (
         <div className="winner-banner">
           <div className="winner-card panel">
@@ -831,6 +846,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <h2>Taking a breather</h2>
             <p className="hint">{session ? 'The room keeps going while you are in this menu.' : 'The game is paused. Your progress is saved for this map.'}</p>
             <div className="pause-a">
+            <button className="btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+            <button className="btn" onClick={() => { setPaused(false); setOnlineOpen(true); }} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
+            {session && <button className="btn" onClick={() => { setPaused(false); pauseRef.current(); }} title="The host pauses the game for everyone">⏸ Pause <kbd>P</kbd></button>}
             {isHost && !roomPause && <button className="btn" onClick={() => { net.send({ t: 'pause', on: true }); setPaused(false); }}>⏸ Pause the game for everyone</button>}
             {((session && isHost) || (!session && mode === 'free')) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
             </div>

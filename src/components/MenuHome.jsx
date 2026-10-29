@@ -104,7 +104,7 @@ export default function MenuHome({ view, setView, onPlay, onMulti, name, setName
           <h3 className="shop-h">🎮 Controls</h3>
           <p className="hint">
             <b>WASD</b> move · <b>Shift</b> sprint · <b>Left click</b> sword (hold to dash) · <b>Right click</b> throw / shoot · <b>Space</b> use, open, enter ·
-            <b> 1-9</b> select · <b>E</b> eat · <b>Tab</b> shop · <b>M</b> map · <b>Enter</b> chat · <b>P</b> pause · <b>G</b> guide
+            <b> 1-9</b> select · <b>E</b> eat · <b>B</b> shop · <b>Tab</b> switch weapon · <b>M</b> map · <b>Enter</b> chat · <b>P</b> pause · <b>G</b> guide
           </p>
 
           <h3 className="shop-h">🎨 Credits</h3>

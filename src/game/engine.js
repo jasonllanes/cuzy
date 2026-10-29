@@ -1,7 +1,7 @@
 import { CHUNK_PX, GRASS, SAND, T, WATER } from './world';
 import { ITEMS, LOOT_APOC, isConsumable, rollLoot, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
-import { Combat, SHIELD_DUR } from './combat';
+import { Combat, GUNS, SHIELD_DUR } from './combat';
 import { MONSTERS } from './monsters';
 import { WaveMirror, WaveSim } from './waves';
 import { ALLIES } from './allies';
@@ -268,6 +268,8 @@ export class Game {
         this.placeBarricade();
       } else if (e.code === 'KeyH' && !e.repeat) {
         this.combat?.startRecall();
+      } else if (e.code === 'KeyR' && !e.repeat) {
+        this.combat?.cycleGun();
       }
     };
     this.onKeyUp = (e) => {
@@ -918,6 +920,7 @@ export class Game {
       c.kills++;
       this.monsterKill(ev.name || 'Monster', XP.wave + (ev.boss ? 80 : 0));
       sfx.play('monsterDie', 0.6);
+      if (ev.power) c.drops.push({ x: ev.x, y: ev.y, id: 'power', pw: ev.power, age: 0, net: `pw${ev.pid}` });
       for (const l of ev.loot) {
         c.drops.push({ x: ev.x + (Math.random() - 0.5) * 16, y: ev.y + (Math.random() - 0.5) * 8, id: l.id, qty: l.qty, age: 0 });
       }
@@ -942,7 +945,7 @@ export class Game {
       this.giveBarricade();
     } else if (d.op === 'recruit' && !d.ok) {
       this.giveCoins(d.cost || 0);
-      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'bus' : 'base'} (Tab) to make room for more helpers.`);
+      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'bus' : 'base'} (B) to make room for more helpers.`);
     } else if (d.op === 'upg' && !d.ok) {
       this.giveCoins(this.houseCostPaid || 0);
       this.onToast?.('The base is already as strong as it gets.');
@@ -1217,6 +1220,45 @@ export class Game {
     this.emitHud();
   }
 
+  // Tab: the next gun in Survival, the next sword you own in the Free Roam
+  switchWeapon() {
+    if (this.frozen || this.dead) return;
+    if (this.wave) {
+      this.combat?.cycleGun();
+      return;
+    }
+    const have = WEAPONS.filter((w) => this.weapons.owned[w.id]);
+    if (have.length < 2) {
+      this.onToast?.('Buy another sword in the shop (B) to switch.');
+      return;
+    }
+    const next = have[(have.findIndex((w) => w.id === this.weapons.equipped) + 1) % have.length];
+    this.weapons.equipped = next.id;
+    sfx.play('buy');
+    this.onToast?.(`⚔️ ${next.name} equipped.`);
+    this.emitHud();
+  }
+
+  // Survival: buy a gun (and pick it up straight away), or switch to one you own
+  buyGun(id) {
+    const info = GUNS[id];
+    const c = this.combat;
+    if (!this.wave || !info || !c) return;
+    if (c.owned[id]) {
+      c.equipGun(id);
+      return;
+    }
+    if (!this.spendCoins(info.price)) {
+      sfx.play('nope');
+      this.onToast?.(`${info.name} costs ${info.price} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    c.owned[id] = true;
+    c.ammo[id] = info.mag;
+    sfx.play('levelup');
+    c.equipGun(id);
+  }
+
   buyUpgrade(id) {
     if (!this.wave) return;
     const info = UPGRADES.find((u) => u.id === id);
@@ -1268,7 +1310,7 @@ export class Game {
     }
     if (this.wave.recruit(kind) === false) {
       this.giveCoins(def.cost);
-      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'bus' : 'base'} (Tab) to make room for more helpers.`);
+      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'bus' : 'base'} (B) to make room for more helpers.`);
     }
     // a guest's request comes back as an 'ack', which refunds the coins if the host said no
   }
@@ -2003,6 +2045,13 @@ export class Game {
       coins: this.coinCount(),
       tEnergy: this.combat.tEnergy,
       tLocked: this.combat.tLocked,
+      gun: this.combat.gun,
+      gunsOwned: { ...this.combat.owned },
+      slowT: this.combat.slowT,
+      blastT: this.combat.blastT,
+      ammo: this.combat.ammo[this.combat.gun],
+      reload: this.combat.reloadT > 0 ? 1 - this.combat.reloadT / GUNS[this.combat.gun].reload : 0,
+      reloading: this.combat.reloadT > 0,
       recallCd: this.combat.recallCd,
       recallT: this.combat.recallT,
       inWater: this.inWater,
@@ -2467,6 +2516,9 @@ export class Game {
         break;
       case 'barricade':
         this.placeBarricade();
+        break;
+      case 'gun':
+        this.switchWeapon();
         break;
       case 'sprint':
         this.keys.add('sprint');

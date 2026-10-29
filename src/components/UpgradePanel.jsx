@@ -1,4 +1,5 @@
 import { ALLIES, ALLY_KINDS, MAX_ALLIES, teamCap } from '../game/allies';
+import { GUNS, GUN_ORDER } from '../game/combat';
 import { MAX_LEVEL, UPGRADES, upgradeCost } from '../game/upgrades';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
@@ -11,7 +12,7 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="panel upgrades">
         <header className="inv-head">
-          <h2>⬆ Upgrades</h2>
+          <h2>🛒 Buy</h2>
           <span className="lvl-chip" title="Character level: kill monsters and players for XP">⭐ Lv {hud.level || 1} <i><b style={{ width: `${Math.min(100, ((hud.xp || 0) / (hud.xpNeed || 40)) * 100)}%` }} /></i> {hud.xp || 0}/{hud.xpNeed || 40} XP</span>
           <span className="coin-chip big">🪙 {hud.coins}</span>
           <button className="btn small-btn" onClick={onClose} aria-label="Close upgrades">✕</button>
@@ -41,6 +42,27 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
             );
           })}
         </div>
+
+        {survival && hud.gunsOwned && (
+          <div className="recruit-note">
+            <b>🔫 Guns</b> (the pistol is free; switch with R or the slot beside the hotbar)
+            <div className="recruit-list">
+              {GUN_ORDER.map((id) => {
+                const g = GUNS[id];
+                const have = !!hud.gunsOwned[id];
+                const on = hud.gun === id;
+                return (
+                  <div key={id} className="recruit-chip hire">
+                    <span><b>{g.icon} {g.name}</b><small>{g.blurb}</small></span>
+                    <button className="btn go small-btn" disabled={on || (!have && hud.coins < g.price)} onClick={() => game.buyGun(id)}>
+                      {on ? 'Equipped' : have ? 'Equip' : `🪙 ${g.price}`}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="recruit-note">
           <b>🪙 {survival ? 'Survivors' : 'Helpers'}</b> ({team}/{cap}, up to {MAX_ALLIES}). Upgrade the {survival ? 'bus' : 'base'} to make room for more.

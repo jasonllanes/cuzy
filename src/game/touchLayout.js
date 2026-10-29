@@ -18,6 +18,7 @@ export const TOUCH = [
   { id: 'shop', kind: 'shop', label: '🛒 Shop', icon: '🛒', text: 'Shop', dock: 'right1' },
   { id: 'eat', kind: 'eat', label: '🍴 Eat', icon: '🍴', text: 'Eat', x: 95, y: 36 },
   { id: 'chat', kind: 'chat', label: '💬 Chat', icon: '💬', text: 'Chat', x: 95, y: 48 },
+  { id: 'gun', kind: 'gun', label: '🔁 Switch gun', icon: '🔁', text: 'Gun', x: 80, y: 28 },
   { id: 'wall', kind: 'barricade', label: '🧱 Wall', icon: '🧱', text: 'Wall', x: 80, y: 46 },
 ];
 

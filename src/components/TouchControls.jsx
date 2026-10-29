@@ -176,6 +176,7 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
     hp: sword,
     stam: sword,
     wall: waves,
+    gun: survival,
   };
   const cooldownOf = {
     home: hud.recallCd ? hud.recallCd / 20 : 0,

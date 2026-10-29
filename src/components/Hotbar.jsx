@@ -3,7 +3,7 @@ import ItemIcon from './ItemIcon';
 
 // The first nine backpack slots, selectable with the 1-9 keys.
 // Drag a stack onto another slot to rearrange; let go anywhere else to drop it on the ground.
-export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDropOut }) {
+export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDropOut, children }) {
   const current = slots[selected];
   return (
     <div className="hotbar" role="toolbar" aria-label="Hotbar">
@@ -41,6 +41,7 @@ export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDro
           {selected === i && current && <span className="hot-name">{ITEMS[current.id].name}</span>}
         </button>
       ))}
+      {children}
     </div>
   );
 }

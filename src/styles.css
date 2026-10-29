@@ -1133,3 +1133,13 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 
 .joystick .run-line.arming { background: #ffb02e; }
 .joystick .run-lock.arming { background: #ffb02e; border-color: #b07800; transform: scale(1.12); }
+
+/* Survival: the gun in hand, attached to the left edge of the hotbar */
+.gun-slot { position: absolute; right: calc(100% + 8px); top: -3px; bottom: -3px; width: 64px; display: grid; place-items: center; align-content: center; padding: 2px; background: rgba(255, 250, 240, 0.92); border: 3px solid var(--wood); border-radius: 16px; box-shadow: 0 4px 0 var(--wood-dark); cursor: pointer; font-family: var(--pixel); color: var(--ink); }
+.gun-slot span { font-size: 1.5rem; line-height: 1; }
+.gun-slot small { font-size: 0.5rem; line-height: 1.1; text-align: center; }
+.gun-slot kbd { position: absolute; top: 1px; left: 4px; font: 700 0.55rem var(--pixel); opacity: 0.7; }
+
+/* power-ups: two small buttons above the gun slot, and the screen effects */
+.slowmo-tint { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(circle, rgba(120, 160, 255, 0.05) 40%, rgba(70, 90, 220, 0.3) 100%); }
+.blast-flash { position: absolute; inset: 0; z-index: 30; pointer-events: none; background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(255, 190, 90, 0.6)); }
