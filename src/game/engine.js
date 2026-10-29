@@ -1391,15 +1391,16 @@ export class Game {
 
   // the level number over a wave monster, in its rarity colour; a legendary also glows gold underfoot
   drawLevelTag(ctx, m, x, y, top) {
-    if (MONSTERS[m.type]?.boss) {
+    if (MONSTERS[m.type]?.boss || m.nightBoss) {
       ctx.save();
       ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'center';
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(30,20,30,0.9)';
       ctx.fillStyle = '#ff4d4d';
-      ctx.strokeText('☠ BOSS ☠', x, top);
-      ctx.fillText('☠ BOSS ☠', x, top);
+      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : '☠ BOSS ☠';
+      ctx.strokeText(label, x, top);
+      ctx.fillText(label, x, top);
       ctx.restore();
       return;
     }
@@ -1442,7 +1443,17 @@ export class Game {
 
     ctx.fillStyle = 'rgba(60,40,30,0.22)';
     ctx.fillRect(x - 5 * sc, y - 1, 10 * sc, 2 + sc);
+    if (m.nightBoss && !dead) {
+      ctx.fillStyle = `rgba(255,40,40,${0.25 + 0.2 * Math.sin(m.anim * 5)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 14 * sc, 5 * sc, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.save();
+    if (m.nightBoss && !dead) {
+      ctx.shadowColor = m.burning ? 'rgba(255,150,40,0.95)' : 'rgba(255,30,30,0.95)';
+      ctx.shadowBlur = 9;
+    }
     ctx.translate(x + (m.atk > 0 ? m.face * 2 : 0), Math.round(y - hover));
     if (m.face < 0) ctx.scale(-1, 1);
     if (dead) {
@@ -1457,6 +1468,14 @@ export class Game {
       ctx.drawImage(sheet, frame * 16, 0, 16, 16, -8 * sc, dy, 16 * sc, 16 * sc);
     }
     ctx.restore();
+    if (m.burning && !dead) {
+      // flames licking up the body
+      for (let i = 0; i < 6; i++) {
+        const ph = (this.t * 3 + i * 0.37) % 1;
+        ctx.fillStyle = ph < 0.5 ? '#ffb02e' : '#ff5a1f';
+        ctx.fillRect(Math.round(x + (i - 2.5) * 3 * sc), Math.round(y - hover - 4 * sc - ph * 14 * sc), 2, 3);
+      }
+    }
 
     if (!dead && (m.hp < m.max || m.wild)) {
       const w = Math.max(10, (box.right - box.left + 1) * sc);

@@ -154,6 +154,7 @@ export class SupaNet {
     const ch = this.sb.channel('cuzy-lobby', { config: { broadcast: { self: false }, presence: { key: this.me } } });
     this.lobbyCh = ch;
     ch.on('broadcast', { event: 'invite' }, ({ payload }) => this.onInvite(payload));
+    ch.on('broadcast', { event: 'gchat' }, ({ payload }) => this.onGlobalChat(payload));
     for (const event of ['sync', 'join', 'leave']) ch.on('presence', { event }, () => this.refreshOnline());
     ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
@@ -195,6 +196,20 @@ export class SupaNet {
       payload: { to: toId, from: { id: this.me, name: this.identity.name, hero: this.identity.hero }, code: this.code, roomName: this.cfg?.name || '' },
     }).catch?.(() => {});
     return true;
+  }
+
+  // chat that every player online can read, wherever they are (people in our own room already got it from the room)
+  sendGlobal(text) {
+    const t = clean(text, 80);
+    if (!t || !this.lobbyCh || !this.lobbyReady) return false;
+    this.lobbyCh.send({ type: 'broadcast', event: 'gchat', payload: { id: this.me, name: this.identity.name, text: t, room: this.code || null } }).catch?.(() => {});
+    return true;
+  }
+
+  onGlobalChat(p) {
+    if (!p || !p.id || p.id === this.me || !p.text) return;
+    if (p.room && p.room === this.code) return;
+    this.emit({ t: 'gchat', id: p.id, name: clean(p.name, 14) || 'Friend', text: clean(p.text, 80) });
   }
 
   onInvite(p) {

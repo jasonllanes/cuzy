@@ -37,8 +37,10 @@ export function mapNameOf(seed) {
 
 export const mapInfo = (id) => SURVIVAL_MAPS.find((m) => m.id === id) || SURVIVAL_MAPS[0];
 
+// A "@abc1" after the base is a layout roll: the same named map, but a freshly generated world (trees, houses, spawn)
 export const splitSeed = (seed) => {
-  const [base, map] = String(seed).split('~');
+  const [rawBase, map] = String(seed).split('~');
+  const base = rawBase.split('@')[0];
   return { base, map: SURVIVAL_MAPS.some((m) => m.id === map) ? map : 'ruins' };
 };
 

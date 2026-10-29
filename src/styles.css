@@ -1156,3 +1156,7 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 
 .kill-board { margin-top: 6px; }
 .mobile-ui .game.mobile .kill-board { display: none; }
+
+.guide-keys { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.guide-keys .hint { grid-column: 1 / -1; }
+.guide-keys kbd { margin-right: 6px; }

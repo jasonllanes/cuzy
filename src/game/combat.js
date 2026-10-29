@@ -4,7 +4,7 @@ import { POWER_SLOW_TIME } from './waves';
 import { ITEMS, breaksOnImpact, iconOf, throwDamage, throwStats } from './items';
 import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
-import { MONSTERS } from './monsters';
+import { MONSTERS, lvDmg, lvHp, lvXp, rollMonsterLevel } from './monsters';
 import { SUPPLY_CAP } from './upgrades';
 import { swingTime, weaponById, weaponIconFile } from './weapons';
 import { HP_PER_HEART, HP_PER_UPGRADE, hp100, maxHearts, monsterXp, XP } from './stats';
@@ -824,9 +824,10 @@ export class Combat {
       const pt = pick();
       if (!pt) return;
       const def = MONSTERS[type];
-      const hp = Math.round(def.hp * (1 + 0.3 * (tier - 1)));
+      const lv = rollMonsterLevel(Math.min(10, tier * 3));
+      const hp = Math.round(def.hp * (1 + 0.3 * (tier - 1)) * lvHp(lv));
       this.wilds.push({
-        id: `w${this.nextId++}`, wild: true, type, x: pt[0], y: pt[1], hp, max: hp, state: 'move', t: 0,
+        lv, id: `w${this.nextId++}`, wild: true, type, x: pt[0], y: pt[1], hp, max: hp, state: 'move', t: 0,
         anim: Math.random() * 3, face: 1, atk: 0, cd: 0.8, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0, phase: Math.random() * 6,
       });
     };
@@ -858,8 +859,83 @@ export class Combat {
       const night = this.g.darkness();
       const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 2;
       if (this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15 ? WILD_NIGHT : WILD_DAY);
+      if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
     }
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
+  }
+
+  // every so often: a bulk spawn of one kind (five bats and so on), and at night a boss that burns up at dawn
+  updateEvents(night) {
+    this.bulkT = (this.bulkT ?? 40 + Math.random() * 40) - 3.5;
+    if (this.bulkT <= 0) {
+      this.bulkT = 55 + Math.random() * 60;
+      const pool = night > 0.15 ? ['bat', 'bat', 'hound', 'scarab', 'redcap'] : ['jelly', 'redcap', 'hand'];
+      this.spawnPack(pool[Math.floor(Math.random() * pool.length)], 5);
+    }
+    const boss = this.wilds.some((w) => w.nightBoss && w.state !== 'dead');
+    if (night > 0.6 && !boss && !this.nightBossDone) {
+      this.nightBossDone = true;
+      this.spawnNightBoss();
+    } else if (night < 0.1 && !boss) {
+      this.nightBossDone = false; // a new night, a new boss
+    }
+  }
+
+  spawnPack(type, n) {
+    const { world, player: p, home } = this.g;
+    const def = MONSTERS[type];
+    const flyer = def.kind === 'fly';
+    for (let tries = 0; tries < 6; tries++) {
+      const ang = Math.random() * Math.PI * 2;
+      const d = 170 + Math.random() * 40;
+      const cx = p.x + Math.cos(ang) * d;
+      const cy = p.y + Math.sin(ang) * d;
+      if (Math.hypot(cx - home.x, cy - home.y) < 160) continue;
+      let made = 0;
+      for (let i = 0; i < n * 3 && made < n; i++) {
+        const x = cx + (Math.random() - 0.5) * 50;
+        const y = cy + (Math.random() - 0.5) * 36;
+        const tx = Math.floor(x / 16);
+        const ty = Math.floor(y / 16);
+        if (!flyer && (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4))) continue;
+        this.wilds.push(this.makeWild(type, x, y, 1));
+        made++;
+      }
+      if (made) {
+        this.g.onToast?.(`${type === 'bat' ? '🦇' : '👹'} A swarm of ${made} ${def.name}s is coming for you!`);
+        sfx.play('wave');
+        return;
+      }
+    }
+  }
+
+  spawnNightBoss() {
+    const { world, player: p, home } = this.g;
+    const type = ['stonetroll', 'ogre', 'ettin'][Math.floor(Math.random() * 3)];
+    for (let i = 0; i < 10; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const x = p.x + Math.cos(ang) * (190 + Math.random() * 40);
+      const y = p.y + Math.sin(ang) * (190 + Math.random() * 40);
+      if (Math.hypot(x - home.x, y - home.y) < 160) continue;
+      if (world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER || world.isBlocked(x - 6, y - 6, 12, 6)) continue;
+      const w = this.makeWild(type, x, y, 8);
+      w.hp = w.max = Math.round(w.max * 2.2);
+      w.nightBoss = true;
+      this.wilds.push(w);
+      this.g.onToast?.('🌑 A night boss has risen! Survive until sunrise… it burns in daylight.');
+      sfx.play('wave');
+      return;
+    }
+    this.nightBossDone = false; // nowhere to put it; try again
+  }
+
+  makeWild(type, x, y, lv) {
+    const def = MONSTERS[type];
+    const hp = Math.max(1, Math.round(def.hp * lvHp(lv)));
+    return {
+      lv, id: `w${this.nextId++}`, wild: true, type, x, y, hp, max: hp, state: 'move', t: 0,
+      anim: Math.random() * 3, face: 1, atk: 0, cd: 0.8, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0, phase: Math.random() * 6,
+    };
   }
 
   spawnWild(pool) {
@@ -876,10 +952,8 @@ export class Combat {
       const tx = Math.floor(x / 16);
       const ty = Math.floor(y / 16);
       if (!flyer && (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4))) continue;
-      this.wilds.push({
-        id: `w${this.nextId++}`, wild: true, type, x, y, hp: def.hp, max: def.hp, state: 'move', t: 0,
-        anim: Math.random() * 3, face: 1, atk: 0, cd: 0.8, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0, phase: Math.random() * 6,
-      });
+      const day = Math.min(10, 1 + Math.floor((this.g.day - 1) * 0.8) + (this.g.darkness() > 0.5 ? 1 : 0));
+      this.wilds.push(this.makeWild(type, x, y, rollMonsterLevel(day)));
       return;
     }
   }
@@ -893,7 +967,21 @@ export class Combat {
     const dist = Math.hypot(dx, dy) || 1;
     w.anim += dt;
     if (w.state === 'dead') return (w.t += dt) < 0.5;
-    if (dist > (this.g.dungeon ? 3000 : 430)) return false;
+    if (!w.nightBoss && dist > (this.g.dungeon ? 3000 : 430)) return false;
+    if (w.nightBoss && !this.g.dungeon && this.g.darkness() < 0.15) w.burning = true; // sunrise
+    if (w.burning) {
+      // it burns away in the daylight. Nothing drops from something that burned to death.
+      w.hp -= w.max * 0.08 * dt;
+      if (Math.random() < dt * 6) this.floaters.push({ x: w.x + (Math.random() - 0.5) * 14, y: w.y - 20, text: '🔥', color: '#ff8a3c', t: 0 });
+      if (w.hp <= 0) {
+        w.state = 'dead';
+        w.t = 0;
+        w.burned = true;
+        sfx.play('monsterDie');
+        this.g.onToast?.('☀️ The night boss burned to ash in the sunlight.');
+        return true;
+      }
+    }
     const flyer = def.kind === 'fly';
     const step = (mx, my) => {
       if (flyer) {
@@ -916,7 +1004,7 @@ export class Combat {
     }
     w.cd -= dt;
     w.atk = Math.max(0, w.atk - dt);
-    const aggro = 100 + this.g.darkness() * 50;
+    const aggro = (w.nightBoss ? 180 : 100) + this.g.darkness() * 50;
     if (dist < aggro && !this.hidden && !this.g.dead) {
       w.face = dx >= 0 ? 1 : -1;
       const speed = def.speed * 1.25;
@@ -928,7 +1016,7 @@ export class Combat {
       else if (w.cd <= 0) {
         w.cd = 1.2;
         w.atk = 0.2;
-        this.hurtPlayer(def.dmg, w.x, w.y, { by: { kind: 'monster', id: w.id, name: def.name } });
+        this.hurtPlayer(Math.max(1, Math.round(def.dmg * lvDmg(w.lv || 1))), w.x, w.y, { by: { kind: 'monster', id: w.id, name: w.nightBoss ? `the night boss ${def.name}` : def.name } });
       }
     } else {
       w.wanderT -= dt;
@@ -954,7 +1042,11 @@ export class Combat {
       w.state = 'dead';
       w.t = 0;
       this.kills++;
-      this.g.monsterKill(def.name, monsterXp(def.hp, def.boss));
+      this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss) * lvXp(w.lv || 1)));
+      if (w.nightBoss) {
+        // slain before dawn: a real prize
+        for (const [id, qty] of [['coin', 10 + Math.floor(Math.random() * 8)], ['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
+      }
       for (const [id, chance, min, max] of WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1));
@@ -1716,6 +1808,8 @@ export class Combat {
       ctx.fillRect(x - 7, y - 24, 14, 3);
       ctx.fillStyle = '#ff7a8f';
       ctx.fillRect(x - 6, y - 23, Math.round(12 * (s.hp / 3)), 1);
+      if (!s.lv) s.lv = Math.min(10, rollMonsterLevel(Math.min(10, 1 + Math.floor(this.g.day / 2))) + (s.elite ? 3 : 0));
+      this.g.drawLevelTag(ctx, s, x, y, y - 27);
     }
   }
 

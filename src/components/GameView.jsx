@@ -460,6 +460,15 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     return () => window.removeEventListener('keydown', onKey);
   }, [session, waves, survival]);
 
+  // chat from players in other rooms (or the menu), so everyone online can talk
+  useEffect(
+    () =>
+      net.on((m) => {
+        if (m.t === 'gchat') setChatLog((l) => [...l.slice(-5), { id: Math.random(), name: `🌐 ${m.name}`, text: m.text }]);
+      }),
+    [net],
+  );
+
   const addLog = (name, text, extra = {}) => setChatLog((l) => [...l.slice(-5), { id: Math.random(), name, text, ...extra }]);
   const sendChat = (e) => {
     e.preventDefault();
@@ -474,6 +483,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       return;
     }
     gameRef.current?.sendChat(text);
+    net.sendGlobal?.(text);
     addLog(profile.name, text, { mine: true });
   };
   const cheatsOn = !!gameRef.current?.cheats;
@@ -843,7 +853,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           }}
         />
       )}
-      {guideOpen && <Guide onClose={() => setGuideOpen(false)} />}
+      {guideOpen && <Guide mode={survival ? 'survival' : waves ? 'waves' : 'free'} onClose={() => setGuideOpen(false)} />}
       {onlineOpen && (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOnlineOpen(false)}>
           <div className="panel online-panel">

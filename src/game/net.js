@@ -131,6 +131,12 @@ export class Net {
     this.send({ t: 'identify', ...this.identity });
   }
 
+  // chat for everyone online, whichever room they are in
+  sendGlobal(text) {
+    this.send({ t: 'gchat', text });
+    return true;
+  }
+
   // ask a player to join the room we are in
   invite(toId) {
     if (!this.roomCode) return false;

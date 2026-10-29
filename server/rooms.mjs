@@ -201,6 +201,15 @@ export function attachRoomServer(httpServer) {
       ws.identified = true;
       pushOnline();
     },
+    // chat for everyone online, whichever room they are in (people in the sender's room already got it from the room)
+    gchat(ws, m) {
+      const text = clean(m.text, 80);
+      if (!text || !ws.identified) return;
+      for (const c of clients) {
+        if (c === ws || !c.identified || (ws.room && c.room === ws.room)) continue;
+        send(c, { t: 'gchat', id: ws.id, name: ws.player.name, text });
+      }
+    },
     // ask another player to join the room we are in
     invite(ws, m) {
       if (!ws.room) return;

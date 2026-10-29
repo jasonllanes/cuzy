@@ -74,6 +74,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const [survMap, setSurvMap] = useState(splitSeed(initial.seed).map); // Survival's map, kept in the seed after a ~
   // the map you pick decides the world seed (maps are named, not typed in)
   const seed = gameMode === 'survival' ? joinSeed(SURVIVAL_BASE, survMap) : FREE_MAPS.find((m) => m.id === freeMap).seed;
+  // a fresh roll of the dice every time the menu opens, so the same map is not the same world twice
+  const [fresh, setFresh] = useState(true);
+  const [roll] = useState(() => Math.random().toString(36).slice(2, 6));
+  const rolledSeed = !fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survMap) : `${seed}@${roll}`;
   const [hovered, setHovered] = useState(null);
   const [code, setCode] = useState(invite);
   const [roomName, setRoomName] = useState('');
@@ -87,7 +91,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
   const { status, rooms, problem } = useLobby(net);
 
   // `hero` is what the game uses; the other picks are remembered so switching game type does not lose them
-  const fullSeed = () => seed;
+  const fullSeed = () => rolledSeed;
   const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed: fullSeed(), mode: gameMode, difficulty, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
   const myName = () => name.trim() || 'Friend';
 
@@ -502,7 +506,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom })
                 );
               })}
             </div>
-            <p className="hint">The world drifting by behind this card is the map you picked.</p>
+            <label className="check-row">
+              <input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> 🎲 New layout every game <small>(same map style, but different trees, houses, wrecks and spawn each time)</small>
+            </label>
+            <p className="hint">The world drifting by behind this card is the map style you picked.</p>
 
             {mode === 'together' && (
               <div className="together">
