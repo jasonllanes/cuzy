@@ -173,6 +173,76 @@ function renderDungeonFloor(world, canvas, ctx, chunk) {
   return canvas;
 }
 
+// the little flowers, tufts and pebbles scattered over the ground
+function drawDecor(ctx, chunk, img) {
+  const ox = chunk.cx * CHUNK_PX;
+  const oy = chunk.cy * CHUNK_PX;
+  for (const d of chunk.decor) {
+    const x = d.x - ox;
+    const y = d.y - oy;
+    if (d.kind === 'img') {
+      // Survival's rubble, rocks and weeds
+      const image = img[`apoc/${d.key}`];
+      ctx.drawImage(image, Math.round(d.x - ox - image.width / 2), Math.round(d.y - oy - image.height));
+      continue;
+    }
+    if (d.kind === 'flower') {
+      ctx.fillStyle = '#4f9a4a';
+      ctx.fillRect(x + 1, y + 3, 1, 2);
+      ctx.fillStyle = d.color;
+      ctx.fillRect(x + 1, y, 1, 1);
+      ctx.fillRect(x, y + 1, 1, 1);
+      ctx.fillRect(x + 2, y + 1, 1, 1);
+      ctx.fillRect(x + 1, y + 2, 1, 1);
+      ctx.fillStyle = '#ffe27a';
+      ctx.fillRect(x + 1, y + 1, 1, 1);
+    } else if (d.kind === 'tuft') {
+      ctx.fillStyle = '#4b9648';
+      ctx.fillRect(x, y, 1, 2);
+      ctx.fillRect(x + 2, y, 1, 2);
+      ctx.fillRect(x + 1, y + 1, 1, 1);
+      ctx.fillStyle = '#9ad86f';
+      ctx.fillRect(x + 1, y, 1, 1);
+    } else if (d.kind === 'pebble') {
+      ctx.fillStyle = '#b79b6e';
+      ctx.fillRect(x, y + 1, 3, 2);
+      ctx.fillStyle = '#e6d3a8';
+      ctx.fillRect(x, y + 1, 2, 1);
+    }
+  }
+}
+
+// The island maps' tilesets (public/assets/maps/tidal.png and emerald.png) are 4x4 tiles of 16px, one for each way water and ground can meet at
+// the four corners of a tile. Key = topLeft * 8 + topRight * 4 + bottomLeft * 2 + bottomRight (1 = ground), value = [col, row].
+const TIDAL = { 0: [0, 3], 1: [1, 3], 2: [0, 0], 3: [3, 0], 4: [0, 2], 5: [1, 0], 6: [2, 3], 7: [1, 1], 8: [3, 3], 9: [0, 1], 10: [3, 2], 11: [2, 0], 12: [1, 2], 13: [2, 2], 14: [3, 1], 15: [2, 1] };
+
+// Each tile is drawn half a tile off the world grid, centred on the meeting point of four world tiles, so every tile
+// looks at those four to pick its edge. The chunk draws one extra row and column, because the tiles on its border straddle its neighbours.
+function renderTidalChunk(world, img, chunk) {
+  const canvas = document.createElement('canvas');
+  canvas.width = CHUNK_PX;
+  canvas.height = CHUNK_PX;
+  const ctx = canvas.getContext('2d');
+  const sheet = img[`maps/${world.tileset}`];
+  // the Crystal Lakes tileset is drawn the other way round: its lake is the shape, with the ground all around it
+  const flip = ['crystal', 'marsh', 'lava', 'beach'].includes(world.tileset) ? 1 : 0;
+  const asphalt = world.tileset === 'asphalt';
+  const land = world.groundSet
+    ? (x, y) => (world.roadAt(x, y) ? (asphalt ? 1 : 0) : asphalt ? 0 : 1) // asphalt: the road is the shape; mountain: the grass is
+    : (x, y) => (world.type(x, y) !== WATER ? 1 - flip : flip);
+  for (let ty = 0; ty <= CHUNK; ty++) {
+    for (let tx = 0; tx <= CHUNK; tx++) {
+      const x = chunk.cx * CHUNK + tx;
+      const y = chunk.cy * CHUNK + ty;
+      const key = land(x - 1, y - 1) * 8 + land(x, y - 1) * 4 + land(x - 1, y) * 2 + land(x, y);
+      const [c, r] = TIDAL[key];
+      ctx.drawImage(sheet, c * T, r * T, T, T, tx * T - T / 2, ty * T - T / 2, T, T);
+    }
+  }
+  drawDecor(ctx, chunk, img);
+  return canvas;
+}
+
 export function renderChunk(world, img, chunk) {
   if (chunk.zone) {
     const c = document.createElement('canvas');
@@ -180,6 +250,7 @@ export function renderChunk(world, img, chunk) {
     c.height = CHUNK_PX;
     return renderDungeonFloor(world, c, c.getContext('2d'), chunk);
   }
+  if (world.tileset) return renderTidalChunk(world, img, chunk); // (Survival's tileset maps too)
   if (world.apoc) return renderApocChunk(world, img, chunk);
   const canvas = document.createElement('canvas');
   canvas.width = CHUNK_PX;
@@ -206,34 +277,6 @@ export function renderChunk(world, img, chunk) {
     }
   }
 
-  const ox = chunk.cx * CHUNK_PX;
-  const oy = chunk.cy * CHUNK_PX;
-  for (const d of chunk.decor) {
-    const x = d.x - ox;
-    const y = d.y - oy;
-    if (d.kind === 'flower') {
-      ctx.fillStyle = '#4f9a4a';
-      ctx.fillRect(x + 1, y + 3, 1, 2);
-      ctx.fillStyle = d.color;
-      ctx.fillRect(x + 1, y, 1, 1);
-      ctx.fillRect(x, y + 1, 1, 1);
-      ctx.fillRect(x + 2, y + 1, 1, 1);
-      ctx.fillRect(x + 1, y + 2, 1, 1);
-      ctx.fillStyle = '#ffe27a';
-      ctx.fillRect(x + 1, y + 1, 1, 1);
-    } else if (d.kind === 'tuft') {
-      ctx.fillStyle = '#4b9648';
-      ctx.fillRect(x, y, 1, 2);
-      ctx.fillRect(x + 2, y, 1, 2);
-      ctx.fillRect(x + 1, y + 1, 1, 1);
-      ctx.fillStyle = '#9ad86f';
-      ctx.fillRect(x + 1, y, 1, 1);
-    } else if (d.kind === 'pebble') {
-      ctx.fillStyle = '#b79b6e';
-      ctx.fillRect(x, y + 1, 3, 2);
-      ctx.fillStyle = '#e6d3a8';
-      ctx.fillRect(x, y + 1, 2, 1);
-    }
-  }
+  drawDecor(ctx, chunk, img);
   return canvas;
 }

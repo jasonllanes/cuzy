@@ -31,7 +31,8 @@ export class Streaks {
   }
 
   // `killer` and `victim` are keys; `names` the display names; `mine` is true when you did it
-  kill(killer, victim, names, mine = false, now = performance.now() / 1000) {
+  // `firstOverride`: the room's own word on whether this is the first takedown of the round (a player who joined late has not seen the earlier ones)
+  kill(killer, victim, names, mine = false, now = performance.now() / 1000, firstOverride = undefined) {
     const k = this.stat(killer);
     const v = this.stat(victim);
     const victimStreak = v.streak;
@@ -41,7 +42,7 @@ export class Streaks {
     k.streak++;
     k.multi = now - k.last <= MULTI_WINDOW ? k.multi + 1 : 1;
     k.last = now;
-    const first = this.total === 0;
+    const first = firstOverride ?? this.total === 0;
     this.total++;
 
     let title = null;

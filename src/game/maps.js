@@ -11,16 +11,28 @@ export const SURVIVAL_MAPS = [
   { id: 'dust', icon: '🏜️', name: 'Dry Plains', blurb: 'Bleached grass, open ground and long sight lines.', ground: 'bg_yellow', trees: 'yellow', climate: 'dry' },
   { id: 'swamp', icon: '🌫️', name: 'Dead Hollow', blurb: 'Dark, wet woods. It rains here a lot.', ground: 'bg_dark', trees: 'dark', climate: 'wet' },
   { id: 'depot', icon: '🏭', name: 'Cargo Depot', blurb: 'Indoors: a huge warehouse floor packed with crates, containers and wrecks.', ground: 'concrete', trees: null, climate: 'none', indoor: true },
+  // the island maps: the same ruined world, on the Free Roam tilesets (water, or lava, where there is no ground)
+  { id: 'tidal', icon: '🌊', name: 'Tidal Isles', blurb: 'Survive on brown islands in glittering teal water.', ground: 'bg', trees: null, climate: 'wet', tileset: 'tidal' },
+  { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush flowered islands ringed by earthen cliffs and deep sea.', ground: 'bg', trees: null, climate: 'mild', tileset: 'emerald' },
+  { id: 'crystal', icon: '💎', name: 'Crystal Lakes', blurb: 'Dirt fields around glimmering crystal-blue lakes.', ground: 'bg', trees: null, climate: 'mild', tileset: 'crystal' },
+  { id: 'marsh', icon: '🐸', name: 'Mossy Marsh', blurb: 'Murky green ponds and mushy banks. It rains a lot.', ground: 'bg', trees: null, climate: 'wet', tileset: 'marsh' },
+  { id: 'lava', icon: '🌋', name: 'Magma Fields', blurb: 'Cracked stone between rivers of lava. Wade in and it burns you.', ground: 'bg', trees: null, climate: 'dry', tileset: 'lava' },
+  { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea.', ground: 'bg', trees: null, climate: 'dry', tileset: 'beach' },
+  { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Cracked asphalt roads winding through a dark wasteland.', ground: 'bg', trees: null, climate: 'mild', tileset: 'asphalt' },
+  { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain' },
 ];
 
 // Free Roam (and Wave Defense) maps: each is a hand-picked world with a name. The seed behind it is fixed.
 export const FREE_MAPS = [
   { id: 'clover', icon: '🏡', name: 'Clover Vale', blurb: 'A village on a big lake, with woods and chests close by.', seed: 'clover-317' },
-  { id: 'woods', icon: '🌲', name: 'Whispering Woods', blurb: 'Thick forest all around, with cottages tucked between the trees.', seed: 'meadow-682' },
-  { id: 'isles', icon: '🏝️', name: 'Heron Isles', blurb: 'Sandy islands and shallow seas. Wade, or ride a chicken across.', seed: 'heron-130' },
-  { id: 'meadows', icon: '🌼', name: 'Golden Meadows', blurb: 'Wide open grass, a busy village and plenty of treasure chests.', seed: 'lantern-393' },
-  { id: 'harbor', icon: '⚓', name: 'Mosshaven Harbor', blurb: 'A seaside town with a long shoreline and woods behind it.', seed: 'moss-545' },
-  { id: 'treasure', icon: '💎', name: 'Treasure Hollow', blurb: 'A quiet valley that hides more chests than anywhere else.', seed: 'heron-114' },
+  { id: 'tidal', icon: '🌊', name: 'Tidal Isles', blurb: 'Brown earth islands in glittering teal water, with a tileset of its own.', seed: 'tidal-908' },
+  { id: 'crystal', icon: '💎', name: 'Crystal Lakes', blurb: 'Dirt and grass fields around glimmering crystal-blue lakes.', seed: 'crystal-274' },
+  { id: 'marsh', icon: '🐸', name: 'Mossy Marsh', blurb: 'Murky green ponds and mushy banks: a swamp of tides and mud.', seed: 'marsh-531' },
+  { id: 'lava', icon: '🌋', name: 'Magma Fields', blurb: 'Cracked stone paths between rivers of lava. Wade in and it burns you.', seed: 'lava-777' },
+  { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea: a beach with open water all around.', seed: 'beach-482' },
+  { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Dark cracked asphalt roads winding through a dark blue wasteland.', seed: 'asphalt-358' },
+  { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads and mountain paths.', seed: 'mountain-206' },
+  { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush green islands with flowers, ringed by earthen cliffs and deep teal sea.', seed: 'emerald-615' },
 ];
 
 // Survival maps all use this base seed; the map itself is the difference

@@ -33,7 +33,7 @@ function useLobby(net) {
   return state;
 }
 
-export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, inviteCode = '' }) {
+export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, onTraining, inviteCode = '' }) {
   const invite = inviteCode || invitedCode(); // an invitation from inside the game, or from a link
   // someone tapped an invite link: skip the setup walk and ask only for a name and a hero (until they ask for the full menu)
   const [fullMenu, setFullMenu] = useState(false);
@@ -237,7 +237,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, i
         <div className="cloud c1" />
         <div className="cloud c2" />
         <div className="cloud c3" />
-        <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => start('together')} name={name} setName={setName} online={status === 'online'} />
+        <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => start('together')} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} />
       </div>
     );
   }
@@ -334,7 +334,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, i
               >
                 <span className="type-emoji">☠️</span>
                 <b>Survival</b>
-                <small>The zombie apocalypse: hold a wrecked bus through 10 waves with scavenged walls and supplies.</small>
+                <small>The zombie apocalypse: hold a camper RV through 10 waves with scavenged walls and supplies.</small>
               </button>
             </div>
             {nav('name', 'who')}
@@ -476,7 +476,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, i
               <div className="wave-setup">
                 <p className="hint">
                   {gameMode === 'survival' ? (
-                    <>Survive <b>10 waves</b> of zombies around a wrecked bus, with a monster boss at the end.</>
+                    <>Survive <b>10 waves</b> of zombies around a camper RV, with a monster boss at the end.</>
                   ) : (
                     <>Hold the house at the centre of the world through <b>10 waves</b> of monsters, with a boss at the end.</>
                   )}

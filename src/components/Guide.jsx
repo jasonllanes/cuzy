@@ -51,19 +51,19 @@ function FreeRoamGuide() {
 function SurvivalGuide() {
   return (
     <div className="guide-tips">
-      <div><b>☠️ The goal</b> Hold the wrecked bus through <b>10 waves</b> of zombies, and beat the Colossus bosses. If the bus's health bar runs out, the round is lost. Between waves you have a short time to build. Everyone in a room plays together, and when the round ends you all go back to the room.</div>
-      <div><b>🚌 The bus</b> It shows its <b>level</b> ("Bus Lv N") above its health bar. Upgrade it in the shop ({k('B')}) for more health and more room for helpers. Zombies chew through walls and the bus, so keep them away from it.</div>
-      <div><b>🔫 Guns</b> {k('Right click')} fires. You start with the <b>Pistol</b> (12 rounds). Buy the <b>Shotgun</b> (5 pellets, short range, 6 shells: up close the pellets stack into huge damage, and every pellet one-shots a normal enemy, but strong ones only take a little from the scattered ones) and the <b>Machine gun</b> (a stream of bullets, 100 rounds) in the shop. Switch with {k('Tab')} or by clicking the gun slot beside the hotbar. The bar above the hotbar is your <b>ammo</b>, and when it hits zero you <b>reload automatically</b> (you also top up after a couple of seconds without shooting). Bullets fly right over the bus.</div>
-      <div><b>⚾ Melee</b> {k('Left click')} swings the bat; hold and release for a dash. {k('F')} raises a shield.</div>
-      <div><b>🧱 Walls</b> Select the <b>Barricade</b> and left-click (or press {k('Q')}) to set a wooden wall down. Hold left click to turn it, then release. {k('Space')} picks one back up. Walls break, so rebuild.</div>
+      <div><b>☠️ The goal</b> Hold the camper RV through <b>10 waves</b> of zombies, and beat the Colossus bosses. If the RV's health bar runs out, the round is lost. Between waves you have a short time to build. Everyone in a room plays together, and when the round ends you all go back to the room.</div>
+      <div><b>🚐 The RV</b> It shows its <b>level</b> ("RV Lv N") above its health bar. Upgrade it in the shop ({k('B')}) for more health and more room for helpers. Zombies chew through walls and the RV, so keep them away from it.</div>
+      <div><b>🔫 Guns</b> {k('Right click')} fires. You start with the <b>Pistol</b> (12 rounds). Buy the <b>Shotgun</b> (5 pellets, short range, 6 shells: up close the pellets stack into huge damage, and every pellet one-shots a normal enemy, but strong ones only take a little from the scattered ones) and the <b>Machine gun</b> (a stream of bullets, 100 rounds) in the shop. Switch with {k('Tab')} or by clicking the gun slot beside the hotbar. The bar above the hotbar is your <b>ammo</b>, and when it hits zero you <b>reload automatically</b> (you also top up after a couple of seconds without shooting). Bullets fly right over the RV.</div>
+      <div><b>⚾ Melee</b> {k('Left click')} swings the bat; hold and release for a dash. {k('F')} raises a shield. The shop sells <b>swords</b> too, each with its own trick (crits, burning, chain lightning, life steal, a wide cleave, a heavy blow). Equip one in the shop, or go back to the bat.</div>
+      <div><b>🧱 Walls</b> Select the <b>Barricade</b> and left-click to set a wooden wall down. <b>Hold and drag</b> along a straight line to lay a whole row at once (as many as you have boxes), then let go. {k('Q')} and {k('E')} turn the wall. {k('Space')} picks one back up. Walls break: use <b>Repair all</b> in the shop to plant the destroyed ones back.</div>
       <div><b>💣 Sticky Grenade</b> Select it and right click: it sticks to the first enemy it hits and explodes after a few seconds. A red circle shows the blast before it goes off, so stay out of it. Find it in fridges or buy one in the shop.</div>
-      <div><b>🎒 The only items</b> Survival keeps things simple: the <b>Barricade</b>, the <b>Health Pack</b> ({k('Z')}, restores health) and the <b>Soup or Soda Can</b> ({k('X')}, restores stamina), plus your bat and guns. Fridges and zombies drop them. <b>If you are downed you keep every item and coin</b> and wake up at the bus after a few seconds.</div>
+      <div><b>🎒 The only items</b> Survival keeps things simple: the <b>Barricade</b>, the <b>Health Pack</b> ({k('Z')}, restores health) and the <b>Soup or Soda Can</b> ({k('X')}, restores stamina), plus your bat and guns. Fridges and zombies drop them. <b>If you are downed you keep every item and coin</b> and wake up at the RV after a few seconds.</div>
       <div><b>🧟 Zombie levels</b> Every zombie shows a level from 1 to 10 in a rarity colour: <b style={{ color: '#5fd16a' }}>green</b> is a common level 1, then lime, teal, blue, purple, pink and orange, up to <b style={{ color: '#d9a400' }}>gold ★ 10 ★</b>, a huge legendary. Higher levels are tougher and hit harder, and later waves roll higher levels. <b style={{ color: '#e63d3d' }}>Bosses glow red</b> with a ☠ BOSS ☠ label.</div>
       <div><b>⚡ Power-ups</b> Somewhere around the 10th kill of a wave, a glowing orb may drop where a zombie fell (not every wave). Walk over it to use it right away, for the whole team: <b>⏳ Slow-mo</b> makes every zombie crawl for 8 seconds, and <b>💣 Big Blast</b> destroys every ordinary zombie (bosses only lose a fifth of their health). Grab it before it fades.</div>
-      <div><b>🛒 Buy ({k('B')})</b> Upgrades (bus, endurance, melee and throw damage, a bigger lantern), <b>guns</b>, and helpers. <b>Thrower and Sharpshooter</b> helpers stand <b>on top of the bus</b> and shoot down; <b>Guards</b> run out on the ground after nearby zombies and slash them. Upgrading the bus makes room for more helpers.</div>
+      <div><b>🛒 Buy ({k('B')})</b> Upgrades (RV, endurance, melee and throw damage, a bigger lantern), <b>guns</b>, and helpers. <b>Thrower and Sharpshooter</b> helpers stand <b>on top of the RV</b> and shoot down; <b>Guards</b> run out on the ground after nearby zombies and slash them. Upgrading the RV makes room for more helpers.</div>
       <div><b>💀 Scoreboard</b> The left side lists who has defeated the most monsters, with a 👑 for the leader. Your helpers' kills count as one line.</div>
       <div><b>🌦 Maps and weather</b> Each map has its own look and weather: Overgrown Town, Frostbite Pass, Rust Orchard, Dry Plains, Dead Hollow and the indoor Cargo Depot. Leave <i>New layout every game</i> on for a different world every time.</div>
-      <div><b>💬 Chat</b> {k('Enter')} chats with everyone online, and messages show at the bottom left. {k('H')} recalls you to the bus.</div>
+      <div><b>💬 Chat</b> {k('Enter')} chats with everyone online, and messages show at the bottom left. {k('H')} recalls you to the RV.</div>
     </div>
   );
 }
@@ -71,7 +71,7 @@ function SurvivalGuide() {
 function WavesGuide() {
   return (
     <div className="guide-tips">
-      <div><b>🌊 The goal</b> Survive 10 waves around the house. {k('Q')} sets a barricade box down at your cursor and {k('Space')} picks one up. {k('H')} recalls you to the base (stand still 2.5s).</div>
+      <div><b>🌊 The goal</b> Survive 10 waves around the house. Left click sets a barricade box down (hold and drag for a row, {k('Q')} / {k('E')} turn it) and {k('Space')} picks one up. {k('H')} recalls you to the base (stand still 2.5s).</div>
       <div><b>♥ Drops</b> Monsters drop hearts that heal you, coins and throwable items. Right click throws without limit, but each throw drains the throw meter.</div>
       <div><b>👹 Monster levels</b> Each monster has a level from 1 to 10, shown as a coloured number (green common up to gold legendary). Higher levels are bigger and tougher, and show up in later waves. Bosses glow red.</div>
       <div><b>🪙 Buy ({k('B')})</b> Spend coins on base health, endurance, melee damage, throw damage and a bigger lantern. Hire a <b>Thrower, Guard or Sharpshooter</b> to help; upgrading the base makes room for more.</div>
@@ -88,10 +88,10 @@ const KEYS = {
   ],
   survival: [
     ['W A S D / arrows', 'Move'], ['Shift', 'Sprint'], ['Left click', 'Bat (hold to dash)'], ['Right click', 'Shoot'], ['Tab / R', 'Switch gun'], ['F', 'Shield'],
-    ['Q', 'Place a wall'], ['Space', 'Pick up / interact'], ['Z / X', 'Health Pack / Soup Can'], ['H', 'Back to the bus'], ['B', 'Buy'], ['M', 'Map'], ['Enter', 'Chat'], ['P', 'Pause'], ['G', 'This guide'],
+    ['Left click', 'Place a wall (hold and drag for a row)'], ['Q / E', 'Turn the wall'], ['Space', 'Pick up / interact'], ['Z / X', 'Health Pack / Soup Can'], ['H', 'Back to the RV'], ['B', 'Buy'], ['M', 'Map'], ['Enter', 'Chat'], ['P', 'Pause'], ['G', 'This guide'],
   ],
   waves: [
-    ['W A S D / arrows', 'Move'], ['Shift', 'Sprint'], ['Left click', 'Swing sword (hold to dash)'], ['Right click', 'Throw'], ['F', 'Shield'], ['Q', 'Place a barricade'],
+    ['W A S D / arrows', 'Move'], ['Shift', 'Sprint'], ['Left click', 'Swing sword (hold to dash)'], ['Right click', 'Throw'], ['F', 'Shield'], ['Left click', 'Place a barricade (drag for a row)'], ['Q / E', 'Turn it'],
     ['Space', 'Pick up / interact'], ['H', 'Back to the base'], ['B', 'Buy'], ['M', 'Map'], ['Enter', 'Chat'], ['P', 'Pause'], ['G', 'This guide'],
   ],
 };

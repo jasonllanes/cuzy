@@ -119,6 +119,7 @@ export function attachRoomServer(httpServer) {
       room.paused = false;
       room.introOpen = false;
       for (const p of room.players.values()) p.kills = 0;
+      room.firstDone = false; // nobody has been taken down yet this round
       sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: [...room.players.values()].map(publicPlayer), scores: scoreList(room) });
       pushLobby();
     }, CELEBRATE_MS);
@@ -275,6 +276,7 @@ export function attachRoomServer(httpServer) {
       openIntro(room);
       room.t0 = Date.now();
       for (const p of room.players.values()) p.kills = 0;
+      room.firstDone = false; // nobody has been taken down yet this round
       const hours = room.startHour;
       for (const p of room.players.values()) {
         send(p, {
@@ -320,7 +322,9 @@ export function attachRoomServer(httpServer) {
       const killer = room.players.get(Number(m.killer));
       if (!killer || killer === ws) return;
       // a player took down a player: everyone hears about it (kill streaks are global); it only scores in a "player kills" room
-      sendRoom(room, { t: 'kill', killer: killer.player.name, victim: ws.player.name, killerId: killer.id, victimId: ws.id });
+      const first = !room.firstDone; // First Blood is announced once per round, even for someone who joined late
+      room.firstDone = true;
+      sendRoom(room, { t: 'kill', killer: killer.player.name, victim: ws.player.name, killerId: killer.id, victimId: ws.id, first });
       if (room.winBy === 'monsters') return;
       killer.kills++;
       if (scoreOf(room, killer) >= targetOf(room)) finishRound(room, killer);
@@ -335,7 +339,7 @@ export function attachRoomServer(httpServer) {
     skill(ws, m) {
       const room = ws.room;
       if (!room?.streakMonsters || !room.started || room.winning) return;
-      sendRoom(room, { t: 'kill', killer: ws.player.name, victim: clean(m.victim, 24) || 'a monster', killerId: ws.id, victimId: 'npc' });
+      sendRoom(room, { t: 'kill', killer: ws.player.name, victim: clean(m.victim, 24) || 'a monster', killerId: ws.id, victimId: 'npc', first: false });
     },
     // this player's opening scene is over (watched or skipped)
     ready(ws) {
@@ -361,6 +365,7 @@ export function attachRoomServer(httpServer) {
       room.paused = false;
       room.introOpen = false;
       for (const p of room.players.values()) p.kills = 0;
+      room.firstDone = false; // nobody has been taken down yet this round
       sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: [...room.players.values()].map(publicPlayer), scores: scoreList(room) });
       pushLobby();
     },

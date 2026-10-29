@@ -13,7 +13,7 @@ import { store } from './store';
 import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, emptyUpgrades, upgradeCost } from './upgrades';
 
 // how far above the feet a hero's name tag floats; the villager is shorter than the others
-const tagHeight = (hero) => (hero.kind === 'retro' ? 26 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
+const tagHeight = (hero) => (hero.kind === 'retro' ? 26 : hero.kind === 'dev' ? 30 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
 
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
@@ -28,7 +28,7 @@ import { HP_PER_HEART, HP_PER_LEVEL, HP_PER_UPGRADE, MAX_CHAR_LEVEL, XP, hp100, 
 import { KINDS } from './dungeon';
 import { drawEntrance, drawExit, drawTorch, makeRuinHouse } from './dungeonArt';
 import { HOUSE_SPRITE } from './world';
-import { drawHero, heroById } from './heroes';
+import { devLayout, drawHero, heroById } from './heroes';
 
 // how much longer than you a mount can sprint: a chicken lasts 2x, a cow 3x as long
 export const MONSTER_TARGET = 15; // monster kills that win a "monster kills" round
@@ -88,7 +88,7 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll }) {
+  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll }) {
     this.canvas = canvas;
     this.onStorage = onStorage;
     this.onOpenStorage = onOpenStorage;
@@ -97,6 +97,7 @@ export class Game {
     this.img = world.frost ? frostImages(assets.img) : assets.img; // the frozen map gets snowy sprites
     this.mbox = assets.mbox;
     this.hero = hero;
+    this.training = training; // the developer training ground: nothing is saved, and you are a bit of a god
     this.name = name;
     this.onRoundWon = onRoundWon; // solo: called once the winner has been cheered
     this.winBy = mode === 'free' ? winBy : 'duel'; // 'duel' (player kills) or 'monsters'; kill targets are for Free Roam only, not Wave Defense or Survival
@@ -192,7 +193,7 @@ export class Game {
       x: hash2(i, 1, 9), y: hash2(i, 2, 9), s: 0.5 + hash2(i, 3, 9), p: hash2(i, 4, 9) * 6,
     }));
 
-    const saved = demo || this.wave ? null : readSave(world.seedStr);
+    const saved = demo || this.wave || training ? null : readSave(world.seedStr);
     const tp = new URLSearchParams(window.location.search).get('tp');
     // every hero has a home house; in rooms each player's slot picks a different one
     this.home = demo ? { x: 8, y: 12 } : this.chooseHome(saved, session);
@@ -279,8 +280,10 @@ export class Game {
         this.combat?.activateShield();
       } else if (e.code === 'KeyC' && !e.repeat) {
         this.combat?.activateInvis();
-      } else if (e.code === 'KeyQ' && !e.repeat) {
-        this.placeBarricade();
+      } else if (e.code === 'KeyQ' && !e.repeat && this.wave) {
+        this.rotateWall(-1); // counter-clockwise
+      } else if (e.code === 'KeyE' && !e.repeat && this.wave && this.inventory[this.selectedSlot]?.id === 'barricade') {
+        this.rotateWall(1); // clockwise
       } else if (e.code === 'KeyH' && !e.repeat) {
         this.combat?.startRecall();
       } else if (e.code === 'KeyR' && !e.repeat) {
@@ -325,12 +328,9 @@ export class Game {
           // Wave Defense / Survival: left-click does what the selected slot does
           const held = this.inventory[this.selectedSlot]?.id;
           if (held === 'barricade') {
-            // Survival walls can be turned: holding locks the wall onto its tile and moving the mouse swings it round; letting go places it
-            if (this.world.apoc) {
-              const { x, y } = this.snapPlacement();
-              this.wallHold = { x, y, mx: this.mouse.x, my: this.mouse.y };
-            }
-            else this.placeBarricade();
+            // press on a tile and keep holding: drag along a straight line to lay a whole row of walls; let go to build it
+            const { x, y } = this.snapPlacement();
+            this.wallHold = { x, y };
             return;
           }
           if (held !== 'sword') return;
@@ -340,7 +340,7 @@ export class Game {
     };
     this.onMouseUp = (e) => {
       if (e.button === 0 && this.wallHold) {
-        if (!this.dead) this.placeBarricade();
+        if (!this.dead) this.placeWalls();
         this.wallHold = null;
       }
       if (e.button === 0 && this.mouseHeld[0]) this.combat.holdEnd();
@@ -354,7 +354,7 @@ export class Game {
     // Free Roam starts (and resumes) indoors, in your own little room
     const resumed = !session && saved && Number.isFinite(saved.x);
     for (const d of saved?.houseDrops || []) if (ITEMS[d.id] && this.combat) this.combat.drops.push({ x: d.x, y: d.y, id: d.id, qty: d.qty, age: 1, ins: true, burst: true });
-    if (!tp && this.canHaveInterior() && (saved?.inside || !resumed)) this.enterHouse(true);
+    if (!tp && !training && this.canHaveInterior() && (saved?.inside || !resumed)) this.enterHouse(true); // (the training ground starts outside, so you can see the map)
   }
 
   start() {
@@ -397,7 +397,7 @@ export class Game {
   }
 
   save() {
-    if (this.wave) return; // wave runs are one-off
+    if (this.wave || this.training) return; // wave runs are one-off, and the training ground never touches your saved games
     try {
       store.set(
         saveKey(this.world.seedStr),
@@ -824,6 +824,7 @@ export class Game {
     sfx.play('death');
     this.streaks.died(this.myKey());
     if (this.mp && by?.kind !== 'player') this.mp.net.send({ t: 'fell' });
+    this.push = null;
     this.dead = { t: 0, dur: RESPAWN_TIME, by, x: this.player.x, y: this.player.y, last: null };
   }
 
@@ -960,7 +961,7 @@ export class Game {
       this.giveBarricade();
     } else if (d.op === 'recruit' && !d.ok) {
       this.giveCoins(d.cost || 0);
-      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'bus' : 'base'} (B) to make room for more helpers.`);
+      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'RV' : 'base'} (B) to make room for more helpers.`);
     } else if (d.op === 'repair') {
       this.finishRepair(d.placed | 0, d.asked | 0);
     } else if (d.op === 'upg' && !d.ok) {
@@ -982,7 +983,7 @@ export class Game {
     const inv = this.inventory;
     let slot = inv[this.selectedSlot]?.id === 'barricade' ? this.selectedSlot : inv.findIndex((s) => s && s.id === 'barricade');
     if (slot < 0) {
-      this.onToast?.('No barricade boxes left. Monsters sometimes drop them, or pick one up with Space.');
+      this.onToast?.('No barricade boxes left. Buy some in the shop (B), cut down a tree, or pick one up with Space.');
       return;
     }
     const { x, y } = this.snapPlacement();
@@ -1000,23 +1001,66 @@ export class Game {
     this.emitInventory();
   }
 
-  // While left-click is held with a wall selected, the wall stays on its tile and the mouse decides which way it faces:
-  // pulled sideways it lies flat, pulled up or down it stands upright. A small wobble changes nothing.
-  updateWallHold(dt) {
+  // the held wall is cancelled if you switch to another slot
+  updateWallHold() {
+    if (this.wallHold && this.inventory[this.selectedSlot]?.id !== 'barricade') this.wallHold = null;
+  }
+
+  // Q / E: turn the wall you are about to place
+  rotateWall() {
+    this.placeV = !this.placeV;
+    sfx.play('click');
+  }
+
+  // While you hold left-click on a wall, the plan is a straight row from where you pressed to where the mouse is now
+  // (as many as you have boxes for), flat for a sideways drag and upright for an up-and-down one.
+  wallPlan() {
     const h = this.wallHold;
-    if (!h) return;
-    if (this.inventory[this.selectedSlot]?.id !== 'barricade') {
-      this.wallHold = null;
-      return;
+    if (!h) {
+      const { x, y } = this.snapPlacement();
+      return { cells: [{ x, y }], v: this.placeV, line: false };
     }
-    const dx = this.mouse.x - h.mx;
-    const dy = this.mouse.y - h.my;
-    if (Math.hypot(dx, dy) < this.zoom * 6) return;
-    const upright = Math.abs(dy) > Math.abs(dx);
-    if (upright !== this.placeV) {
-      this.placeV = upright;
+    const m = this.mouseWorld();
+    const dx = m.x - h.x;
+    const dy = m.y + 6 - h.y;
+    if (Math.hypot(dx, dy) < 14) return { cells: [{ x: h.x, y: h.y }], v: this.placeV, line: false };
+    const horiz = Math.abs(dx) >= Math.abs(dy);
+    const d = horiz ? dx : dy;
+    const have = this.inventory.reduce((n, s) => n + (s && s.id === 'barricade' ? s.qty : 0), 0);
+    const n = Math.max(1, Math.min(have, 40, Math.floor(Math.abs(d) / 16) + 1));
+    const sg = Math.sign(d) || 1;
+    const cells = Array.from({ length: n }, (_, i) => ({ x: h.x + (horiz ? i * 16 * sg : 0), y: h.y + (horiz ? 0 : i * 16 * sg) }));
+    return { cells, v: !horiz, line: n > 1 };
+  }
+
+  // let go of the mouse: build the planned wall (or row of walls), as far as the boxes and the free ground allow
+  placeWalls() {
+    if (!this.wave) return;
+    const plan = this.wallPlan();
+    const inv = this.inventory;
+    let placed = 0;
+    let firstWhy = null;
+    for (const c of plan.cells) {
+      const slot = inv.findIndex((s) => s && s.id === 'barricade');
+      if (slot < 0) {
+        if (!placed && !firstWhy) firstWhy = 'none';
+        break;
+      }
+      const why = Math.hypot(c.x - this.player.x, c.y - this.player.y) > 110 ? 'far' : this.wave.placeCheck(c.x, c.y);
+      if (why) {
+        firstWhy ||= why;
+        continue;
+      }
+      if (!this.wave.requestPlace(c.x, c.y, plan.v)) continue;
+      removeFromSlot(inv, slot, 1); // a guest gets the box back if the host says no
+      placed++;
+    }
+    if (plan.line) this.placeV = plan.v;
+    if (placed) {
+      this.emitInventory();
       sfx.play('click');
-    }
+    } else if (firstWhy === 'none') this.onToast?.('No barricade boxes left. Buy some in the shop (B), or cut down a tree.');
+    else if (firstWhy) this.onToast?.(this.placeMessage(firstWhy));
   }
 
   placeMessage(why) {
@@ -1029,7 +1073,7 @@ export class Game {
 
   // Where a wall would go: flush with the nearest existing wall when you aim near one, otherwise on an 8px grid
   snapPlacement() {
-    if (this.wallHold) return { x: this.wallHold.x, y: this.wallHold.y }; // locked in while you aim it
+    if (this.wallHold) return { x: this.wallHold.x, y: this.wallHold.y }; // where you pressed
     const m = this.mouseWorld();
     let near = null;
     let nd = 28;
@@ -1307,6 +1351,14 @@ export class Game {
     }
   }
 
+  // training ground: swap the character you are playing right now
+  setHero(id) {
+    const hero = heroById(id);
+    this.hero = hero;
+    this.faces.clear();
+    return hero;
+  }
+
   // Tab: the next gun in Survival, the next sword you own in the Free Roam
   switchWeapon() {
     if (this.frozen || this.dead) return;
@@ -1324,6 +1376,33 @@ export class Game {
     sfx.play('buy');
     this.onToast?.(`⚔️ ${next.name} equipped.`);
     this.emitHud();
+  }
+
+  // Survival: buy a sword (or switch to one you own, or back to the bat)
+  buyMelee(id) {
+    if (!this.wave || !this.world.apoc || this.dead) return;
+    if (id === 'bat') {
+      this.weapons.equipped = 'trusty';
+      this.onToast?.('⚾ Baseball bat equipped.');
+      return;
+    }
+    const info = WEAPONS.find((w) => w.id === id);
+    if (!info) return;
+    if (this.weapons.owned[id]) {
+      this.weapons.equipped = id;
+      sfx.play('buy');
+      this.onToast?.(`⚔️ ${info.name} equipped.`);
+      return;
+    }
+    if (!this.spendCoins(info.cost)) {
+      sfx.play('nope');
+      this.onToast?.(`${info.name} costs ${info.cost} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    this.weapons.owned[id] = true;
+    this.weapons.equipped = id;
+    sfx.play('levelup');
+    this.onToast?.(`⚔️ ${info.name} bought and equipped!`);
   }
 
   // Buy a Sticky Grenade
@@ -1450,7 +1529,7 @@ export class Game {
     }
     if (this.wave.recruit(kind) === false) {
       this.giveCoins(def.cost);
-      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'bus' : 'base'} (B) to make room for more helpers.`);
+      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'RV' : 'base'} (B) to make room for more helpers.`);
     }
     // a guest's request comes back as an 'ack', which refunds the coins if the host said no
   }
@@ -1888,35 +1967,42 @@ export class Game {
     ctx.fillStyle = st.baseHp / st.baseMax > 0.4 ? '#7fd48f' : '#ee5d7d';
     ctx.fillRect(bx, by, Math.max(1, Math.round(bw * (st.baseHp / st.baseMax))), 4);
     if (this.world.apoc) {
-      // the bus's upgrade level, over its health bar
+      // the RV's upgrade level, over its health bar
       ctx.save();
       ctx.font = 'bold 7px sans-serif';
       ctx.textAlign = 'center';
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(30,20,30,0.9)';
       ctx.fillStyle = '#ffe08a';
-      ctx.strokeText(`🚌 Bus Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
-      ctx.fillText(`🚌 Bus Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
+      ctx.strokeText(`🚐 RV Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
+      ctx.fillText(`🚐 RV Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
       ctx.restore();
     }
 
     const held = this.inventory[this.selectedSlot];
     if (held?.id === 'barricade' && !this.paused) {
-      const { x, y } = this.snapPlacement();
-      const why = Math.hypot(x - this.player.x, y - this.player.y) > 110 ? 'far' : w.placeCheck(x, y);
-      const ok = !why;
-      if (why) this.ghostWhy = { x, y, why };
-      ctx.globalAlpha = 0.55;
-      if (this.world.apoc) {
-        const im = this.img[`apoc/wall_${this.placeV ? 'v' : 'h'}`];
-        ctx.drawImage(im, x - Math.round(im.width / 2), y - im.height + 2);
-      } else {
-        ctx.drawImage(this.img.trees, 71, 14, 20, 33, x - 10, y - 31, 20, 33);
+      const plan = this.wallPlan();
+      for (const c of plan.cells) {
+        const { x, y } = c;
+        const why = Math.hypot(x - this.player.x, y - this.player.y) > 110 ? 'far' : w.placeCheck(x, y);
+        const ok = !why;
+        if (why && !this.ghostWhy) this.ghostWhy = { x, y, why };
+        ctx.globalAlpha = 0.55;
+        if (this.world.apoc) {
+          const im = this.img[`apoc/wall_${plan.v ? 'v' : 'h'}`];
+          ctx.drawImage(im, x - Math.round(im.width / 2), y - im.height + 2);
+        } else {
+          ctx.drawImage(this.img.trees, 71, 14, 20, 33, x - 10, y - 31, 20, 33);
+        }
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = ok ? '#5fe08a' : '#ff5d5d';
+        ctx.fillRect(x - 8, y - 14, 16, 16);
+        ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = ok ? '#5fe08a' : '#ff5d5d';
-      ctx.fillRect(x - 8, y - 14, 16, 16);
-      ctx.globalAlpha = 1;
+      if (plan.line) {
+        const last = plan.cells[plan.cells.length - 1];
+        this.ghostCount = { x: last.x, y: last.y, n: plan.cells.length };
+      } else this.ghostCount = null;
     }
   }
 
@@ -2016,7 +2102,7 @@ export class Game {
     } else if (m.t === 'hit') {
       this.combat.hitByPlayer(m);
     } else if (m.t === 'kill') {
-      this.streaks.kill(String(m.killerId), String(m.victimId), { killer: m.killer, victim: m.victim }, m.killerId === this.mp.you);
+      this.streaks.kill(String(m.killerId), String(m.victimId), { killer: m.killer, victim: m.victim }, m.killerId === this.mp.you, undefined, m.first);
       if (m.killerId === this.mp.you) this.addXp(XP.player);
     } else if (m.t === 'fell') {
       this.streaks.died(String(m.id));
@@ -2254,6 +2340,19 @@ export class Game {
       // a mount has its own, bigger stamina pool: sprinting tires the animal and spares you
       const m = this.mount;
       const tired = m ? m.exhausted : this.exhausted;
+      if (this.inWater && this.world.lava && !this.dead) {
+        // swimming in lava: it burns, over and over, until you climb out
+        this.lavaT = (this.lavaT ?? 0) - dt;
+        if (this.lavaT <= 0) {
+          this.lavaT = 0.5;
+          this.combat.hurtPlayer(0.4, p.x, p.y + 6, { invuln: 0.25, knock: false, by: { kind: 'lava', name: 'the lava' } });
+          this.combat.floaters.push({ x: p.x, y: p.y - 26, text: '🔥', color: '#ff7a2e', t: 0 });
+          if (this.t - (this.lavaToastAt ?? -9) > 4) {
+            this.lavaToastAt = this.t;
+            this.onToast?.('🔥 The lava is burning you! Get out!');
+          }
+        }
+      } else this.lavaT = 0;
       const wantsSprint = p.moving && this.keys.has('sprint') && !tired && !this.inWater;
       this.sprinting = wantsSprint;
       if (m) {
@@ -2300,6 +2399,17 @@ export class Game {
           }
         }
         this.bumpedHouse = null;
+      }
+      if (this.push) {
+        // knocked back (a grenade blast): slide away, slowing down, and stop at walls
+        const k = Math.exp(-dt * 5);
+        const nx = p.x + this.push.vx * dt;
+        if (!this.blocked(nx, p.y)) p.x = nx;
+        const ny = p.y + this.push.vy * dt;
+        if (!this.blocked(p.x, ny)) p.y = ny;
+        this.push.vx *= k;
+        this.push.vy *= k;
+        if (Math.hypot(this.push.vx, this.push.vy) < 12) this.push = null;
       }
       this.updateMount(dt);
       // walking through your own front door takes you into your room
@@ -3045,7 +3155,7 @@ export class Game {
     const [vx, vy] = DIR_VEC[p.dir];
     const x = p.x + vx * 10;
     const y = p.y - 2 + vy * 10;
-    if (this.world.type(Math.floor(x / T), Math.floor(y / T)) !== WATER) return null;
+    if (this.world.lava || this.world.type(Math.floor(x / T), Math.floor(y / T)) !== WATER) return null; // (nobody drinks lava)
     return { inter: 'water', x: p.x + vx * 6, y: p.y + vy * 6 + 4 };
   }
 
@@ -3355,7 +3465,7 @@ export class Game {
             break;
           }
           if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
-          ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && Math.floor(this.t * 14) % 2 ? 0.4 : 1;
+          ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
           if (this.wave && this.world.apoc) this.combat.drawGun(ctx, this.player.x, this.player.y);
@@ -3412,6 +3522,10 @@ export class Game {
       this.drawBossArrows(camX, camY);
       this.drawKillerHighlight(camX, camY);
       this.drawCelebration(camX, camY);
+      if (this.ghostCount && !this.ghostWhy) {
+        const [sx, sy] = this.toScreen(this.ghostCount.x, this.ghostCount.y - 30, camX, camY);
+        this.pill(`${this.ghostCount.n} walls`, sx, sy, this.zoom * 3.6, '#fff', 'rgba(60,140,90,0.92)');
+      }
       if (this.ghostWhy) {
         // tell the player why the placement ghost is red
         const [sx, sy] = this.toScreen(this.ghostWhy.x, this.ghostWhy.y - 34, camX, camY);
@@ -3545,6 +3659,11 @@ export class Game {
     const c = cv.getContext('2d');
     if (hero.kind === 'retro') {
       c.drawImage(this.img[`retro/c${hero.n}`], 18, 0, 12, 11, 0, 0, 12, 11);
+    } else if (hero.kind === 'dev') {
+      const L = devLayout(this.img['dev/chars']);
+      const col = L.cols[1];
+      const cxm = (col.x0 + col.x1) / 2;
+      c.drawImage(this.img['dev/chars'], Math.round(cxm - 8), L.rows[hero.n - 1].y0, 16, 14, 0, 0, 12, 11);
     } else {
       c.fillStyle = color || '#f2b05e';
       c.fillRect(0, 0, 12, 11);

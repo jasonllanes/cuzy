@@ -7,6 +7,7 @@ import { Net } from './game/net';
 import { SupaNet } from './game/supaNet';
 import { cloudOn, rawClient, store } from './game/store';
 import MainMenu from './components/MainMenu';
+import { FREE_MAPS } from './game/maps';
 import GameView from './components/GameView';
 import WaitingRoom from './components/WaitingRoom';
 import InviteToasts from './components/InviteToasts';
@@ -50,6 +51,9 @@ export default function App() {
   const [session, setSession] = useState(null); // set while inside a multiplayer room
   const [lobby, setLobby] = useState(false); // true while the room is waiting for its host to press Start
   const [invites, setInvites] = useState([]); // pop-up invitations from other players
+  const [training, setTraining] = useState(() => /[#?&/]training\b/.test(`${window.location.hash}${window.location.search}`)); // the developer training ground (#/training)
+  const [trainingMap, setTrainingMap] = useState(FREE_MAPS[0].id); // the training ground's map and hero survive a map swap
+  const [trainingHero, setTrainingHero] = useState('retro:1');
   const [pendingInvite, setPendingInvite] = useState(''); // an accepted invitation: the name and character page for that room
   const netRef = useRef(null);
   // with Supabase configured, rooms run on it (works on GitHub Pages); otherwise on the local room server (npm run dev)
@@ -183,12 +187,21 @@ export default function App() {
   if (!assets) return <div className="splash"><span className="splash-dot" /> Gathering acorns…</div>;
 
   let screen;
+  if (training) {
+    // the training ground: Clover Vale, Free Roam, alone, with only the uploaded characters
+    const trainingProfile = { name: 'Dev', hero: trainingHero, cozyHero: trainingHero, seed: (FREE_MAPS.find((m) => m.id === trainingMap) || FREE_MAPS[0]).seed, mode: 'free', difficulty: 'medium', bots: 0, winBy: 'duel' };
+    const leaveTraining = () => {
+      setTraining(false);
+      window.history.replaceState(null, '', window.location.pathname);
+    };
+    return <GameView key={`training-${trainingMap}`} assets={assets} profile={trainingProfile} net={net} session={null} training trainingMap={trainingMap} onTrainingMap={setTrainingMap} onTrainingHero={setTrainingHero} onExit={leaveTraining} onRoundWon={leaveTraining} />;
+  }
   if (playing && session && lobby) {
     screen = <WaitingRoom assets={assets} net={net} session={session} profile={profile} onStart={startRound} onLeave={exit} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else if (playing) {
     screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else {
-    screen = <MainMenu key={pendingInvite || 'menu'} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
+    screen = <MainMenu onTraining={() => setTraining(true)} key={pendingInvite || 'menu'} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }
   return (
     <>

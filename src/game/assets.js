@@ -16,6 +16,8 @@ const NAMES = [
   'amelia_idle', 'amelia_run', 'bob_idle', 'bob_run',
   'items/crate_top',
   'interior/farm', 'interior/modern',
+  'dev/chars',
+  'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/asphalt', 'maps/mountain',
   ...Array.from({ length: 40 }, (_, i) => `weapons/w${String(i + 1).padStart(2, '0')}`),
   ...MONSTER_SPRITES.map((n) => `monsters/${n}`),
   ...APOC_KEYS.map((k) => `apoc/${k}`),

@@ -63,6 +63,16 @@ export const CREDITS = [
   },
 ];
 
+// (added after the packs above)
+CREDITS.push({
+  pack: 'Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads and Mountain Paths tilesets',
+  authors: 'Generated with Pixellab (pixellab.ai) for this project',
+  link: 'https://www.pixellab.ai',
+  used: 'The water and ground tiles of the Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads and Mountain Paths maps.',
+  license: 'AI-generated pixel art made for Cuzy.',
+  checked: 'file',
+});
+
 export const TOOLS = [
   { name: 'Pixelify Sans', by: 'Stefie Justprince', link: 'https://fonts.google.com/specimen/Pixelify+Sans', what: 'the pixel font' },
   { name: 'Nunito', by: 'Vernon Adams, Jacques Le Bailly and Manvel Shmavonyan', link: 'https://fonts.google.com/specimen/Nunito', what: 'the text font' },

@@ -56,7 +56,6 @@ const FILES = {
   mushroom: 'Objects/Nature/Flowers_Mashrooms_Other-nature-stuff/Mushrooms_2_Red.png',
   puddle: 'Objects/Nature/Flowers_Mashrooms_Other-nature-stuff/Puddles-And-Water-Anim/Puddle_On-Grass_1_Grass_Green.png',
   // wrecks and junk that make the world feel abandoned (and give you things to run around)
-  bus: 'Objects/Vehicles/Rust/Car_8_Rust_Bus/Car_8_Rust_Green_Bus.png',
   van: 'Objects/Vehicles/Rust/Car_3_Rust_Van/Car_3_Rust_Blue_Van.png',
   car_blue: 'Objects/Vehicles/Rust/Car_1_Rust/Car_1_Rust_Blue.png',
   car_red: 'Objects/Vehicles/Rust/Car_4_Rust/Car_4_Rust_Red.png',
@@ -157,6 +156,11 @@ for (const [key, rel] of Object.entries(FILES)) {
   }
   copyFileSync(from, join(dest, `${key}.png`));
   sizes[key] = { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+// the base is the camper RV from "Survival Assets/RV" (west.png, trimmed): it is kept by hand in public/assets/apoc/bus.png
+{
+  const buf = readFileSync(join(dest, 'bus.png'));
+  sizes.bus = { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
 writeFileSync(join(root, 'src', 'game', 'apoc.json'), `${JSON.stringify(sizes, null, 1)}\n`);
 console.log(`Copied ${Object.keys(sizes).length} Apocalypse images`);

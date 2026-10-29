@@ -87,6 +87,7 @@ export const POWERS = {
 };
 export const GUN_ORDER =['pistol', 'shotgun', 'smg'];
 export const BOMB_R = 46; // blast radius in pixels
+export const GRENADE_REACH = 190; // how far a grenade can be thrown
 const BOMB_FUSE = 2.8; // seconds from the throw to the bang
 const THROW_UNLOCK = 0.35; // once empty, wait until it refills this far
 export const RECALL_TIME = 2.5;
@@ -195,9 +196,12 @@ export class Combat {
     return this.g.upgrades?.[id] || 0;
   }
 
-  // Free Roam's equipped sword (Survival keeps its bat, so there is none)
+  // The equipped sword. Wave Defense has none; Survival swings its baseball bat until you buy and equip a sword in the shop.
   weapon() {
-    return this.g.wave ? null : weaponById(this.g.weapons?.equipped);
+    if (!this.g.wave) return weaponById(this.g.weapons?.equipped);
+    if (!this.g.world.apoc) return null;
+    const eq = this.g.weapons?.equipped;
+    return !eq || eq === 'trusty' ? null : weaponById(eq);
   }
 
   meleeDmg() {
@@ -587,7 +591,23 @@ export class Combat {
     this.g.emitInventory();
     const a = this.aim();
     const [cx, cy] = this.center();
-    this.bombs.push({ x: cx + Math.cos(a) * 8, y: cy + Math.sin(a) * 8, vx: Math.cos(a) * 140, vy: Math.sin(a) * 140, fly: 0.45, fuse: BOMB_FUSE, max: BOMB_FUSE, stuck: null, R: BOMB_R });
+    // it lands where the cursor points (up to a throw's reach); on a touch screen it goes a medium distance the way you aim
+    let dist = 110;
+    if (!this.g.touchMode && this.g.aimOverride == null) {
+      const m = this.g.mouseWorld();
+      dist = Math.hypot(m.x - cx, m.y - cy);
+    }
+    dist = Math.min(GRENADE_REACH, Math.max(16, dist));
+    const flight = Math.max(0.25, dist / 230); // seconds in the air
+    const x0 = cx + Math.cos(a) * 8;
+    const y0 = cy + Math.sin(a) * 8;
+    const tx = cx + Math.cos(a) * Math.max(dist, 10);
+    const ty = cy + Math.sin(a) * Math.max(dist, 10);
+    this.bombs.push({
+      x: x0, y: y0, vx: (tx - x0) / flight, vy: (ty - y0) / flight,
+      fly: flight, flightMax: flight, dist, tx, ty,
+      fuse: BOMB_FUSE, max: BOMB_FUSE, stuck: null, R: BOMB_R,
+    });
     this.revealT = 1.5;
     sfx.play('throw', 0.8);
     this.throwCd = 0.4;
@@ -600,11 +620,12 @@ export class Combat {
     if (!this.bombs.length) return;
     this.bombs = this.bombs.filter((b) => {
       if (b.fly > 0) {
+        const step = Math.min(dt, b.fly); // the last step stops exactly on the target
         b.fly -= dt;
         const px = b.x;
         const py = b.y;
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
+        b.x += b.vx * step;
+        b.y += b.vy * step;
         for (const m of [...(this.g.wave?.monsters || []), ...this.wilds]) {
           if (m.state === 'dead') continue;
           const sc = MONSTERS[m.type].scale || 1;
@@ -640,11 +661,24 @@ export class Combat {
     this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R });
     sfx.play('boom');
     // anything normal inside the circle is blown away; tougher things take a big hit
+    // enemies are thrown back away from the blast: the closer, the harder
     for (const m of this.monstersNear(b.x, b.y, b.R)) {
-      this.hitMonster(m, this.isNormalFoe(m) ? Math.max(9, m.hp) : 9, b.x, b.y, 220);
+      const d = Math.hypot(m.x - b.x, bodyY(m) - b.y);
+      this.hitMonster(m, this.isNormalFoe(m) ? Math.max(9, m.hp) : 9, b.x, b.y, 160 + 240 * Math.max(0, 1 - d / b.R));
     }
     for (const s of this.skeletons) {
-      if (s.state !== 'dead' && Math.hypot(s.x - b.x, s.y - 8 - b.y) <= b.R) this.damageSkeleton(s, 9, b.x, b.y, 240);
+      const d = Math.hypot(s.x - b.x, s.y - 8 - b.y);
+      if (s.state !== 'dead' && d <= b.R) this.damageSkeleton(s, 9, b.x, b.y, 180 + 240 * (1 - d / b.R));
+    }
+    // and so are you: a grenade at your feet hurts, and sends you flying back the way you came from
+    const p = this.g.player;
+    const pd = Math.hypot(p.x - b.x, p.y - 8 - b.y);
+    if (pd <= b.R && !this.g.dead && !this.g.inside) {
+      const near = 1 - pd / b.R;
+      const ang = pd < 3 ? this.aim() + Math.PI : Math.atan2(p.y - 8 - b.y, p.x - b.x);
+      const power = 130 + 260 * near;
+      this.hurtPlayer(0.4 + 1.1 * near, b.x, b.y, { invuln: 0.6, by: { kind: 'bomb', name: 'your own grenade' } });
+      if (!this.g.mount) this.g.push = { vx: Math.cos(ang) * power, vy: Math.sin(ang) * power };
     }
     this.chopTrees(b.x, b.y, b.R * 0.7, 6);
   }
@@ -1614,7 +1648,7 @@ export class Combat {
 
   // `killer` is another player's id when a fight-mode room is being played; they get the point if this lands the last hit
   // `by` says who did it ({ kind: 'player' | 'monster' | 'skeleton', id, name }) for the "killed by" screen
-  hurtPlayer(n, fromX, fromY, { killer = null, invuln = 1.1, by = null } = {}) {
+  hurtPlayer(n, fromX, fromY, { killer = null, invuln = 1.1, by = null, knock = true } = {}) {
     if (this.invuln > 0 || this.hidden) return;
     const p = this.g.player;
     if (this.shieldT > 0) {
@@ -1637,7 +1671,7 @@ export class Combat {
     this.splat(p.x, p.y, null, 1, fromX, fromY);
     this.floaters.push({ x: p.x, y: p.y - 34, text: `-${hp100(n)}`, color: '#ff5d7a', t: 0 });
     const ang = Math.atan2(p.y - fromY, p.x - fromX);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; knock && i < 6; i++) {
       const nx = p.x + Math.cos(ang) * 1.5;
       const ny = p.y + Math.sin(ang) * 1.5;
       if (!this.g.blocked(nx, ny)) {
@@ -1984,8 +2018,9 @@ export class Combat {
       const b = o.p.b;
       const f = 1 - Math.max(0, b.fuse) / b.max;
       const flash = f > 0.7 && Math.sin(t * 40) > 0 ? 0.25 : 0;
+      const air = b.fly > 0 && !b.stuck;
       ctx.save();
-      ctx.translate(Math.round(b.x), Math.round(b.y + 2));
+      ctx.translate(Math.round(air ? b.tx : b.x), Math.round((air ? b.ty : b.y) + 2));
       ctx.fillStyle = `rgba(255,30,30,${0.12 + flash})`;
       ctx.beginPath();
       ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
@@ -2000,7 +2035,8 @@ export class Combat {
       ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
-      this.drawIcon(ctx, 'truffle', b.x, b.y - 4 - (b.fly > 0 ? 6 : 0) + (f > 0.7 && Math.sin(t * 40) > 0 ? -1 : 0), 0);
+      const lift = air ? Math.sin((1 - b.fly / b.flightMax) * Math.PI) * Math.min(22, b.dist * 0.3) : 0; // an arc through the air
+      this.drawIcon(ctx, 'truffle', b.x, b.y - 4 - lift + (f > 0.7 && Math.sin(t * 40) > 0 ? -1 : 0), air ? t * 12 : 0);
     } else if (o.kind === 'projectile' && o.p.id === 'blast') {
       const bl = o.p.bl;
       const p = bl.t / 0.45;
@@ -2207,7 +2243,7 @@ export class Combat {
   // also used for other players' swings in multiplayer
   drawSwingAt(ctx, cx, cy, sw) {
     const k = sw.t / 0.24;
-    const w = this.g.world.apoc ? null : weaponById(sw.w);
+    const w = this.g.world.apoc && !sw.w ? null : weaponById(sw.w);
     // the trail is wider and longer with a higher level, and shaped by the kind of sword
     const lvl = 1 + Math.min(1, 0.04 * ((sw.lv || this.g.level || 1) - 1));
     const sweep = w ? (w.effect === 'cleave' ? 1.8 : w.id === 'rapier' ? 0.8 : w.effect === 'knock' ? 1.3 : 1.1) : 1.1;

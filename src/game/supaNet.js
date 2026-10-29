@@ -129,7 +129,8 @@ export class SupaNet {
     this.syncing = false;
     this.startHour = START_HOUR;
     this.t0 = Date.now();
-    this.kills = new Map(); // host's score keeping
+    this.kills = new Map();
+    this.firstDone = false; // has anyone been taken down yet this round (for First Blood)
     this.lastScores = []; // what the host last announced (so a new host can carry on)
     this.introOpen = false;
     this.introReady = new Set();
@@ -706,7 +707,7 @@ export class SupaNet {
       case 'skill':
         // a monster kill that counts towards streaks, if the host allowed that
         if (this.cfg.streakMonsters && this.started && !this.winning) {
-          this.out({ t: 'kill', killer: this.members.get(this.me)?.name || 'Someone', victim: clean(m.victim, 24) || 'a monster', killerId: this.me, victimId: 'npc' });
+          this.out({ t: 'kill', killer: this.members.get(this.me)?.name || 'Someone', victim: clean(m.victim, 24) || 'a monster', killerId: this.me, victimId: 'npc', first: false });
         }
         break;
       case 'w':
@@ -935,6 +936,7 @@ export class SupaNet {
     this.openIntro();
     this.t0 = Date.now();
     this.kills = new Map();
+    this.firstDone = false; // has anyone been taken down yet this round (for First Blood)
     this.out({
       t: 'start',
       room: this.summary(),
@@ -996,7 +998,9 @@ export class SupaNet {
     const victim = this.members.get(from);
     if (!killer || !victim || killer.id === from) return;
     // a player took down a player: everyone hears about it (kill streaks are global); it only scores in a "player kills" room
-    this.out({ t: 'kill', killer: killer.name, victim: victim.name, killerId: killer.id, victimId: from });
+    const first = !this.firstDone;
+    this.firstDone = true;
+    this.out({ t: 'kill', killer: killer.name, victim: victim.name, killerId: killer.id, victimId: from, first });
     if (cfg.winBy === 'monsters') return;
     const n = (this.kills.get(killer.id) || 0) + 1;
     this.kills.set(killer.id, n);
@@ -1030,6 +1034,7 @@ export class SupaNet {
     this.paused = false;
     this.introOpen = false;
     this.kills = new Map();
+    this.firstDone = false; // has anyone been taken down yet this round (for First Blood)
     this.out({ t: 'lobby', room: this.summary(), teams: { ...this.teamMap }, host: this.hostId, players: [...this.members.values()].map((m) => this.publicPlayer(m)), scores: this.scoreList() });
     this.touchRow({ started: false });
   }

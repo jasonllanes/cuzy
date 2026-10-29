@@ -26,6 +26,8 @@ import { hp100 } from '../game/stats';
 import { mapNameOf } from '../game/maps';
 import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
+import TrainingPanel from './TrainingPanel';
+import AboutContent from './AboutContent';
 import { GUNS, RECALL_CD, SHIELD_CD } from '../game/combat';
 import { setTheme } from '../game/items';
 import RoomPanel from './RoomPanel';
@@ -101,7 +103,7 @@ function WaveHud({ w, difficulty, withRoom, survival }) {
         </div>
       )}
       <div className="base-bar" title={`Base health ${Math.ceil(w.baseHp)} / ${w.baseMax}`}>
-        <span>{survival ? '🚌' : '🏠'}</span>
+        <span>{survival ? '🚐' : '🏠'}</span>
         <b className="base-lv">Lv {(w.baseLevel || 0) + 1}</b>
         <div className="base-track"><div className={`base-fill ${w.baseHp / w.baseMax < 0.35 ? 'low' : ''}`} style={{ width: `${(w.baseHp / w.baseMax) * 100}%` }} /></div>
       </div>
@@ -141,7 +143,7 @@ function Meter({ icon, label, value, tone, text }) {
   );
 }
 
-export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom }) {
+export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom, training = false, trainingMap, onTrainingMap, onTrainingHero }) {
   const canvasRef = useRef(null);
   const miniRef = useRef(null);
   const gameRef = useRef(null);
@@ -158,7 +160,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [toast, setToast] = useState(null);
   const [paused, setPaused] = useState(false);
   // the opening scene: 'play' (watching), 'wait' (finished or skipped; in a room, waiting for the others), 'out' (fading away), 'done'
-  const [intro, setIntro] = useState(() => (new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
+  const [intro, setIntro] = useState(() => (training || new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
   const introRef = useRef(intro);
   const [mapOpen, setMapOpen] = useState(false);
   const [roomPause, setRoomPause] = useState(null); // set while the host has the room paused: { by }
@@ -170,6 +172,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [statsOpen, setStatsOpen] = useState(false); // phones: the stats panel slides in from the left
   const [hudMenuOpen, setHudMenuOpen] = useState(false); // phones: the buttons down the right edge fold away
   const roomSetRef = useRef(false);
+  const [aboutOpen, setAboutOpen] = useState(false); // About and credits, from the in-game menu
+  const aboutRef = useRef(false);
+  aboutRef.current = aboutOpen;
   useEffect(() => {
     if (!gameRef.current) return;
     gameRef.current.touchMode = mobile;
@@ -279,6 +284,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       onRoundWon: session ? null : () => onRoundWon?.(),
       assets,
       hero: heroById(profile.hero),
+      training,
       name: profile.name,
       net: session ? net : null,
       session,
@@ -300,6 +306,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     });
     gameRef.current = game;
     game.touchMode = getControls() === 'mobile';
+    if (training) {
+      game.cheats = true; // (God mode starts off, so lava, monsters and grenades can actually hurt you; switch it on in the training panel)
+    }
     game.frozen = introRef.current === 'play' || introRef.current === 'wait';
     game.start();
     return () => {
@@ -396,9 +405,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   };
 
   useEffect(() => {
-    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || storeOpen || !!qty || onlineOpen;
+    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || storeOpen || !!qty || onlineOpen || aboutOpen;
     gameRef.current?.setStorageOpen(storeOpen);
-  }, [paused, mapOpen, guideOpen, upgOpen, storeOpen, qty, onlineOpen]);
+  }, [paused, mapOpen, guideOpen, upgOpen, storeOpen, qty, onlineOpen, aboutOpen]);
 
   // how many others are online, for the button
   useEffect(() => {
@@ -448,7 +457,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       } else if (e.code === 'KeyP' && !e.repeat && (!modal || (pausedRef.current && !session))) {
         pauseRef.current();
       } else if (e.code === 'Escape') {
-        if (roomSetRef.current) setRoomSetOpen(false);
+        if (aboutRef.current) setAboutOpen(false);
+        else if (roomSetRef.current) setRoomSetOpen(false);
         else if (storeRef.current) setStoreOpen(false);
         else if (upgRef.current) setUpgOpen(false);
         else if (guideRef.current) setGuideOpen(false);
@@ -657,7 +667,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} />}
-      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · Tab switch weapon· E eat · B buy · M map · G guide</div>}
+      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q/E turn wall' : ''} · 1-9/wheel select · Tab switch weapon· E eat · B buy · M map · G guide</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -705,10 +715,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <button
             className="skill ready"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => gameRef.current?.placeBarricade()}
-            title="Place a barricade box where your cursor points"
+            onClick={() => gameRef.current?.rotateWall()}
+            title="Turn the wall you are about to place (Q or E). The number is how many boxes you have."
           >
-            <span className="skill-icon">🌳</span>
+            <span className="skill-icon">🔄</span>
             <kbd>Q</kbd>
             <span className="skill-num">{inventory.reduce((n, s) => n + (s && s.id === 'barricade' ? s.qty : 0), 0)}</span>
           </button>
@@ -854,6 +864,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           }}
         />
       )}
+      {training && <TrainingPanel game={gameRef} assets={assets} initial={profile.hero} map={trainingMap} onMap={onTrainingMap} onHero={onTrainingHero} onExit={onExit} />}
       {guideOpen && <Guide mode={survival ? 'survival' : waves ? 'waves' : 'free'} onClose={() => setGuideOpen(false)} />}
       {onlineOpen && (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOnlineOpen(false)}>
@@ -888,6 +899,16 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         </div>
       )}
 
+      {aboutOpen && (
+        <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && setAboutOpen(false)}>
+          <div className="panel menu-card about-card">
+            <section className="page about-page">
+              <AboutContent />
+              <div className="nav-row"><button type="button" className="btn go" onClick={() => setAboutOpen(false)}>Back to the game</button><span /></div>
+            </section>
+          </div>
+        </div>
+      )}
       {paused && (
         <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && setPaused(false)}>
           <div className="panel pause-card">
@@ -901,6 +922,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             {((session && isHost) || (!session && mode === 'free')) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
             </div>
             <div className="pause-b">
+            <button className="btn" onClick={() => { setPaused(false); setAboutOpen(true); }}>📖 About &amp; credits</button>
             <h3 className="settings-h">⚙ Settings</h3>
             <AudioSettings />
             <ScreenSettings />

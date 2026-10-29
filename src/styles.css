@@ -1164,3 +1164,33 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .supply-slot { position: relative; overflow: hidden; }
 .supply-cd { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(60, 50, 90, 0.45); pointer-events: none; }
 .coin-chip.coin-drop { cursor: pointer; font: inherit; }
+
+.wicon.small { display: inline-block; width: 18px; height: 18px; vertical-align: middle; background-size: contain; background-repeat: no-repeat; image-rendering: pixelated; }
+
+/* Developer training ground */
+.training-panel { top: 50px; left: 50%; transform: translateX(-50%); width: min(430px, 92vw); display: grid; gap: 6px; padding: 8px 10px; z-index: 6; }
+.training-panel.folded { width: auto; }
+.tp-head { display: flex; align-items: center; gap: 8px; font: 700 0.9rem var(--pixel); color: var(--ink); }
+.tp-head small { color: var(--ink-soft); font-weight: 400; flex: 1; }
+.tp-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.tp-hero { display: grid; justify-items: center; gap: 0; padding: 2px; background: #fff7ea; border: 3px solid var(--wood); border-radius: 12px; cursor: pointer; font-family: var(--pixel); color: var(--ink); }
+.tp-hero.on { border-color: var(--rose); background: #fff0f3; }
+.tp-hero small { font-size: 0.55rem; }
+.tp-portrait { image-rendering: pixelated; max-width: 100%; height: auto; }
+.tp-dirs { display: flex; justify-content: center; gap: 10px; background: #e9f3d8; border-radius: 12px; padding: 4px; }
+.tp-dir { display: grid; justify-items: center; font-size: 0.6rem; font-family: var(--pixel); }
+.tp-tools { display: flex; flex-wrap: wrap; gap: 4px; }
+.tp-hint { margin: 0; font-size: 0.7rem; }
+
+.tp-map { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; }
+.tp-map select { font: 700 0.8rem var(--pixel); color: var(--ink); background: #fff7ea; border: 3px solid var(--wood); border-radius: 10px; padding: 2px 4px; max-width: 130px; }
+.tp-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tp-tab { font: 700 0.65rem var(--pixel); color: var(--ink); background: #fff7ea; border: 2px solid var(--wood); border-radius: 999px; padding: 2px 8px; cursor: pointer; }
+.tp-tab.on { background: var(--rose); color: #fff; border-color: var(--rose); }
+.tp-grid { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; grid-template-columns: none; }
+.tp-hero { flex: 0 0 auto; min-width: 52px; }
+.tp-swatches { display: flex; gap: 6px; justify-content: center; }
+.tp-swatch { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--wood); cursor: pointer; padding: 0; }
+.tp-swatch.on { border-color: var(--rose); }
+.about-card { max-width: min(640px, 94vw); max-height: 88vh; }
+.about-card .about-page { max-height: 80vh; }

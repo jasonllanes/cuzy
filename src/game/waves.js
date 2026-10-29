@@ -2,6 +2,7 @@ import { T } from './world';
 import { DIFFICULTY, MONSTERS, MONSTER_IDS, TOTAL_WAVES, lvDmg, lvHp, lvSpeed, rollMonsterLevel, rollMonsterLoot, waveCounts, waveList } from './monsters';
 import { ALLIES, ALLY_KINDS, teamCap } from './allies';
 import { MAX_LEVEL } from './upgrades';
+import { apocSize } from './apoc';
 
 const PREP_FIRST = 20; // seconds to get ready before wave 1
 const PREP_BETWEEN = 14;
@@ -27,19 +28,21 @@ function layout(base, theme) {
   const left = base.x * T;
   const floor = base.y * T;
   if (theme === 'apoc') {
-    // Survival: a wrecked bus (61x31) with a tighter ring around it
+    // Survival: a camper RV (its size comes from the image) with a tighter ring around it
+    const { w: bw, h: bh } = apocSize('bus');
+    const body = Math.round(bh * 0.55); // the part of it that stands on the ground; the rest is the roof
     return {
       left,
       floor,
-      house: { x: left + 2, y: floor - 26, w: 57, h: 24 },
-      sprite: { x: left, y: floor - 31, w: 61, h: 31 },
-      center: { x: left + 30, y: floor - 14 },
-      bar: { x: left, y: floor - 40, w: 61 },
-      ring: { x0: left - 34, x1: left + 94, y0: floor - 70, y1: floor + 40, gate: [left + 8, left + 54] },
+      house: { x: left + 2, y: floor - body - 2, w: bw - 4, h: body },
+      sprite: { x: left, y: floor - bh, w: bw, h: bh },
+      center: { x: left + Math.round(bw / 2), y: floor - Math.round(body / 2) },
+      bar: { x: left, y: floor - bh - 9, w: bw },
+      ring: { x0: left - 34, x1: left + bw + 33, y0: floor - bh - 39, y1: floor + 40, gate: [left + 8, left + bw - 7] },
       pads: [
         { kind: 'thrower', x: left - 18, y: floor + 20 },
         { kind: 'guard', x: left - 2, y: floor + 20 },
-        { kind: 'sniper', x: left + 70, y: floor + 20 },
+        { kind: 'sniper', x: left + bw + 9, y: floor + 20 },
       ],
     };
   }
@@ -644,8 +647,8 @@ export class WaveSim {
     if (this.theme === 'apoc' && def.ai === 'ranged') {
       // Survival: the shooters stand on top of the bus and fire down from there
       const k = this.allies.filter((a) => ALLIES[a.kind].ai === 'ranged').length;
-      ax = px = this.sprite.x + [30, 18, 42, 10, 50, 24, 36, 6][k % 8];
-      ay = py = this.sprite.y + 7;
+      ax = px = this.sprite.x + Math.round(([30, 18, 42, 10, 50, 24, 36, 6][k % 8] * this.sprite.w) / 61);
+      ay = py = this.sprite.y + Math.round(this.sprite.h * 0.35);
     }
     this.allies.push({ id: this.nextId++, kind, x: px, y: py, ax, ay, dir: 0, cd: 0.8, anim: Math.random() * 3, moving: false, atk: 0 });
     this.emit({ type: 'recruit', kind, x: px, y: py });

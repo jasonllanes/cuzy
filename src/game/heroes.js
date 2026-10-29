@@ -19,6 +19,13 @@ export const RETRO_NAMES = [
   'Sunny', 'Olive', 'Berry', 'Cedar', 'Pearl', 'Jade', 'Ruby', 'Onyx',
 ];
 
+// ---------- Training ground heroes: 8 characters on one sheet (public/assets/dev/chars.png), 10 poses each ----------
+
+export const DEV_COUNT = 8;
+export const devId = (n) => `dev:${n}`;
+export const isDev = (id) => typeof id === 'string' && id.startsWith('dev:');
+export const DEV_NAMES = ['Ember', 'Azure', 'Goldie', 'Mossy', 'Rusty', 'Violet', 'Shade', 'Blossom'];
+
 // ---------- Sunnyside villager: a body plus a swappable, recolourable hair layer ----------
 
 export const HAIRS = [
@@ -59,6 +66,11 @@ export const isSunny = (id) => typeof id === 'string' && id.startsWith('sunny:')
 export function heroById(id) {
   const classic = HEROES.find((h) => h.id === id);
   if (classic) return classic;
+  const dm = /^dev:(\d+)$/.exec(id || '');
+  if (dm && Number(dm[1]) >= 1 && Number(dm[1]) <= DEV_COUNT) {
+    const n = Number(dm[1]);
+    return { id, kind: 'dev', n, label: DEV_NAMES[n - 1], title: `Training hero ${n}`, blurb: 'A character from the training ground sheet.' };
+  }
   const rm = /^retro:(\d+)$/.exec(id || '');
   if (rm && Number(rm[1]) >= 1 && Number(rm[1]) <= RETRO_COUNT) {
     const n = Number(rm[1]);
@@ -181,10 +193,63 @@ const MODERN_DIR = { right: 0, up: 1, left: 2, down: 3 };
 const RETRO_ROW = { down: 0, left: 1, right: 2, up: 3 };
 const RETRO_WALK = [0, 1, 2, 1];
 
+// The training sheet is not on a tidy grid, so find where every pose sits: runs of non-empty columns are the poses
+// (10 across) and runs of non-empty rows are the characters (8 down).
+let devLayoutCache = null;
+export function devLayout(image) {
+  if (devLayoutCache) return devLayoutCache;
+  const c = document.createElement('canvas');
+  c.width = image.width;
+  c.height = image.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+  const px = ctx.getImageData(0, 0, c.width, c.height).data;
+  const runs = (len, any) => {
+    const out = [];
+    let start = null;
+    for (let i = 0; i < len; i++) {
+      const on = any(i);
+      if (on && start === null) start = i;
+      if (!on && start !== null) {
+        out.push([start, i - 1]);
+        start = null;
+      }
+    }
+    if (start !== null) out.push([start, len - 1]);
+    return out;
+  };
+  let cols = runs(c.width, (x) => { for (let y = 0; y < c.height; y++) if (px[(y * c.width + x) * 4 + 3]) return true; return false; });
+  let rows = runs(c.height, (y) => { for (let x = 0; x < c.width; x++) if (px[(y * c.width + x) * 4 + 3]) return true; return false; });
+  if (cols.length !== 10) cols = Array.from({ length: 10 }, (_, i) => [Math.round(i * (c.width / 10)), Math.round((i + 1) * (c.width / 10)) - 1]);
+  if (rows.length !== 8) rows = Array.from({ length: 8 }, (_, i) => [i * (c.height / 8), (i + 1) * (c.height / 8) - 1]);
+  devLayoutCache = { cols: cols.map(([x0, x1]) => ({ x0, x1 })), rows: rows.map(([y0, y1]) => ({ y0, y1 })) };
+  return devLayoutCache;
+}
+
+// which pose is which: front, back and sideways, with a four-step walk through each (the sideways art is flipped for the other way)
+const DEV_POSES = { down: { stand: 1, walk: [0, 1, 3, 1] }, up: { stand: 5, walk: [4, 5, 6, 5] }, side: { stand: 8, walk: [7, 8, 9, 8] } };
+export const DEV_SIDE_FACES_RIGHT = true;
+
 // Draws a hero with its feet at (fx, fy). Returns nothing.
 export function drawHero(ctx, img, hero, dir, moving, t, fx, fy) {
   fx = Math.round(fx);
   fy = Math.round(fy);
+  if (hero.kind === 'dev') {
+    const L = devLayout(img['dev/chars']);
+    const row = L.rows[hero.n - 1];
+    const way = dir === 'up' ? 'up' : dir === 'down' ? 'down' : 'side';
+    const poses = DEV_POSES[way];
+    const col = L.cols[moving ? poses.walk[Math.floor(t * 9) % 4] : poses.stand];
+    const w = col.x1 - col.x0 + 1;
+    const h = row.y1 - row.y0 + 1;
+    const flip = way === 'side' && (dir === 'left') === DEV_SIDE_FACES_RIGHT;
+    ctx.save();
+    ctx.translate(fx, fy);
+    if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(img['dev/chars'], col.x0, row.y0, w, h, -Math.round(w / 2), -h, w, h);
+    ctx.restore();
+    return;
+  }
   if (hero.kind === 'retro') {
     const frame = moving ? RETRO_WALK[Math.floor(t * 9) % 4] : 1;
     ctx.drawImage(img[`retro/c${hero.n}`], frame * 16, RETRO_ROW[dir] * 20, 16, 20, fx - 8, fy - 19, 16, 20);

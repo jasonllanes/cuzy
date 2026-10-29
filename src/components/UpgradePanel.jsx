@@ -2,6 +2,7 @@ import { ALLIES, ALLY_KINDS, MAX_ALLIES, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
 import { MAX_LEVEL, UPGRADES, upgradeCost } from '../game/upgrades';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
+import { EFFECTS, WEAPONS, swingTime, weaponIconFile } from '../game/weapons';
 import { GRENADE_COST } from '../game/engine';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
@@ -28,10 +29,10 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
             const bus = u.id === 'house' && survival;
             return (
               <div className="upg-row" key={u.id}>
-                <div className="upg-icon">{bus ? '🚌' : survival && u.survIcon ? u.survIcon : u.icon}</div>
+                <div className="upg-icon">{bus ? '🚐' : survival && u.survIcon ? u.survIcon : u.icon}</div>
                 <div className="upg-info">
-                  <h3>{bus ? 'Upgrade the bus' : survival && u.survName ? u.survName : u.name}</h3>
-                  <p>{bus ? '+30% bus health per level (arriving already repaired) and room for more survivors to defend it. Shared by everyone.' : survival && u.survDesc ? u.survDesc : u.desc}</p>
+                  <h3>{bus ? 'Upgrade the RV' : survival && u.survName ? u.survName : u.name}</h3>
+                  <p>{bus ? '+30% RV health per level (arriving already repaired) and room for more survivors to defend it. Shared by everyone.' : survival && u.survDesc ? u.survDesc : u.desc}</p>
                   {u.id === 'house' && <p className="upg-now">Team room: <b>{teamCap(level)}</b>{!maxed && <> → <b>{teamCap(level + 1)}</b></>} {survival ? 'survivors' : 'helpers'}</p>}
                   <div className="pips" aria-label={`Level ${level} of ${MAX_LEVEL}`}>
                     {Array.from({ length: MAX_LEVEL }, (_, i) => <i key={i} className={i < level ? 'on' : ''} />)}
@@ -49,7 +50,7 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
           <b>🧱 Barricades</b> (a barricade you set down stays put until zombies destroy it)
           <div className="recruit-list">
             <div className="recruit-chip hire">
-              <span><b>📦 Barricade Box</b><small>One more wall to set down with Q or left click.</small></span>
+              <span><b>📦 Barricade Box</b><small>One more wall. Left click places it, hold and drag to lay a row, Q or E turns it.</small></span>
               <button className="btn go small-btn" disabled={hud.coins < BARRICADE_COST} onClick={() => game.buyBarricade()}>🪙 {BARRICADE_COST}</button>
             </div>
             <div className="recruit-chip hire">
@@ -64,6 +65,35 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
             </div>
           </div>
         </div>
+
+        {survival && hud.weapons && (
+          <div className="recruit-note">
+            <b>⚔️ Melee</b> (swords have their own tricks; you start with the baseball bat)
+            <div className="recruit-list">
+              <div className="recruit-chip hire">
+                <span><b>⚾ Baseball bat</b><small>Your trusty starter.</small></span>
+                <button className="btn go small-btn" disabled={hud.weapons.equipped === 'trusty'} onClick={() => game.buyMelee('bat')}>
+                  {hud.weapons.equipped === 'trusty' ? 'Equipped' : 'Equip'}
+                </button>
+              </div>
+              {WEAPONS.filter((w) => w.id !== 'trusty').map((w) => {
+                const have = !!hud.weapons.owned?.[w.id];
+                const on = hud.weapons.equipped === w.id;
+                return (
+                  <div key={w.id} className="recruit-chip hire" style={{ borderColor: w.tint }}>
+                    <span>
+                      <b><i className="wicon small" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(w)}.png)` }} /> {w.name}</b>
+                      <small>{EFFECTS[w.effect].name}: {EFFECTS[w.effect].desc} · 💥 {(2 + w.dmg + (hud.upg?.melee || 0)).toFixed(1)} · ⏱ {swingTime(w, 0).toFixed(2)}s</small>
+                    </span>
+                    <button className="btn go small-btn" disabled={on || (!have && hud.coins < w.cost)} onClick={() => game.buyMelee(w.id)}>
+                      {on ? 'Equipped' : have ? 'Equip' : `🪙 ${w.cost}`}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {survival && hud.gunsOwned && (
           <div className="recruit-note">
@@ -87,7 +117,7 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
         )}
 
         <div className="recruit-note">
-          <b>🪙 {survival ? 'Survivors' : 'Helpers'}</b> ({team}/{cap}, up to {MAX_ALLIES}). Upgrade the {survival ? 'bus' : 'base'} to make room for more.
+          <b>🪙 {survival ? 'Survivors' : 'Helpers'}</b> ({team}/{cap}, up to {MAX_ALLIES}). Upgrade the {survival ? 'RV' : 'base'} to make room for more.
           <div className="recruit-list">
             {ALLY_KINDS.map((k) => (
               <div key={k} className="recruit-chip hire" style={{ borderColor: ALLIES[k].color }}>

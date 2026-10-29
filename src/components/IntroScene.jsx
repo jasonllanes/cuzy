@@ -14,9 +14,9 @@ function script(kind, name, fight) {
       bot: '🚗 Driver Rusty-Bot',
       lines: [
         `Wake up, ${name}. Driver Rusty-Bot here. The radio went quiet an hour ago.`,
-        'See that wrecked bus up ahead? That is home base now.',
+        'See that camper RV up ahead? That is home base now.',
         'Ten waves of the dead are coming, with something big at the very end.',
-        'Scavenge walls, hire survivors and keep that bus standing.',
+        'Scavenge walls, hire survivors and keep that RV standing.',
         'Hold on tight, we are pulling in!',
       ],
     };

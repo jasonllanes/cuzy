@@ -45,6 +45,13 @@ export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.seedStr = String(seedStr);
     this.seed = hashString(this.seedStr);
+    // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
+    // start of the seed, and a Survival map names it
+    this.tileset = theme === 'apoc' ? mapInfo(splitSeed(this.seedStr).map).tileset || null : /^tidal-/.test(this.seedStr) ? 'tidal' : /^emerald-/.test(this.seedStr) ? 'emerald' : /^crystal-/.test(this.seedStr) ? 'crystal' : /^marsh-/.test(this.seedStr) ? 'marsh' : /^lava-/.test(this.seedStr) ? 'lava' : /^beach-/.test(this.seedStr) ? 'beach' : /^asphalt-/.test(this.seedStr) ? 'asphalt' : /^mountain-/.test(this.seedStr) ? 'mountain' : null;
+    // asphalt and mountain are not water tilesets: two kinds of walkable ground, laid out as winding roads and paths
+    this.groundSet = this.tileset === 'asphalt' || this.tileset === 'mountain';
+    this.tidal = !!this.tileset && !this.groundSet;
+    this.lava = this.tileset === 'lava'; // the "water" here is lava: wading in it burns
     this.apoc = theme === 'apoc'; // Survival: the ruined, overgrown look from the Apocalypse pack
     this.map = this.apoc ? splitSeed(this.seedStr).map : 'meadow'; // Survival has more than one map
     this.frost = this.map === 'frost';
@@ -62,8 +69,17 @@ export class World {
     this.treeCache = new Map();
   }
 
+  // the winding roads (or paths) of the asphalt and mountain maps: ridges of two noise fields, so they cross and branch
+  roadAt(x, y) {
+    const a = fbm(x / 24, y / 24, this.seed + 4141, 3);
+    const b = fbm(x / 30, y / 30, this.seed + 5252, 3);
+    return Math.abs(a - 0.5) < 0.034 || Math.abs(b - 0.5) < 0.034;
+  }
+
   elevation(x, y) {
-    return fbm(x / 44, y / 44, this.seed, 4);
+    const e = fbm(x / 44, y / 44, this.seed, 4);
+    // the island maps sit lower: a lot more sea, and the land breaks up into islands; the crystal lakes only a little
+    return this.tileset === 'crystal' ? e - 0.04 : this.tileset === 'marsh' || this.tileset === 'lava' || this.tileset === 'beach' ? e - 0.05 : this.tidal ? e - 0.1 : e;
   }
 
   forest(x, y) {
@@ -77,7 +93,8 @@ export class World {
     if (t === undefined) {
       const e = this.elevation(x, y);
       // Survival has no water: low ground is patchy dry dirt instead
-      t = this.depot ? GRASS : this.apoc ? (e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
+      if (this.groundSet) t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS; // (roads are open ground: nothing grows on them, and nothing is water)
+      else t = this.depot ? GRASS : this.apoc ? (this.tileset && e < SEA ? WATER : e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
       if (this.typeCache.size > 600000) this.typeCache.clear();
       this.typeCache.set(key, t);
     }
@@ -286,6 +303,7 @@ export class World {
 
   // supply fridges, things to pick up, and scattered ground details for one tile
   addApocTile(chunk, x, y, t, r) {
+    if (t === WATER) return; // (the tileset maps have water: nothing grows or lies in it)
     const s = this.seed;
     if (this.treeAt(x >> 1, y >> 1)) return;
     if (t === GRASS && !this.isCleared(x, y)) {
@@ -460,7 +478,8 @@ export class World {
           // Survival's base is a wrecked bus: a solid block in the middle of the barricade ring
           const bus = apocSize('bus');
           chunk.objects.push({ kind: 'tree', id, sheet: 'apoc/bus', sx: 0, sy: 0, sw: bus.w, sh: bus.h, x: left + bus.w / 2, y: base });
-          chunk.rects.push({ x: left + 2, y: base - 22, w: bus.w - 4, h: 20, bus: true });
+          const body = Math.round(bus.h * 0.55); // its footprint: the body, not the roof
+          chunk.rects.push({ x: left + 2, y: base - body - 1, w: bus.w - 4, h: body, bus: true });
           continue;
         }
         chunk.objects.push({ kind: 'house', id, sheet: 'house', ...HOUSE_SPRITE, x: left + HOUSE_SPRITE.sw / 2, y: base, ox: left, oy: base - HOUSE_BASE });
