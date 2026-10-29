@@ -682,6 +682,7 @@ export class SupaNet {
       case 'mkill':
       case 'team':
       case 'pause':
+      case 'tolobby':
         this.request(m.t, m);
         break;
       case 'fell':
@@ -822,6 +823,10 @@ export class SupaNet {
         return this.hTeam(from, m);
       case 'pause':
         return this.hPause(from, m);
+      case 'tolobby':
+        // a finished wave round: back to the waiting room, for everyone
+        if (this.started) this.returnToLobby();
+        return;
       default:
     }
   }

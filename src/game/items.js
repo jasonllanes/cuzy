@@ -107,12 +107,9 @@ export function chestOdds(id) {
 
 // What a supply fridge can hold in Survival
 export const LOOT_APOC = [
-  ['canned', 4, 1, 2],
-  ['soup', 3, 1, 2],
-  ['bandage', 4, 1, 3],
-  ['medkit', 1, 1, 1],
-  ['rock', 3, 1, 3],
-  ['barricade', 2, 1, 2],
+  ['hppack', 5, 1, 2],
+  ['soupcan', 5, 1, 2],
+  ['barricade', 3, 1, 2],
   ['coin', 3, 2, 5],
 ];
 

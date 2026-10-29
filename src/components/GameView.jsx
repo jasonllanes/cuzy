@@ -48,16 +48,34 @@ function dayIcon(hour) {
 // Top-of-screen status for Wave Defense: which wave, how many monsters, the base's health, the boss
 function WaveHud({ w, difficulty, withRoom, survival }) {
   const prep = w.phase === 'prep';
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem('cuzy-wavehud') !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const toggle = () => {
+    setOpen((o) => {
+      try {
+        localStorage.setItem('cuzy-wavehud', o ? 'closed' : 'open');
+      } catch {
+        /* private window */
+      }
+      return !o;
+    });
+  };
   return (
-    <div className={`hud wave-hud panel small ${withRoom ? 'with-room' : ''}`}>
+    <div className={`hud wave-hud panel small ${withRoom ? 'with-room' : ''} ${open ? '' : 'folded'}`}>
       <div className="wave-title">
         {survival ? '☠️' : '🌊'} Wave <b>{Math.max(1, w.wave)}</b> / {w.total}
         <span className="wave-diff">{difficulty}</span>
+        <button type="button" className="wave-fold" onClick={toggle} aria-label={open ? 'Fold the wave panel' : 'Open the wave panel'} title={open ? 'Fold' : 'Open'}>{open ? '▴' : '▾'}</button>
       </div>
       <div className="wave-sub">
         {prep ? <>Next wave in <b>{Math.ceil(w.timer)}s</b> · build and prepare!</> : <><b>{w.left}</b> monsters left</>}
       </div>
-      {prep && w.coming && (
+      {open && prep && w.coming && (
         <div className="wave-forecast">
           <div className="wave-forecast-h">Wave {w.wave + 1} brings {w.coming.reduce((n, [, c]) => n + c, 0)}:</div>
           <div className="wave-chips">
@@ -67,7 +85,7 @@ function WaveHud({ w, difficulty, withRoom, survival }) {
           </div>
         </div>
       )}
-      {!prep && w.waveTotal > 0 && (
+      {open && !prep && w.waveTotal > 0 && (
         <div className="wave-forecast">
           <div className="wave-forecast-h">
             Still to spawn: <b>{w.queued}</b> of {w.waveTotal}
@@ -83,7 +101,8 @@ function WaveHud({ w, difficulty, withRoom, survival }) {
         </div>
       )}
       <div className="base-bar" title={`Base health ${Math.ceil(w.baseHp)} / ${w.baseMax}`}>
-        <span>🏠</span>
+        <span>{survival ? '🚌' : '🏠'}</span>
+        <b className="base-lv">Lv {(w.baseLevel || 0) + 1}</b>
         <div className="base-track"><div className={`base-fill ${w.baseHp / w.baseMax < 0.35 ? 'low' : ''}`} style={{ width: `${(w.baseHp / w.baseMax) * 100}%` }} /></div>
       </div>
       {w.boss && (
@@ -410,9 +429,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         gameRef.current?.useItem(selRef.current);
         return;
       }
-      if (e.code === 'KeyZ' && !e.repeat && !modal && !waves) {
+      if (e.code === 'KeyZ' && !e.repeat && !modal && (!waves || survival)) {
         gameRef.current?.useSupply('hp');
-      } else if (e.code === 'KeyX' && !e.repeat && !modal && !waves) {
+      } else if (e.code === 'KeyX' && !e.repeat && !modal && (!waves || survival)) {
         gameRef.current?.useSupply('stam');
       } else if (e.code === 'Tab') {
         // Tab switches weapon: the next gun in Survival, the next sword in the Free Roam
@@ -439,7 +458,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [session, waves]);
+  }, [session, waves, survival]);
 
   const addLog = (name, text, extra = {}) => setChatLog((l) => [...l.slice(-5), { id: Math.random(), name, text, ...extra }]);
   const sendChat = (e) => {
@@ -541,6 +560,24 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <button className="btn guide-btn" onClick={() => setGuideOpen(true)} title="Field guide: what every item gives">
           📖 Guide <kbd>G</kbd>
         </button>
+        {waves && hud.wave?.kills && Object.keys(hud.wave.kills).length > 0 && (
+          <div className="scoreboard panel small kill-board">
+            <div className="score-title">💀 Most monsters killed</div>
+            {Object.entries(hud.wave.kills)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .map(([id, n], i) => {
+                const mine = id === String(session?.you ?? 'me');
+                const name = id === 'ally' ? '🤝 Helpers' : mine ? profile.name : peers.find((p) => String(p.id) === id)?.name || 'Survivor';
+                return (
+                  <div key={id} className={`score-row ${mine ? 'me' : ''}`}>
+                    <span>{i === 0 ? '👑 ' : ''}{name}</span>
+                    <b>{n}</b>
+                  </div>
+                );
+              })}
+          </div>
+        )}
         {!session && hud.mkills && (
           <div className="scoreboard panel small">
             <div className="score-title">👹 First to {hud.mkills.target} monster kills</div>
@@ -704,7 +741,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
                 ? 'All 10 waves defeated, and the Crushing Cyclops too. Well defended!'
                 : `You made it to wave ${hud.wave.wave} of ${hud.wave.total}. Rebuild and try again!`}
             </p>
-            <button className="btn go" onClick={onExit}>Back to the menu</button>
+            <button className="btn go" onClick={() => (session ? net.send({ t: 'tolobby' }) : onExit())}>{session ? 'Back to the room' : 'Back to the menu'}</button>
           </div>
         </div>
       )}
@@ -719,7 +756,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {!waves && <SupplyBar supplies={hud.supplies || { hp: 0, stam: 0, shield: 0 }} onUse={(k) => gameRef.current?.useSupply(k)} />}
+      {(!waves || survival) && <SupplyBar supplies={hud.supplies || { hp: 0, stam: 0, shield: 0 }} onUse={(k) => gameRef.current?.useSupply(k)} />}
       {banner && !hud.celeb && (
         <div key={banner.id} className={`kill-banner tier-${banner.tier} ${banner.mine ? 'mine' : ''}`} role="status">
           <b>{banner.title}</b>

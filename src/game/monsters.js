@@ -129,16 +129,14 @@ export function rollMonsterLoot(def, diff, theme = 'cozy') {
     if (Math.random() < chance) out.push({ id, qty: min + Math.floor(Math.random() * (max - min + 1)) });
   };
   const scarce = theme === 'apoc' ? 0.7 : 1; // Survival hands out less help
-  roll('heart', def.boss ? 1 : big ? Math.min(1, diff.heal * 2.2 * scarce) : diff.heal * scarce);
-  if (def.boss) roll('heart', 1);
+  const heal = theme === 'apoc' ? 'hppack' : 'heart'; // Survival: a Health Pack goes in your quick slot
+  roll(heal, def.boss ? 1 : big ? Math.min(1, diff.heal * 2.2 * scarce) : diff.heal * scarce);
+  if (def.boss) roll(heal, 1);
   // coins pay for upgrades and recruits
   roll('coin', def.boss ? 1 : big ? 1 : 0.6 * scarce, def.boss ? 8 : big ? 2 : 1, def.boss ? 12 : big ? (theme === 'apoc' ? 4 : 5) : 3);
   if (theme === 'apoc') {
     // scavenged supplies instead of trinkets
-    roll('rock', big ? 0.9 : 0.3, 1, big ? 3 : 2);
-    roll('canned', big ? 0.5 : 0.1);
-    roll('soup', big ? 0.4 : 0.07);
-    roll('medkit', def.boss ? 1 : big ? 0.3 : 0.02, 1, def.boss ? 2 : 1);
+    roll('soupcan', big ? 0.5 : 0.1);
     roll('barricade', def.boss ? 1 : big ? 0.4 : 0.07, 1, def.boss ? 3 : 1);
     return out;
   }
@@ -148,4 +146,31 @@ export function rollMonsterLoot(def, diff, theme = 'cozy') {
   roll('gem', def.boss ? 1 : big ? 0.25 : 0.03, 1, def.boss ? 3 : 1);
   roll('barricade', def.boss ? 1 : big ? 0.4 : 0.07, 1, def.boss ? 3 : 1);
   return out;
+}
+
+// Monster levels 1-10, shown as a coloured number: green for the common ones up to gold for a huge legendary.
+export const MONSTER_RARITY = [
+  null,
+  { name: 'Common', color: '#5fd16a' },
+  { name: 'Common', color: '#9bd94a' },
+  { name: 'Uncommon', color: '#3fd0b4' },
+  { name: 'Uncommon', color: '#3fa7e8' },
+  { name: 'Rare', color: '#5f7df0' },
+  { name: 'Rare', color: '#9b6cf0' },
+  { name: 'Epic', color: '#d062e8' },
+  { name: 'Epic', color: '#f0589a' },
+  { name: 'Mythic', color: '#f2693a' },
+  { name: 'Legendary', color: '#ffc928' },
+];
+export const lvHp = (lv) => 1 + 0.3 * (lv - 1); // level 10 has almost four times the health
+export const lvDmg = (lv) => 1 + 0.12 * (lv - 1);
+export const lvSpeed = (lv) => 1 + 0.015 * (lv - 1);
+export const lvSize = (lv) => 1 + 0.08 * (lv - 1); // level 10 is huge
+export const lvXp = (lv) => 1 + 0.25 * (lv - 1);
+
+// What level a new monster of this wave (1-10) is: mostly low, with the high ones showing up later and rarely
+export function rollMonsterLevel(wave) {
+  const cap = Math.min(10, 1 + Math.ceil(wave * 0.9));
+  const lv = 1 + Math.floor(Math.pow(Math.random(), 2.4) * cap);
+  return Math.min(10, lv);
 }

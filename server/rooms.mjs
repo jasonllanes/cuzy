@@ -343,6 +343,18 @@ export function attachRoomServer(httpServer) {
       room.paused = !!m.on;
       sendRoom(room, { t: 'paused', on: room.paused, by: ws.player.name });
     },
+    // a finished wave round: back to the waiting room, for everyone
+    tolobby(ws) {
+      const room = ws.room;
+      if (!room || !room.started) return;
+      room.started = false;
+      room.winning = false;
+      room.paused = false;
+      room.introOpen = false;
+      for (const p of room.players.values()) p.kills = 0;
+      sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: [...room.players.values()].map(publicPlayer), scores: scoreList(room) });
+      pushLobby();
+    },
     // host-only room settings, changeable from the waiting room
     settings(ws, m) {
       const room = ws.room;

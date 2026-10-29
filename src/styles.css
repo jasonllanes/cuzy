@@ -1143,3 +1143,16 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 /* power-ups: two small buttons above the gun slot, and the screen effects */
 .slowmo-tint { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(circle, rgba(120, 160, 255, 0.05) 40%, rgba(70, 90, 220, 0.3) 100%); }
 .blast-flash { position: absolute; inset: 0; z-index: 30; pointer-events: none; background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(255, 190, 90, 0.6)); }
+
+/* the wave panel sits to the right of the weather and time chip, and can fold away */
+.wave-hud, .wave-hud.with-room { top: 6px; left: calc(50% + 140px); transform: none; width: 250px; min-width: 0; text-align: center; }
+.wave-hud.folded { width: auto; min-width: 0; }
+.wave-fold { margin-left: 8px; width: 22px; height: 22px; padding: 0; line-height: 1; font-size: 0.8rem; border: 2px solid var(--wood); border-radius: 8px; background: var(--paper); color: var(--ink); cursor: pointer; pointer-events: auto; vertical-align: middle; }
+.wave-hud.folded .wave-sub { font-size: 0.75rem; }
+@media (max-width: 1100px) { .wave-hud, .wave-hud.with-room { width: 210px; } }
+.mobile-ui .game.mobile .wave-hud, .mobile-ui .game.mobile .wave-hud.with-room { top: 4px; left: calc(50% + 100px); transform: scale(calc(var(--mz) * var(--hs))); transform-origin: top left; }
+
+.base-lv { font: 700 0.7rem var(--pixel); color: #b0782a; white-space: nowrap; }
+
+.kill-board { margin-top: 6px; }
+.mobile-ui .game.mobile .kill-board { display: none; }

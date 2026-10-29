@@ -173,8 +173,8 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
   const shown = {
     shield: util === 'shield',
     invis: util === 'invis',
-    hp: sword,
-    stam: sword,
+    hp: sword || survival,
+    stam: sword || survival,
     wall: waves,
     gun: survival,
   };

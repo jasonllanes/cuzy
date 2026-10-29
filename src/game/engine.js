@@ -2,7 +2,7 @@ import { CHUNK_PX, GRASS, SAND, T, WATER } from './world';
 import { ITEMS, LOOT_APOC, isConsumable, rollLoot, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
-import { MONSTERS } from './monsters';
+import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
 import { WaveMirror, WaveSim } from './waves';
 import { ALLIES } from './allies';
 import { Bots } from './bots';
@@ -918,7 +918,7 @@ export class Game {
       this.stamina = 1;
     } else if (ev.type === 'mdie') {
       c.kills++;
-      this.monsterKill(ev.name || 'Monster', XP.wave + (ev.boss ? 80 : 0));
+      this.monsterKill(ev.name || 'Monster', Math.round(XP.wave * lvXp(ev.lv || 1)) + (ev.boss ? 80 : 0));
       sfx.play('monsterDie', 0.6);
       if (ev.power) c.drops.push({ x: ev.x, y: ev.y, id: 'power', pw: ev.power, age: 0, net: `pw${ev.pid}` });
       for (const l of ev.loot) {
@@ -1117,7 +1117,7 @@ export class Game {
 
   // Z / X: the two quick slots
   useSupply(kind) {
-    if (this.dead || this.wave) return;
+    if (this.dead || (this.wave && !this.world.apoc)) return;
     const c = this.combat;
     const item = kind === 'hp' ? ITEMS.hppack : ITEMS.soupcan;
     if (this.supplies[kind] <= 0) {
@@ -1340,7 +1340,7 @@ export class Game {
 
   // Survival's zombies: a walking strip for each of four directions, and a death strip for sideways falls
   drawZombie(ctx, m, def) {
-    const sc = def.scale || 1;
+    const sc = (def.scale || 1) * lvSize(m.lv || 1);
     const dead = m.state === 'dead';
     const way = ['down', 'up', 'side', 'left'][m.dirv ?? 0];
     const frames = ZOMBIE_FRAMES[def.apoc];
@@ -1354,7 +1354,19 @@ export class Game {
 
     ctx.fillStyle = 'rgba(30,20,30,0.28)';
     ctx.fillRect(x - 5 * sc, y - 1, 10 * sc, 2 + sc);
+    if (def.boss && !dead) {
+      // a boss glows red
+      const pulse = 0.5 + 0.5 * Math.sin(m.anim * 5);
+      ctx.fillStyle = `rgba(255,40,40,${0.25 + pulse * 0.2})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 16 * sc, 6 * sc, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.save();
+    if (def.boss && !dead) {
+      ctx.shadowColor = 'rgba(255,30,30,0.95)';
+      ctx.shadowBlur = 8 + 6 * (0.5 + 0.5 * Math.sin(m.anim * 5));
+    }
     if (def.tint) ctx.filter = def.tint; // the Runner and Armored zombies share art with the others, in different colours
     if (dead) ctx.globalAlpha = Math.max(0, 1.4 - m.t * 2);
     const dx = -Math.round((fw * sc) / 2) + (m.atk > 0 && !dead ? m.face * 2 : 0);
@@ -1374,6 +1386,42 @@ export class Game {
       ctx.fillStyle = '#e8506a';
       ctx.fillRect(x - w / 2, by, Math.max(1, Math.round(w * (m.hp / m.max))), 2);
     }
+    if (!dead) this.drawLevelTag(ctx, m, x, y, y - fh * sc - (m.hp < m.max || m.wild ? 8 : 4));
+  }
+
+  // the level number over a wave monster, in its rarity colour; a legendary also glows gold underfoot
+  drawLevelTag(ctx, m, x, y, top) {
+    if (MONSTERS[m.type]?.boss) {
+      ctx.save();
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(30,20,30,0.9)';
+      ctx.fillStyle = '#ff4d4d';
+      ctx.strokeText('☠ BOSS ☠', x, top);
+      ctx.fillText('☠ BOSS ☠', x, top);
+      ctx.restore();
+      return;
+    }
+    const lv = m.lv || 1;
+    const r = MONSTER_RARITY[lv];
+    if (lv >= 9) {
+      ctx.fillStyle = `${r.color}${lv === 10 ? '66' : '44'}`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 9 + lv, 4 + lv * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.save();
+    ctx.font = `bold ${lv === 10 ? 8 : 7}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(30,20,30,0.9)';
+    ctx.fillStyle = r.color;
+    const t = lv === 10 ? `★ ${lv} ★` : String(lv);
+    ctx.strokeText(t, x, top);
+    ctx.fillText(t, x, top);
+    ctx.restore();
   }
 
   drawMonster(ctx, m) {
@@ -1382,7 +1430,7 @@ export class Game {
       this.drawZombie(ctx, m, def);
       return;
     }
-    const sc = def.scale || 1;
+    const sc = (def.scale || 1) * lvSize(m.lv || 1);
     const box = this.mbox[def.sprite];
     const sheet = this.img[`monsters/${def.sprite}`];
     const flyer = def.kind === 'fly' || def.fly;
@@ -1418,6 +1466,7 @@ export class Game {
       ctx.fillStyle = '#ff7a8f';
       ctx.fillRect(x - w / 2, by, Math.max(1, Math.round(w * (m.hp / m.max))), 2);
     }
+    if (!dead && m.lv) this.drawLevelTag(ctx, m, x, y, y - hover - (box.bottom - box.top + 1) * sc - (m.hp < m.max || m.wild ? 8 : 4));
   }
 
   // A tree standing guard; it turns into a stump as it takes a beating
@@ -1523,6 +1572,25 @@ export class Game {
     ctx.fill();
     ctx.globalAlpha = 1;
     this.drawHeroAt(ctx, hero, dir, a.moving, a.anim, a.x, a.y);
+    if (def.ai === 'melee' && a.atk > 0) {
+      // the guard's slash: a bright crescent swept across the way they face
+      const p = 1 - a.atk / 0.25;
+      const face = [Math.PI / 2, -Math.PI / 2, 0, Math.PI][a.dir || 0];
+      const sweep = face - 1 + p * 2;
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgba(255,236,170,${0.95 - p * 0.6})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y - 9, 13, sweep - 0.7, sweep + 0.1);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255,255,255,${0.9 - p * 0.7})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(x, y - 9, 13, sweep - 0.6, sweep);
+      ctx.stroke();
+      ctx.restore();
+    }
     const width = def.pips * 3 - 1;
     for (let i = 0; i < def.pips; i++) {
       ctx.fillStyle = def.color;
@@ -1546,6 +1614,18 @@ export class Game {
     ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
     ctx.fillStyle = st.baseHp / st.baseMax > 0.4 ? '#7fd48f' : '#ee5d7d';
     ctx.fillRect(bx, by, Math.max(1, Math.round(bw * (st.baseHp / st.baseMax))), 4);
+    if (this.world.apoc) {
+      // the bus's upgrade level, over its health bar
+      ctx.save();
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(30,20,30,0.9)';
+      ctx.fillStyle = '#ffe08a';
+      ctx.strokeText(`🚌 Bus Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
+      ctx.fillText(`🚌 Bus Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
+      ctx.restore();
+    }
 
     const held = this.inventory[this.selectedSlot];
     if (held?.id === 'barricade' && !this.paused) {
@@ -2935,7 +3015,8 @@ export class Game {
     if (this.wave) {
       for (const m of this.wave.monsters) drawList.push({ kind: 'monster', m, y: m.y });
       for (const b of this.wave.barricades) drawList.push({ kind: 'barricade', b, y: b.y });
-      for (const a of this.wave.allies) drawList.push({ kind: 'ally', a, y: a.y });
+      // Survival shooters stand on the bus roof, so they are drawn in front of the bus
+      for (const a of this.wave.allies) drawList.push({ kind: 'ally', a, y: a.y + (this.world.apoc && ALLIES[a.kind].ai === 'ranged' ? 34 : 0) });
       for (const s of this.wave.ashots) drawList.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'rock', rot: this.t * 14 }, y: s.y + 6 });
     }
     drawList.sort((a, b) => a.y - b.y);
