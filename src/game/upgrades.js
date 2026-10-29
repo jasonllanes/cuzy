@@ -102,4 +102,5 @@ export const THROW_SHOP = [
   { item: 'mug', qty: 2, cost: 5 },
   { item: 'gold', qty: 2, cost: 7 },
   { item: 'gem', qty: 1, cost: 6 },
+  { item: 'truffle', qty: 2, cost: 8 },
 ];

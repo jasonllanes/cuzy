@@ -50,6 +50,7 @@ export default function App() {
   const [session, setSession] = useState(null); // set while inside a multiplayer room
   const [lobby, setLobby] = useState(false); // true while the room is waiting for its host to press Start
   const [invites, setInvites] = useState([]); // pop-up invitations from other players
+  const [pendingInvite, setPendingInvite] = useState(''); // an accepted invitation: the name and character page for that room
   const netRef = useRef(null);
   // with Supabase configured, rooms run on it (works on GitHub Pages); otherwise on the local room server (npm run dev)
   if (!netRef.current) netRef.current = cloudOn ? new SupaNet(rawClient) : new Net();
@@ -123,6 +124,7 @@ export default function App() {
     setSession({ ...joined, clockAt: performance.now() });
     setLobby(!joined.started);
     setPlaying(true);
+    setPendingInvite('');
   };
 
   // the host pressed Start: everyone gets the fresh roster, scores and clock
@@ -156,14 +158,15 @@ export default function App() {
   const dismissInvite = (key) => setInvites((list) => list.filter((i) => i.key !== key));
 
   // "Join" on an invitation: leave whatever we are doing and go to that room
-  const joinInvite = async (invite) => {
+  // It leaves the current game and opens the same page an invite link does: type a name, pick a character, and you are in the room.
+  const joinInvite = (invite) => {
     dismissInvite(invite.key);
-    try {
-      const joined = await net.join(invite.code, { name: profile.name.trim() || 'Friend', hero: profile.cozyHero || profile.hero });
-      enterRoom(profile, joined);
-    } catch (err) {
-      setInvites((list) => [...list, { key: Math.random(), error: err.message }]);
-    }
+    if (!invite.code) return;
+    if (session) net.leave();
+    setSession(null);
+    setLobby(false);
+    setPlaying(false);
+    setPendingInvite(String(invite.code).toUpperCase().slice(0, 8));
   };
 
   const exit = () => {
@@ -171,6 +174,7 @@ export default function App() {
     setSession(null);
     setLobby(false);
     setPlaying(false);
+    setPendingInvite('');
     // drop the ?room= invite so reloading doesn't re-prompt
     if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
   };
@@ -184,7 +188,7 @@ export default function App() {
   } else if (playing) {
     screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else {
-    screen = <MainMenu assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
+    screen = <MainMenu key={pendingInvite || 'menu'} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }
   return (
     <>

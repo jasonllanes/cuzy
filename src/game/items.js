@@ -23,7 +23,8 @@ export const ITEMS = {
   rock: { name: 'Smooth Rock', desc: 'A good, honest throwing rock.', icon: single('rock', 10, 10), stack: 20, throw: 2 },
   mug: { name: 'Cozy Mug', desc: 'Best friend of rainy afternoons. Breaks when thrown!', icon: single('mug_01', 5, 9), stack: 5, throw: 2, fragile: true },
   wool: { name: 'Ball of Wool', desc: 'Soft enough to nap on.', icon: single('wool', 10, 10), stack: 20 },
-  truffle: { name: 'Truffle', desc: 'A rare, earthy treat.', icon: single('truffle', 10, 10), stack: 10, heal: 2 },
+  // (the id stays "truffle" so old saves keep working)
+  truffle: { name: 'Sticky Grenade', desc: 'Throw it: it sticks to whatever it hits and explodes a few seconds later. A red circle on the ground shows the blast.', icon: single('grenade', 12, 14), stack: 10, throw: 2, bomb: true },
   sword: { name: 'Sword', desc: 'Select this slot, then left-click to swing (hold to charge a dash). Select another slot and left-click does whatever that slot is for.', icon: { file: 'sword', sx: 0, sy: 0, sw: 14, sh: 14, sheetW: 14, sheetH: 14 }, stack: 1, wave: true },
   barricade: { name: 'Barricade Box', desc: 'Select it and left-click where you want the wall (or press Q). Hold left-click to lock it, move the mouse to turn it, release to place. Pick one up again with Space.', icon: single('crate_top', 16, 14), stack: 9, wave: true },
   // Survival (Apocalypse) pickups
@@ -83,7 +84,7 @@ export const LOOT = [
   ['gem', 1, 1, 1],
   ['mug', 1, 1, 1],
   ['wool', 2, 1, 2],
-  ['truffle', 1, 1, 1],
+  ['truffle', 3, 1, 2],
   ['seeds', 3, 2, 5],
 ];
 
@@ -110,6 +111,7 @@ export const LOOT_APOC = [
   ['hppack', 2, 1, 2],
   ['soupcan', 3, 1, 2],
   ['barricade', 8, 1, 3],
+  ['truffle', 3, 1, 2],
   ['coin', 3, 2, 5],
 ];
 

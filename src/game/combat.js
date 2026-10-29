@@ -78,14 +78,16 @@ const BULLET_LIFE = 0.55; // about 12 tiles
 // the three guns: how much magazine a shot uses, seconds between shots, bullets per shot, spread (radians), damage, range
 export const GUNS = {
   pistol: { name: 'Pistol', icon: '🔫', mag: 12, reload: 1.2, rate: 0.5, pellets: 1, spread: 0, dmg: 2, life: BULLET_LIFE, price: 0, blurb: 'Steady and accurate. 12 rounds.' },
-  shotgun: { name: 'Shotgun', icon: '💥', mag: 6, reload: 2, rate: 0.85, pellets: 5, spread: 0.36, dmg: 2, life: 0.3, price: 60, blurb: 'Five pellets per shot, deadly up close. 6 shells.' },
-  smg: { name: 'Machine gun', icon: '🔥', mag: 40, reload: 2.2, rate: 0.085, pellets: 1, spread: 0.1, dmg: 1, life: 0.5, price: 90, blurb: 'Sprays bullets while you hold. 40 rounds.' },
+  shotgun: { name: 'Shotgun', icon: '💥', mag: 6, reload: 2, rate: 0.85, pellets: 5, spread: 0.36, dmg: 2.5, life: 0.3, price: 60, blurb: 'Five pellets. Point blank they all stack for huge damage, and every pellet one-shots a normal enemy. 6 shells.' },
+  smg: { name: 'Machine gun', icon: '🔥', mag: 100, reload: 2.8, rate: 0.085, pellets: 1, spread: 0.1, dmg: 1, life: 0.5, price: 90, blurb: 'Sprays bullets while you hold. 100 rounds.' },
 };
 export const POWERS = {
   slowmo: { name: 'Slow-mo', icon: '⏳', color: '#7ea8ff', blurb: 'Monsters crawl and strike slowly for a few seconds.' },
   blast: { name: 'Big Blast', icon: '💣', color: '#ff9a3c', blurb: 'Wipes out every ordinary monster at once.' },
 };
 export const GUN_ORDER =['pistol', 'shotgun', 'smg'];
+export const BOMB_R = 46; // blast radius in pixels
+const BOMB_FUSE = 2.8; // seconds from the throw to the bang
 const THROW_UNLOCK = 0.35; // once empty, wait until it refills this far
 export const RECALL_TIME = 2.5;
 export const RECALL_CD = 20;
@@ -138,6 +140,8 @@ export class Combat {
     this.campT = 0;
     this.campScan = 0;
     this.projectiles = [];
+    this.bombs = []; // Sticky Grenades that have been thrown
+    this.blasts = []; // the flash of one going off
     this.remoteShots = [];
     this.drops = [];
     this.floaters = [];
@@ -531,6 +535,10 @@ export class Combat {
   // Wave Defense throw: a free pebble by default, or the selected throwable item. Costs throw energy.
   throwWave(slot) {
     if (this.throwCd > 0) return;
+    if (this.g.inventory[slot]?.id === 'truffle') {
+      this.throwGrenade(slot);
+      return;
+    }
     if (this.tLocked) {
       this.throwCd = 0.25;
       return;
@@ -571,6 +579,76 @@ export class Combat {
     this.faceAim(a);
   }
 
+  // Throw a Sticky Grenade: it flies a short way, sticks to the first enemy it touches (or just lands), and goes off after a few seconds
+  throwGrenade(slot) {
+    const inv = this.g.inventory;
+    if (!inv[slot] || inv[slot].id !== 'truffle') return;
+    removeFromSlot(inv, slot, 1);
+    this.g.emitInventory();
+    const a = this.aim();
+    const [cx, cy] = this.center();
+    this.bombs.push({ x: cx + Math.cos(a) * 8, y: cy + Math.sin(a) * 8, vx: Math.cos(a) * 140, vy: Math.sin(a) * 140, fly: 0.45, fuse: BOMB_FUSE, max: BOMB_FUSE, stuck: null, R: BOMB_R });
+    this.revealT = 1.5;
+    sfx.play('throw', 0.8);
+    this.throwCd = 0.4;
+    this.faceAim(a);
+  }
+
+  updateBombs(dt) {
+    const { world } = this.g;
+    this.blasts = this.blasts.filter((bl) => (bl.t += dt) < 0.45);
+    if (!this.bombs.length) return;
+    this.bombs = this.bombs.filter((b) => {
+      if (b.fly > 0) {
+        b.fly -= dt;
+        const px = b.x;
+        const py = b.y;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        for (const m of [...(this.g.wave?.monsters || []), ...this.wilds]) {
+          if (m.state === 'dead') continue;
+          const sc = MONSTERS[m.type].scale || 1;
+          const ox = (b.x - m.x) / (7 * sc + 3);
+          const oy = (b.y - bodyY(m)) / (9 * sc + 3);
+          if (ox * ox + oy * oy < 1) {
+            b.stuck = m;
+            b.fly = 0;
+            break;
+          }
+        }
+        if (!b.stuck && world.isBlocked(b.x - 1, b.y - 1, 2, 2, false, true)) {
+          b.x = px;
+          b.y = py;
+          b.fly = 0;
+        }
+      }
+      if (b.stuck) {
+        if (b.stuck.state === 'dead') b.stuck = null;
+        else {
+          b.x = b.stuck.x;
+          b.y = bodyY(b.stuck) + 4;
+        }
+      }
+      b.fuse -= dt;
+      if (b.fuse > 0) return true;
+      this.explode(b);
+      return false;
+    });
+  }
+
+  explode(b) {
+    this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R });
+    sfx.play('boom');
+    // anything normal inside the circle is blown away; tougher things take a big hit
+    for (const m of this.monstersNear(b.x, b.y, b.R)) {
+      this.hitMonster(m, this.isNormalFoe(m) ? Math.max(9, m.hp) : 9, b.x, b.y, 220);
+    }
+    for (const s of this.skeletons) {
+      if (s.state !== 'dead' && Math.hypot(s.x - b.x, s.y - 8 - b.y) <= b.R) this.damageSkeleton(s, 9, b.x, b.y, 240);
+    }
+    this.chopTrees(b.x, b.y, b.R * 0.7, 6);
+  }
+
   // Survival: the pistol. Bullets fly fast and straight, and hit like the throwing items do.
   shootGun() {
     if (this.throwCd > 0) return;
@@ -594,6 +672,7 @@ export class Combat {
         x: cx + Math.cos(b) * 12, y: cy + Math.sin(b) * 12,
         vx: Math.cos(b) * BULLET_SPEED, vy: Math.sin(b) * BULLET_SPEED,
         id: 'bullet', dmg: gun.dmg + this.throwBonus(), life: gun.life, rot: 0, free: true,
+        pellet: gun.pellets > 1, ox: cx + Math.cos(b) * 12, oy: cy + Math.sin(b) * 12, // shotgun pellets remember where they started
       };
       this.projectiles.push(shot);
       this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
@@ -674,6 +753,10 @@ export class Combat {
     const inv = this.g.inventory;
     const stack = inv[slot];
     if (!stack) return;
+    if (stack.id === 'truffle') {
+      this.throwGrenade(slot);
+      return;
+    }
     const def = ITEMS[stack.id];
     const a = this.aim();
     const [cx, cy] = this.center();
@@ -701,6 +784,7 @@ export class Combat {
   // ---------- simulation ----------
 
   update(dt) {
+    this.updateBombs(dt);
     for (const k in this.g.cds) this.g.cds[k] = Math.max(0, this.g.cds[k] - dt);
     this.swingCd -= dt;
     this.throwCd -= dt;
@@ -1630,6 +1714,7 @@ export class Combat {
   }
 
   clearEnemies() {
+    this.bombs = [];
     this.skeletons = [];
     this.wilds = [];
     this.wildShots = [];
@@ -1641,6 +1726,20 @@ export class Combat {
     this.hold = null;
     this.trail = [];
     this.shieldT = 0;
+  }
+
+  // A shotgun pellet: hits harder at point blank (before the spread scatters), and one-shots any normal enemy
+  pelletDmg(p, hp, normal) {
+    if (!p.pellet) return p.dmg;
+    const near = Math.hypot(p.x - p.ox, p.y - p.oy) < 45;
+    const d = p.dmg * (near ? 1.6 : 1);
+    return normal ? Math.max(d, hp) : d;
+  }
+
+  // a plain enemy: not a boss, not a big brute, and not a high level one
+  isNormalFoe(m) {
+    const def = MONSTERS[m.type];
+    return !def.boss && !m.nightBoss && (def.scale || 1) <= 1 && def.hp <= 8 && (m.lv || 1) <= 4;
   }
 
   updateProjectile(p, dt) {
@@ -1663,7 +1762,7 @@ export class Combat {
         const oy = (p.y - (s.y - 9)) / 12;
         if (ox * ox + oy * oy < 1) {
           this.hitColor = splatTone(p.id);
-          this.damageSkeleton(s, p.dmg, px, py);
+          this.damageSkeleton(s, this.pelletDmg(p, s.hp, !s.elite), px, py);
           this.hitColor = null;
           this.land(p, px, py);
           return false;
@@ -1676,7 +1775,7 @@ export class Combat {
         const oy = (p.y - bodyY(m)) / (9 * sc + 3);
         if (ox * ox + oy * oy < 1) {
           this.hitColor = splatTone(p.id);
-          this.hitMonster(m, p.dmg, px, py, 90);
+          this.hitMonster(m, this.pelletDmg(p, m.hp, this.isNormalFoe(m)), px, py, 90);
           this.hitColor = null;
           this.land(p, px, py);
           return false;
@@ -1828,6 +1927,8 @@ export class Combat {
     for (const w of this.wilds) list.push({ kind: 'monster', m: w, y: w.y });
     for (const p of this.projectiles) list.push({ kind: 'projectile', p, y: p.y + 6 });
     for (const s of this.wildShots) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'wshot' }, y: s.y + 6 });
+    for (const b of this.bombs) list.push({ kind: 'projectile', p: { x: b.x, y: b.y, id: 'bomb', b }, y: b.y + 6 });
+    for (const bl of this.blasts) list.push({ kind: 'projectile', p: { x: bl.x, y: bl.y, id: 'blast', bl }, y: bl.y + 40 });
     for (const p of this.remoteShots) list.push({ kind: 'projectile', p, y: p.y + 6 });
     for (const d of this.drops) if (!d.ins) list.push({ kind: 'drop', d, y: d.y });
     if (this.swing) list.push({ kind: 'swing', y: this.g.player.y + 0.5 });
@@ -1877,6 +1978,45 @@ export class Combat {
       ctx.fillRect(-9, -0.5, 4, 1);
       ctx.fillStyle = '#fff3b0';
       ctx.fillRect(-5, -0.7, 7, 1.4);
+      ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.id === 'bomb') {
+      // the red circle on the ground: it fills up until the blast, and flashes at the end (like a boss skill's warning)
+      const b = o.p.b;
+      const f = 1 - Math.max(0, b.fuse) / b.max;
+      const flash = f > 0.7 && Math.sin(t * 40) > 0 ? 0.25 : 0;
+      ctx.save();
+      ctx.translate(Math.round(b.x), Math.round(b.y + 2));
+      ctx.fillStyle = `rgba(255,30,30,${0.12 + flash})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,40,40,${0.3 + 0.3 * f})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.R * f, b.R * 0.8 * f, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,70,70,0.95)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      this.drawIcon(ctx, 'truffle', b.x, b.y - 4 - (b.fly > 0 ? 6 : 0) + (f > 0.7 && Math.sin(t * 40) > 0 ? -1 : 0), 0);
+    } else if (o.kind === 'projectile' && o.p.id === 'blast') {
+      const bl = o.p.bl;
+      const p = bl.t / 0.45;
+      ctx.save();
+      ctx.translate(Math.round(bl.x), Math.round(bl.y - 6));
+      ctx.fillStyle = `rgba(255,200,90,${0.75 * (1 - p)})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bl.R * (0.35 + 0.65 * p), bl.R * 0.8 * (0.35 + 0.65 * p), 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - p)})`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255,120,40,${0.8 * (1 - p)})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bl.R * 0.4 * (1 - p * 0.4), bl.R * 0.32 * (1 - p * 0.4), 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     } else if (o.kind === 'projectile' && o.p.id === 'wshot') {
       // a monster's spit: a small glowing green orb

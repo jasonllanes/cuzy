@@ -41,6 +41,7 @@ const FOOT_H = 5;
 const SPEED = 62;
 const SPRINT_MULT = 1.75;
 const RESPAWN_TIME = 5; // seconds spent downed
+export const GRENADE_COST = 8;
 export const HEAL_CD = 6; // seconds between healing items
 export const STAM_CD = 5; // seconds between stamina items
 const WADE_SLOWDOWN = 0.4; // speed multiplier while paddling through water
@@ -1323,6 +1324,20 @@ export class Game {
     sfx.play('buy');
     this.onToast?.(`⚔️ ${next.name} equipped.`);
     this.emitHud();
+  }
+
+  // Buy a Sticky Grenade
+  buyGrenade() {
+    if (!this.wave || this.dead) return;
+    if (!this.spendCoins(GRENADE_COST)) {
+      sfx.play('nope');
+      this.onToast?.(`A Sticky Grenade costs ${GRENADE_COST} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    const left = addItem(this.inventory, 'truffle', 1);
+    if (left > 0) this.combat.drops.push({ x: this.player.x, y: this.player.y, id: 'truffle', qty: left, age: 0 });
+    this.emitInventory();
+    sfx.play('buy');
   }
 
   // Buy a Barricade Box

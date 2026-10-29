@@ -33,8 +33,8 @@ function useLobby(net) {
   return state;
 }
 
-export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom }) {
-  const invite = invitedCode();
+export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, inviteCode = '' }) {
+  const invite = inviteCode || invitedCode(); // an invitation from inside the game, or from a link
   // someone tapped an invite link: skip the setup walk and ask only for a name and a hero (until they ask for the full menu)
   const [fullMenu, setFullMenu] = useState(false);
   const inviting = !!invite && !fullMenu;

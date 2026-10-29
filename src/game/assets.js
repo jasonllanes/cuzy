@@ -9,7 +9,7 @@ const NAMES = [
   'chicken_red', 'chicken_green', 'cow_f', 'cow_m',
   'items/mushroom_red', 'items/mushroom_blue',
   'items/acron', 'items/jar_01', 'items/jar_02', 'items/milk', 'items/egg', 'items/coin', 'items/ore_gold',
-  'items/ore_bluestone', 'items/mug_01', 'items/wool', 'items/truffle', 'items/seeds_generic', 'items/rock',
+  'items/ore_bluestone', 'items/mug_01', 'items/wool', 'items/truffle', 'items/grenade', 'items/seeds_generic', 'items/rock',
   'skeleton_idle', 'skeleton_walk', 'skeleton_attack', 'skeleton_hurt', 'skeleton_death', 'sword',
   ...Array.from({ length: 32 }, (_, i) => `retro/c${i + 1}`),
   'adam_idle', 'adam_run', 'alex_idle', 'alex_run',

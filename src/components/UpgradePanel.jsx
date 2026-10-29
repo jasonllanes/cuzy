@@ -2,6 +2,7 @@ import { ALLIES, ALLY_KINDS, MAX_ALLIES, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
 import { MAX_LEVEL, UPGRADES, upgradeCost } from '../game/upgrades';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
+import { GRENADE_COST } from '../game/engine';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
 export default function UpgradePanel({ hud, game, onClose, survival = false }) {
@@ -50,6 +51,10 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
             <div className="recruit-chip hire">
               <span><b>📦 Barricade Box</b><small>One more wall to set down with Q or left click.</small></span>
               <button className="btn go small-btn" disabled={hud.coins < BARRICADE_COST} onClick={() => game.buyBarricade()}>🪙 {BARRICADE_COST}</button>
+            </div>
+            <div className="recruit-chip hire">
+              <span><b>💣 Sticky Grenade</b><small>Throw it: it sticks to an enemy and explodes after a few seconds (a red circle shows the blast).</small></span>
+              <button className="btn go small-btn" disabled={hud.coins < GRENADE_COST} onClick={() => game.buyGrenade()}>🪙 {GRENADE_COST}</button>
             </div>
             <div className="recruit-chip hire">
               <span><b>🔧 Repair all barricades</b><small>{hud.wave?.wrecks ? `${hud.wave.wrecks} destroyed: plants them back where they stood (shown as red ghosts). Walls you picked up yourself are left alone.` : 'Nothing destroyed. Walls that break are remembered here.'}</small></span>
