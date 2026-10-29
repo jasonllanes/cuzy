@@ -222,6 +222,10 @@ export class Combat {
   }
 
   aim() {
+    // on a touch screen the aim comes from the attack button's drag, or is the nearest enemy
+    const o = this.g.aimOverride;
+    if (o === 'auto') return this.g.autoAim();
+    if (typeof o === 'number') return o;
     const [cx, cy] = this.center();
     const m = this.g.mouseWorld();
     return Math.atan2(m.y - cy, m.x - cx);

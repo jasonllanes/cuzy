@@ -2,6 +2,8 @@ import { useState } from 'react';
 import AudioSettings from './AudioSettings';
 import { CREDITS, TOOLS } from '../game/credits';
 import { store } from '../game/store';
+import ControlsLayout from './ControlsLayout';
+import ScreenSettings from './ScreenSettings';
 
 const CHECKED = {
   page: '✔ author confirmed from their page',
@@ -69,8 +71,16 @@ export default function MenuHome({ view, setView, onPlay, onMulti, name, setName
       {view === 'settings' && (
         <section className="page">
           <h2 className="page-title">⚙️ Settings</h2>
+          <div className="settings-cols">
+          <div>
           <h3 className="shop-h">🔊 Sound</h3>
           <AudioSettings />
+          <h3 className="shop-h">🎮 Controls &amp; screen</h3>
+          <ScreenSettings />
+          </div>
+          <div>
+          <h3 className="shop-h">📐 Mobile layout</h3>
+          <ControlsLayout />
           <h3 className="shop-h">🧑 Player</h3>
           <label className="sub-label" htmlFor="set-name">Your name</label>
           <input id="set-name" value={name} maxLength={14} autoComplete="off" onChange={(e) => setName(e.target.value)} />
@@ -78,6 +88,8 @@ export default function MenuHome({ view, setView, onPlay, onMulti, name, setName
           <p className="hint">Every map keeps its own progress on this device (and in the cloud, if it is set up).</p>
           <button type="button" className="btn ghost small-btn" onClick={clearSaves}>Delete all saved games</button>
           {msg && <p className="hint">{msg}</p>}
+          </div>
+          </div>
           <div className="nav-row">{back}<span /></div>
         </section>
       )}

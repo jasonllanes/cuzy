@@ -126,6 +126,8 @@ export class Game {
     this.weatherForce = null; // set by the -weather cheat
     this.level = 1; // character level
     this.xp = 0;
+    this.touchMode = false; // mobile controls: the screen is not a mouse
+    this.aimOverride = null; // a touch aim: an angle, or 'auto' for the nearest enemy
     this.cheats = !session || !!session.room?.allowCheats; // alone you may always cheat; in a room the host decides
     this.weatherT = 0;
     this.cloudCanvas = null;
@@ -297,6 +299,7 @@ export class Game {
       this.mouse.y = (e.clientY - r.top) * (this.canvas.height / r.height);
     };
     this.onMouseDown = (e) => {
+      if (this.touchMode) return; // taps are for the on-screen buttons
       if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || (e.button !== 0 && e.button !== 2)) return;
       this.onMouseMove(e);
       this.mouseHeld[e.button] = true;
@@ -2407,6 +2410,94 @@ export class Game {
     this.interactPressed = false;
   }
 
+  // ---------- touch controls ----------
+
+  // the joystick: -1..1 on each axis (the hero walks in eight directions)
+  setTouchMove(x, y) {
+    const t = 0.3;
+    for (const [k, on] of [['left', x < -t], ['right', x > t], ['up', y < -t], ['down', y > t]]) {
+      if (on) this.keys.add(k);
+      else this.keys.delete(k);
+    }
+  }
+
+  // On a touch screen an attack goes the way the hero is facing (unless you drag from the button to aim)
+  autoAim() {
+    const [vx, vy] = DIR_VEC[this.player.dir] || [0, 1];
+    return Math.atan2(vy, vx);
+  }
+
+  setTouchAim(ang) {
+    if (this.aimOverride !== null) this.aimOverride = ang ?? 'auto';
+  }
+
+  // a button went down. `ang` is where the finger was dragged to (null: aim for me)
+  touchPress(kind, ang = null) {
+    if (this.frozen || this.dead || this.celeb || !this.combat) return;
+    const c = this.combat;
+    switch (kind) {
+      case 'attack':
+        this.aimOverride = ang ?? 'auto';
+        c.holdStart(); // a tap swings; holding and letting go dashes
+        break;
+      case 'throw':
+        this.aimOverride = ang ?? 'auto';
+        this.mouseHeld[2] = true;
+        break;
+      case 'interact':
+        this.spaceDown = true;
+        if (this.mount) this.dismount();
+        else this.interactPressed = true;
+        break;
+      case 'eat':
+        this.useItem(this.selectedSlot);
+        break;
+      case 'shield':
+        c.activateShield();
+        break;
+      case 'invis':
+        c.activateInvis();
+        break;
+      case 'recall':
+        c.startRecall();
+        break;
+      case 'hp':
+      case 'stam':
+        this.useSupply(kind);
+        break;
+      case 'barricade':
+        this.placeBarricade();
+        break;
+      case 'sprint':
+        this.keys.add('sprint');
+        break;
+      default:
+    }
+  }
+
+  touchRelease(kind, ang = null) {
+    switch (kind) {
+      case 'attack':
+        if (ang !== null) this.aimOverride = ang;
+        if (this.combat?.hold) this.combat.holdEnd();
+        this.aimOverride = null;
+        break;
+      case 'throw':
+        this.mouseHeld[2] = false;
+        this.aimOverride = null;
+        break;
+      case 'interact':
+        this.spaceDown = false;
+        this.spaceLock = false;
+        this.spaceHold = 0;
+        break;
+      case 'sprint':
+        this.keys.delete('sprint');
+        break;
+      default:
+    }
+  }
+
   // ---------- chat commands (cheats) ----------
 
   // Runs a "-command" from the chat box. Tells you why if cheats are off.
@@ -3183,7 +3274,8 @@ export class Game {
   drawPrompt(o, camX, camY) {
     const bob = Math.sin(this.t * 5) * 1.5;
     const [sx, sy] = this.toScreen(o.x, o.y - (o.inter === 'chest' ? 24 : 22) + bob, camX, camY);
-    this.pill(o.label || (o.inter === 'chest' ? 'Space · open' : o.inter === 'water' ? 'Space · drink' : 'Space · pick up'), sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
+    const text = o.label || (o.inter === 'chest' ? 'Space · open' : o.inter === 'water' ? 'Space · drink' : 'Space · pick up');
+    this.pill(this.touchMode ? text.replace('Space', '✋ Use') : text, sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
   }
 
   // The small corner map, and the big one opened with M

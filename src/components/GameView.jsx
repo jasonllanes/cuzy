@@ -11,12 +11,16 @@ import OnlinePlayers from './OnlinePlayers';
 import { sfx } from '../game/sfx';
 import { INVIS_CD } from '../game/combat';
 import AudioSettings from './AudioSettings';
+import ControlsLayout from './ControlsLayout';
+import ScreenSettings from './ScreenSettings';
 import Hotbar from './Hotbar';
 import SupplyBar from './SupplyBar';
 import ShopPanel from './ShopPanel';
 import StoragePanel from './StoragePanel';
 import QtyPicker from './QtyPicker';
 import RoomSettings, { Switch } from './RoomSettings';
+import TouchControls from './TouchControls';
+import { getControls, useControls } from '../game/controls';
 import { COMMANDS } from '../game/commands';
 import { hp100 } from '../game/stats';
 import { mapNameOf } from '../game/maps';
@@ -141,8 +145,17 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [roomPause, setRoomPause] = useState(null); // set while the host has the room paused: { by }
   const [hostId, setHostId] = useState(session?.host ?? null);
   const [live, setLive] = useState(session?.room || null); // the room's settings as they are now (the host can change some during a round)
+  const controls = useControls();
+  const mobile = controls === 'mobile';
   const [roomSetOpen, setRoomSetOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false); // phones: the stats panel slides in from the left
+  const [hudMenuOpen, setHudMenuOpen] = useState(false); // phones: the buttons down the right edge fold away
   const roomSetRef = useRef(false);
+  useEffect(() => {
+    if (!gameRef.current) return;
+    gameRef.current.touchMode = mobile;
+    if (!mobile) gameRef.current.setTouchMove(0, 0);
+  }, [mobile]);
   const [solo, setSolo] = useState(() => ({ allowMelee: true, allowThrow: true, target: 10 })); // the rules of a game against computer rivals
   const [onlineOpen, setOnlineOpen] = useState(false); // the "players online" list
   const [onlineCount, setOnlineCount] = useState(() => net.online?.length || 0);
@@ -267,6 +280,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       onToast: pushToast,
     });
     gameRef.current = game;
+    game.touchMode = getControls() === 'mobile';
     game.frozen = introRef.current === 'play' || introRef.current === 'wait';
     game.start();
     return () => {
@@ -275,6 +289,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assets, profile, session]);
+
+  // a button picked from the folded-away menu closes it
+  useEffect(() => {
+    if (upgOpen || mapOpen || onlineOpen || paused || roomSetOpen || guideOpen) setHudMenuOpen(false);
+  }, [upgOpen, mapOpen, onlineOpen, paused, roomSetOpen, guideOpen]);
 
   useEffect(() => {
     mapRef.current = mapOpen;
@@ -439,7 +458,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const hints = chatOpen && cheatsOn && (chatText === '' || chatText.startsWith('-')) ? COMMANDS.filter((c) => `-${c.name}`.startsWith(typed) || chatText === '') : [];
 
   return (
-    <div className="game">
+    <div className={`game ${mobile ? 'mobile' : ''}`}>
       <div className="game-canvas">
         <canvas ref={canvasRef} />
       </div>
@@ -486,7 +505,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </div>
 
-      <div className="hud hud-left-col">
+      {mobile && (
+        <button type="button" className="hud stats-tab" onClick={() => setStatsOpen((o) => !o)} aria-label={statsOpen ? 'Hide stats' : 'Show stats'}>
+          ❤ {hp100(hud.hp)} · ⭐ {hud.level || 1} <b>{statsOpen ? '◂' : '▸'}</b>
+        </button>
+      )}
+      <div className={`hud hud-left-col ${mobile ? `mobile-slide ${statsOpen ? 'open' : ''}` : ''}`}>
         <div className="hud-left panel small">
           <div className="hud-name">{profile.name}</div>
           <div className="hud-line">🗺️ <b>{mapNameOf(profile.seed)}</b></div>
@@ -563,20 +587,27 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <button className="btn small-btn" aria-label="Zoom in" onClick={() => gameRef.current?.zoomBy(1)}>+</button>
         </div>
         <div className="coin-chip" title={waves ? 'Coins for upgrades and helpers' : 'Coins for the shop'}>🪙 {hud.coins}</div>
-        <button className="btn small-btn" onClick={() => setUpgOpen(true)}>{waves ? '⬆ Upgrades' : '🛒 Shop'} <kbd>Tab</kbd></button>
+        {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
+        {(!mobile || hudMenuOpen) && (
+          <>
+        {!mobile && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>{waves ? '⬆ Upgrades' : '🛒 Shop'} <kbd>Tab</kbd></button>}
         <button className="btn small-btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
         <button className="btn small-btn" onClick={() => setMapOpen(true)}>🗺️ Map <kbd>M</kbd></button>
         <button className="btn small-btn" onClick={() => setOnlineOpen(true)} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
         {((session && isHost) || (!session && mode === 'free')) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
         <button className="btn small-btn" onClick={() => pauseRef.current()} title={session ? 'The host pauses the game for everyone' : 'Pause the game'}>⏸ Pause <kbd>P</kbd></button>
+        <button className="btn small-btn" onClick={() => { setGuideOpen(true); setHudMenuOpen(false); }}>📖 Guide</button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu</button>
+          </>
+        )}
       </div>
 
       <div className={`hud stamina ${hud.exhausted ? 'tired' : ''} ${hud.stamina < 0.995 ? 'show' : ''}`}>
         <span className="stamina-label">{hud.exhausted ? 'Catching breath…' : 'Stamina'}</span>
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
-      <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · E eat · Tab shop · M map · G guide</div>
+      {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} />}
+      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q barricade' : ''} · 1-9/wheel select · E eat · Tab shop · M map · G guide</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -795,14 +826,21 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
 
       {paused && (
-        <div className="overlay">
+        <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && setPaused(false)}>
           <div className="panel pause-card">
             <h2>Taking a breather</h2>
             <p className="hint">{session ? 'The room keeps going while you are in this menu.' : 'The game is paused. Your progress is saved for this map.'}</p>
+            <div className="pause-a">
             {isHost && !roomPause && <button className="btn" onClick={() => { net.send({ t: 'pause', on: true }); setPaused(false); }}>⏸ Pause the game for everyone</button>}
             {((session && isHost) || (!session && mode === 'free')) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
+            </div>
+            <div className="pause-b">
             <h3 className="settings-h">⚙ Settings</h3>
             <AudioSettings />
+            <ScreenSettings />
+            {mobile && <ControlsLayout />}
+            </div>
+            <div className="pause-c">
             <button className="btn go" onClick={() => setPaused(false)}>Keep exploring</button>
             <button className="btn" onClick={onExit}>Back to hero select</button>
             <button
@@ -814,6 +852,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             >
               Reset this world's progress
             </button>
+            </div>
           </div>
         </div>
       )}

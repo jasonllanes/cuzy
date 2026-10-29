@@ -1,3 +1,4 @@
+import ControlToggle from './components/ControlToggle';
 import { useEffect, useRef, useState } from 'react';
 import { loadAssets } from './game/assets';
 import { retroId } from './game/heroes';
@@ -188,6 +189,7 @@ export default function App() {
     <>
       {screen}
       <InviteToasts invites={invites} assets={assets} onJoin={joinInvite} onDismiss={dismissInvite} />
+      <ControlToggle playing={playing && !(session && lobby)} />
     </>
   );
 }
