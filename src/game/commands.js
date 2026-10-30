@@ -20,6 +20,7 @@ export const COMMANDS = [
   { name: 'sword', usage: '-sword ember', desc: 'Unlock and equip a sword (-sword all)' },
   { name: 'time', usage: '-time 12', desc: 'Set the hour of the day (0-24)' },
   { name: 'weather', usage: '-weather rain', desc: 'clear, cloudy, rain, snow or auto' },
+  { name: 'dimension', usage: '-dimension ember', desc: 'Step into a realm now: ember, frost, void (or crypt, cave, ruin)' },
   { name: 'tp', usage: '-tp 40 -20', desc: 'Teleport to a tile' },
   { name: 'clear', usage: '-clear', desc: 'Clear the chat' },
   { name: 'help', usage: '-help', desc: 'Show this list' },
@@ -116,6 +117,15 @@ export function runCommand(game, text) {
       game.weatherForce = k === 'auto' ? null : k;
       game.weatherT = 0;
       return k === 'auto' ? '🌦 The weather is back to normal.' : `🌦 ${WEATHER[k].name} (just for you).`;
+    }
+    case 'dimension':
+    case 'portal': {
+      const kinds = ['ember', 'frost', 'void', 'crypt', 'cave', 'ruin'];
+      const k = (args[0] || '').toLowerCase();
+      if (!kinds.includes(k)) return `Usage: -dimension ${kinds.join(' | ')}`;
+      if (game.wave || game.dungeon || game.inside || game.dead) return 'Go outside first (and leave any dungeon).';
+      game.enterDimension(k);
+      return `🌀 Entering the ${k} realm…`;
     }
     case 'tp': {
       const x = Number(args[0]);

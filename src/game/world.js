@@ -1,6 +1,6 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
 import { mapInfo, splitSeed } from './maps';
-import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf } from './dungeon';
+import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
 
@@ -73,6 +73,7 @@ export class World {
     this.typeCache = new Map();
     this.siteCache = new Map();
     this.dsites = new Map(); // dungeon entrances
+    this.dkindOverride = new Map(); // regions forced to a kind (the -dimension command)
     this.activeZone = null; // the dungeon you are in (only that one is built)
     this.treeCache = new Map();
   }
@@ -168,35 +169,49 @@ export class World {
     let site = null;
     if (!this.apoc && !this.waveMode && hash2(drx, dry, this.seed + 8800) < 0.55) {
       const kr = hash2(drx, dry, this.seed + 8801);
-      const kind = kr < 0.4 ? 'crypt' : kr < 0.75 ? 'cave' : 'ruin';
-      const x = drx * DREGION + 8 + Math.floor(hash2(drx, dry, this.seed + 8802) * 24);
-      const y = dry * DREGION + 12 + Math.floor(hash2(drx, dry, this.seed + 8803) * 20);
-      const rad = kind === 'ruin' ? 5 : 3;
-      let ok = true;
-      for (let ty = y - 6; ty <= y + 1 && ok; ty++) {
-        for (let tx = x - rad; tx <= x + rad; tx++) {
-          if (this.type(tx, ty) !== GRASS || this.elevation(tx, ty) < BEACH + 0.02 || this.isCleared(tx, ty)) {
-            ok = false;
-            break;
+      const base = kr < 0.4 ? 'crypt' : kr < 0.75 ? 'cave' : 'ruin';
+      const portal = hash2(drx, dry, this.seed + 8804) < 0.35; // now and then it is a portal instead
+      // a few tries at different spots: the first is where it always was, the others only help where it did not fit
+      for (let a = 0; a < 10 && !site; a++) {
+        const x = drx * DREGION + 8 + Math.floor(hash2(drx, dry, this.seed + 8802 + a * 17) * 24);
+        const y = dry * DREGION + 12 + Math.floor(hash2(drx, dry, this.seed + 8803 + a * 17) * 20);
+        const kind = portal ? this.riftFor(x, y, drx, dry) : base;
+        const rad = kind === 'ruin' ? 5 : 3;
+        let ok = true;
+        for (let ty = y - 6; ty <= y + 1 && ok; ty++) {
+          for (let tx = x - rad; tx <= x + rad; tx++) {
+            if (this.type(tx, ty) !== GRASS || this.elevation(tx, ty) < BEACH + 0.02 || this.isCleared(tx, ty)) {
+              ok = false;
+              break;
+            }
           }
         }
-      }
-      for (let by = (y - 6) >> 1; by <= (y + 1) >> 1 && ok; by++) {
-        for (let bx = (x - rad) >> 1; bx <= (x + rad) >> 1; bx++) {
-          if (this.treeAt(bx, by)) {
-            ok = false;
-            break;
+        for (let by = (y - 6) >> 1; by <= (y + 1) >> 1 && ok; by++) {
+          for (let bx = (x - rad) >> 1; bx <= (x + rad) >> 1; bx++) {
+            if (this.treeAt(bx, by)) {
+              ok = false;
+              break;
+            }
           }
         }
+        if (ok) site = { x, y, kind, drx, dry };
       }
-      if (ok) site = { x, y, kind, drx, dry };
     }
     this.dsites.set(key, site);
     return site;
   }
 
+  // which dimension a portal at this spot leads to: the land around it decides
+  riftFor(x, y, drx, dry) {
+    const biome = this.mixed ? this.biomeAt(x, y) : this.tileset;
+    if (['lava', 'beach', 'asphalt'].includes(biome)) return 'ember';
+    if (['crystal', 'mountain', 'tidal'].includes(biome)) return 'frost';
+    if (['marsh', 'wood'].includes(biome)) return 'void';
+    return RIFTS[Math.floor(hash2(drx, dry, this.seed + 8805) * RIFTS.length)];
+  }
+
   dungeonKind(drx, dry) {
-    return this.dungeonSite(drx, dry)?.kind || 'crypt';
+    return this.dkindOverride.get(`${drx},${dry}`) || this.dungeonSite(drx, dry)?.kind || 'crypt';
   }
 
   dungeonLayout(rx, ry) {

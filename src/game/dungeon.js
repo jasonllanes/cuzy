@@ -20,7 +20,12 @@ export const KINDS = {
   crypt: { name: 'Crypt', enter: 'Space · enter the crypt', rooms: 5 },
   cave: { name: 'Cave', enter: 'Space · enter the cave', rooms: 5 },
   ruin: { name: 'Ruined house', enter: 'Space · enter the ruined house', rooms: 3 },
+  // portals to other dimensions: a glowing rift in the meadow, a realm of its own behind it, and a guardian in the last room
+  ember: { name: 'Ember Realm', enter: 'Space · step into the Ember Rift', rooms: 5, rift: true, blurb: 'A burning realm of orcs and fire hounds.' },
+  frost: { name: 'Frost Realm', enter: 'Space · step into the Frost Rift', rooms: 5, rift: true, blurb: 'A frozen realm of skeletons, mages and knights.' },
+  void: { name: 'Void Realm', enter: 'Space · step into the Void Rift', rooms: 5, rift: true, blurb: 'A twilight realm of necromancers and watchers.' },
 };
+export const RIFTS = ['ember', 'frost', 'void'];
 
 // which dungeon (region) a chunk belongs to, if it is in the far-off area
 export function zoneOf(cx, cy) {

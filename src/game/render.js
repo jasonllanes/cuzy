@@ -125,6 +125,10 @@ function renderDungeonFloor(world, canvas, ctx, chunk) {
     crypt: { floor: ['#555a6e', '#5b6076', '#50556a', '#5f647a'], seam: 'rgba(20,22,34,0.35)', wall: '#2b2d3d', top: '#454860', hi: '#5d6079' },
     cave: { floor: ['#6b5a46', '#725f4a', '#645441', '#6e5c47'], seam: 'rgba(30,20,12,0.3)', wall: '#2f2620', top: '#4a3d31', hi: '#5c4c3d' },
     ruin: { floor: ['#9a7448', '#a07a4e', '#946d42', '#a47e52'], seam: 'rgba(60,35,15,0.4)', wall: '#4a3020', top: '#6e4a2c', hi: '#8a6038' },
+    // the realms behind the portals
+    ember: { floor: ['#4a2222', '#512626', '#431e1e', '#582a2a'], seam: 'rgba(255,110,40,0.22)', wall: '#1c0e0e', top: '#3a1a1a', hi: '#7a3220', speck: '#ff8a3c' },
+    frost: { floor: ['#8fb0c8', '#97b8d0', '#88a8c0', '#9fc0d8'], seam: 'rgba(40,70,110,0.3)', wall: '#34506a', top: '#5f88a8', hi: '#d4f0ff', speck: '#ffffff' },
+    void: { floor: ['#2a2046', '#30254f', '#261d40', '#352a58'], seam: 'rgba(150,100,255,0.22)', wall: '#120c24', top: '#241a44', hi: '#6a4fd0', speck: '#c79bff' },
   }[L.kind];
   for (let ty = 0; ty < CHUNK; ty++) {
     for (let tx = 0; tx < CHUNK; tx++) {
@@ -142,7 +146,12 @@ function renderDungeonFloor(world, canvas, ctx, chunk) {
           ctx.fillRect(tx * T, ty * T, T, 1);
           ctx.fillRect(tx * T, ty * T, 1, T);
         }
-        if (h < 0.06) {
+        if (h < 0.06 && pal.speck) {
+          ctx.fillStyle = pal.speck; // sparks, ice crystals or motes
+          ctx.fillRect(tx * T + 5, ty * T + 6, 2, 2);
+          ctx.fillRect(tx * T + 10, ty * T + 10, 1, 1);
+          ctx.fillRect(tx * T + 3, ty * T + 11, 1, 1);
+        } else if (h < 0.06) {
           ctx.fillStyle = 'rgba(235,230,215,0.8)'; // bones
           ctx.fillRect(tx * T + 4, ty * T + 6, 5, 1);
           ctx.fillRect(tx * T + 6, ty * T + 4, 1, 5);

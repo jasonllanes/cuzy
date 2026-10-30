@@ -22,6 +22,7 @@ export default function MapPanel({ game, onClose }) {
           <span><i style={{ background: '#f4f0e6' }} /> Skeleton</span>
           <span><i style={{ background: '#b45cd8' }} /> Wild monster</span>
           <span><i style={{ background: '#e0384a' }} /> Wave monster</span>
+          <span><i style={{ background: 'linear-gradient(135deg, #ff5a1f, #6fc4ff, #9b5cff)', transform: 'rotate(45deg)' }} /> Portal to another realm</span>
           <span><i style={{ background: '#f2a33c' }} /> AI rival (its face)</span>
           <span><i style={{ background: '#5aaee8' }} /> Other player (their face)</span>
         </div>

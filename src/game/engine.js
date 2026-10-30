@@ -28,8 +28,8 @@ import { frostImages } from './assets';
 import { WEATHER, weatherAt } from './weather';
 import { runCommand } from './commands';
 import { HP_PER_HEART, HP_PER_LEVEL, HP_PER_UPGRADE, MAX_CHAR_LEVEL, XP, hp100, xpNeed } from './stats';
-import { KINDS } from './dungeon';
-import { drawEntrance, drawExit, drawTorch, makeRuinHouse } from './dungeonArt';
+import { KINDS, DREGION } from './dungeon';
+import { drawEntrance, drawExit, drawTorch, makeRuinHouse, riftColor } from './dungeonArt';
 import { HOUSE_SPRITE } from './world';
 import { devLayout, drawHero, heroById } from './heroes';
 
@@ -1916,7 +1916,7 @@ export class Game {
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(30,20,30,0.9)';
       ctx.fillStyle = '#ff4d4d';
-      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : m.miniBoss ? '⚔ MINI BOSS ⚔' : '☠ BOSS ☠';
+      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : m.guardian ? '🌀 GUARDIAN 🌀' : m.miniBoss ? '⚔ MINI BOSS ⚔' : '☠ BOSS ☠';
       ctx.strokeText(label, x, top);
       ctx.fillText(label, x, top);
       ctx.restore();
@@ -3187,8 +3187,19 @@ export class Game {
       this.cam.y = this.player.y;
       this.weatherT = 0;
       sfx.play('pickup');
-      this.onToast?.(`${KINDS[o.dkind].name}: monsters lurk in the dark, and chests wait deeper in. Find the glowing archway to leave.`);
+      this.onToast?.(KINDS[o.dkind].rift
+        ? `🌀 ${KINDS[o.dkind].name}: ${KINDS[o.dkind].blurb} A guardian waits in the last room with the best chests. Find the glowing archway to return.`
+        : `${KINDS[o.dkind].name}: monsters lurk in the dark, and chests wait deeper in. Find the glowing archway to leave.`);
     });
+  }
+
+  // the -dimension command: step straight into a dungeon or a realm of this kind, in the region you stand in
+  enterDimension(kind) {
+    const reg = DREGION * 16;
+    const drx = Math.floor(this.player.x / reg);
+    const dry = Math.floor(this.player.y / reg);
+    this.world.dkindOverride.set(`${drx},${dry}`, kind);
+    this.enterDungeon({ drx, dry, dkind: kind, x: this.player.x, y: this.player.y - 16 });
   }
 
   exitDungeon() {
@@ -4046,8 +4057,9 @@ export class Game {
           break;
         case 'dungeon':
           if (o.dkind === 'ruin' && !this.ruinHouse) this.ruinHouse = makeRuinHouse(img.house, HOUSE_SPRITE.sx, HOUSE_SPRITE.sy, HOUSE_SPRITE.sw, HOUSE_SPRITE.sh);
-          drawEntrance(ctx, o, this.ruinHouse);
+          drawEntrance(ctx, o, this.ruinHouse, this.t);
           if (o.dkind === 'crypt') this.glows.push([o.x - 14, o.y - 12, 22], [o.x + 14, o.y - 12, 22]);
+          else if (KINDS[o.dkind]?.rift) this.glows.push([o.x, o.y - 24, 40]);
           break;
         case 'dexit':
           drawExit(ctx, o, this.t);
@@ -4424,7 +4436,7 @@ export class Game {
     const bob = Math.sin(this.t * 5) * 1.5;
     const [sx, sy] = this.toScreen(o.x, o.y - (o.inter === 'chest' ? 24 : 22) + bob, camX, camY);
     const k = this.actKey();
-    const text = o.label || (o.inter === 'chest' ? `${k} · open` : o.inter === 'water' ? `${k} · drink` : `${k} · pick up`);
+    const text = (o.label || (o.inter === 'chest' ? `${k} · open` : o.inter === 'water' ? `${k} · drink` : `${k} · pick up`)).replace(/^Space ·/, `${k} ·`);
     this.pill(this.touchMode ? text.replace(/^(Space|F)(?= ·)/, '✋ Use') : text, sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
   }
 
@@ -4504,6 +4516,34 @@ export class Game {
     if (!this.demo && this.combat) {
       for (const b of this.bots?.list || []) if (Number.isFinite(b.x)) face(b.x, b.y, b.hero, b.name, '#f2a33c');
       for (const o of this.remotes.values()) if (!o.hidden) face(o.x, o.y, o.hero, o.name, o.bot || o.ai ? '#f2a33c' : '#5aaee8');
+    }
+    // portals to other realms, as little coloured diamonds
+    if (!this.demo && !this.dungeon && !this.wave && !this.world.apoc) {
+      const reg = DREGION * 16;
+      const span = Math.ceil((size / 2) * step / DREGION) + 1;
+      const rx0 = Math.floor(this.player.x / reg);
+      const ry0 = Math.floor(this.player.y / reg);
+      const pr2 = size > 120 ? 5 : 3;
+      for (let j = -span; j <= span; j++) {
+        for (let i = -span; i <= span; i++) {
+          const s = this.world.dungeonSite(rx0 + i, ry0 + j);
+          if (!s || !KINDS[s.kind]?.rift) continue;
+          const mx = size / 2 + (s.x - this.player.x / T) / step;
+          const my = size / 2 + (s.y - this.player.y / T) / step;
+          if (mx < pr2 || my < pr2 || mx > size - pr2 || my > size - pr2) continue;
+          ctx.beginPath();
+          ctx.moveTo(mx, my - pr2);
+          ctx.lineTo(mx + pr2, my);
+          ctx.lineTo(mx, my + pr2);
+          ctx.lineTo(mx - pr2, my);
+          ctx.closePath();
+          ctx.fillStyle = riftColor(s.kind);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
     }
     // bosses: a big pulsing red marker, kept on the edge of the map when they are farther away than it reaches
     for (const b of this.bossTargets()) {

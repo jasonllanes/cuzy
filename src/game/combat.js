@@ -114,6 +114,12 @@ const GRENADES = {
   smokegrenade: { kind: 'smoke', fuse: 1.1, R: 50 },
 };
 const STUN_TIME = 3.5;
+// who lives in each realm behind a portal, by tier, and the guardian in the last room
+const RIFT_FOES = {
+  ember: { pool: ['t_orc', 't_armorc', 'hound', 'scarab', 'redcap'], tier2: ['t_eliteorc', 't_werebear'], tier3: ['t_eliteorc', 't_gskel'], boss: 't_eliteorc' },
+  frost: { pool: ['t_skeleton', 't_skarcher', 't_slime', 't_bat'], tier2: ['t_wizard', 't_priest', 't_knight'], tier3: ['t_templar', 't_necro'], boss: 't_templar' },
+  void: { pool: ['t_skeleton', 't_bat', 'eye', 'ghastly'], tier2: ['t_wizard', 't_necro', 't_armskel'], tier3: ['t_gskel', 't_necro'], boss: 't_necro' },
+};
 const SMOKE_TIME = 9;
 const THROW_UNLOCK = 0.35; // once empty, wait until it refills this far
 export const RECALL_TIME = 2.5;
@@ -1245,14 +1251,16 @@ export class Combat {
     };
     const wild = (type) => {
       const pt = pick();
-      if (!pt) return;
+      if (!pt) return null;
       const def = MONSTERS[type];
       const lv = rollMonsterLevel(Math.min(10, tier * 3));
       const hp = Math.round(def.hp * (1 + 0.3 * (tier - 1)) * lvHp(lv));
-      this.wilds.push({
+      const w = {
         lv, id: `w${this.nextId++}`, wild: true, type, x: pt[0], y: pt[1], hp, max: hp, state: 'move', t: 0,
         anim: Math.random() * 3, face: 1, atk: 0, cd: 0.8, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0, phase: Math.random() * 6,
-      });
+      };
+      this.wilds.push(w);
+      return w;
     };
     const n = 2 + tier + Math.floor(room.i / 2);
     if (kind === 'crypt') {
@@ -1262,6 +1270,22 @@ export class Combat {
       const pool = ['jelly', 'redcap', 'hand', 'bat', ...(tier > 1 ? ['hound', 'scarab', 'eye', 'slime'] : []), ...(tier > 2 ? ['grimlock', 'myconid', 'ghoul', 'ghastly'] : [])];
       for (let i = 0; i < n; i++) wild(pool[Math.floor(Math.random() * pool.length)]);
       if (last) wild(['ogre', 'stonetroll', 'ettin'][tier - 1]); // the cave's brute
+    } else if (RIFT_FOES[kind]) {
+      const rf = RIFT_FOES[kind];
+      const pool = [...rf.pool, ...(tier > 1 ? rf.tier2 : []), ...(tier > 2 ? rf.tier3 : [])];
+      for (let i = 0; i < n; i++) wild(pool[Math.floor(Math.random() * pool.length)]);
+      if (last) {
+        // the realm's guardian: big, tough and in no hurry to hit you (the red warning builds slowly)
+        const gd = wild(rf.boss);
+        if (gd) {
+          gd.miniBoss = true;
+          gd.guardian = true;
+          gd.scale = 1.7;
+          gd.hp = gd.max = Math.round(gd.max * 5);
+          gd.dmgMul = 1.3;
+          this.g.announceBoss?.('🌀 THE REALM\'S GUARDIAN', `${MONSTERS[rf.boss].name} guards the best chests in the ${kind} realm`);
+        }
+      }
     } else {
       const pool = ['jelly', 'hand', 'redcap'];
       for (let i = 0; i < n - 1; i++) wild(pool[Math.floor(Math.random() * pool.length)]);
@@ -1758,7 +1782,7 @@ export class Combat {
         // a mini boss is worth the trouble
         this.shareCoins(w.x, w.y, 6 + Math.floor(Math.random() * 6), 3);
         for (const [id, qty] of [['gem', 1], ['gold', 2], ['wood', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
-        this.g.onToast?.(`⚔️ The mini boss ${def.name} is down!`);
+        this.g.onToast?.(w.guardian ? `🌀 The realm's guardian, ${def.name}, is down! Loot the chests.` : `⚔️ The mini boss ${def.name} is down!`);
       }
       if (w.nightBoss) {
         // slain before dawn: a real prize (the coins can be picked up by everyone in the room)

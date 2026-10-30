@@ -53,11 +53,55 @@ function ruin(g, x, y, house) {
   rect(g, '#5b412c', x - 1, y - 32, 3, 30);
 }
 
-export function drawEntrance(g, o, house) {
+const RIFT_COLORS = {
+  ember: ['#ff5a1f', '#ffb236', '#fff1a0', '#4a2020'],
+  frost: ['#6fc4ff', '#c4ecff', '#ffffff', '#4a6a88'],
+  void: ['#9b5cff', '#d3b0ff', '#ffffff', '#2a1a4a'],
+};
+
+// a portal: a stone ring around a swirling hole in the world, in the colours of the realm behind it
+function portal(g, x, y, kind, t) {
+  const [c1, c2, c3, dark] = RIFT_COLORS[kind];
+  rect(g, 'rgba(40,30,40,0.3)', x - 24, y - 2, 48, 4);
+  rect(g, '#6a6e7d', x - 20, y - 50, 8, 50); // the ring
+  rect(g, '#6a6e7d', x + 12, y - 50, 8, 50);
+  rect(g, '#7d8190', x - 20, y - 54, 40, 8);
+  rect(g, '#9a9eae', x - 20, y - 50, 3, 50);
+  rect(g, '#9a9eae', x + 12, y - 50, 3, 50);
+  rect(g, '#a7abbb', x - 22, y - 3, 44, 3); // steps
+  rect(g, c1, x - 3, y - 53, 6, 3); // a gem over the arch
+  rect(g, c3, x - 1, y - 53, 2, 1);
+  rect(g, dark, x - 12, y - 46, 24, 44); // the hole
+  g.save();
+  g.beginPath();
+  g.rect(x - 12, y - 46, 24, 44);
+  g.clip();
+  for (let i = 0; i < 5; i++) {
+    const a = t * (1.6 + i * 0.5) + i * 1.3;
+    g.strokeStyle = i % 2 ? c2 : c1;
+    g.globalAlpha = 0.85 - i * 0.1;
+    g.lineWidth = 3;
+    g.beginPath();
+    g.ellipse(x, y - 24, 11 - i * 2, 21 - i * 4, 0, a, a + 3.6);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  for (let i = 0; i < 7; i++) {
+    const p = (t * 0.6 + i * 0.37) % 1;
+    g.fillStyle = i % 2 ? c3 : c2;
+    g.fillRect(Math.round(x - 9 + ((i * 13) % 18)), Math.round(y - 4 - p * 38), 2, 2);
+  }
+  g.restore();
+}
+
+export function drawEntrance(g, o, house, t = 0) {
   if (o.dkind === 'crypt') crypt(g, o.x, o.y);
   else if (o.dkind === 'cave') cave(g, o.x, o.y);
+  else if (RIFT_COLORS[o.dkind]) portal(g, o.x, o.y, o.dkind, t);
   else ruin(g, o.x, o.y, house);
 }
+
+export const riftColor = (kind) => RIFT_COLORS[kind]?.[0];
 
 // a darkened, cobwebbed copy of the cottage picture, made once
 export function makeRuinHouse(houseImg, sx, sy, sw, sh) {
