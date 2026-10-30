@@ -1,40 +1,43 @@
 import { apocIcon } from './apoc';
 
 // Icons point at files in public/assets. `sheet` sizes are only needed when the icon is a crop of a bigger image.
-// heal: hearts of HP restored when eaten.  energy: fraction (0..1) of the stamina bar restored.
+// heal: share (0..1) of your max HP restored when eaten.  energy: fraction (0..1) of the stamina bar restored.
 const crops = (sx, sy) => ({ file: 'crops', sx, sy, sw: 16, sh: 16, sheetW: 224, sheetH: 128 });
 const single = (file, sw, sh) => ({ file: `items/${file}`, sx: 0, sy: 0, sw, sh, sheetW: sw, sheetH: sh });
 const strip = (file) => ({ file: `items/${file}`, sx: 0, sy: 0, sw: 16, sh: 16, sheetW: 64, sheetH: 16 });
 
 export const ITEMS = {
-  berry: { name: 'Wild Strawberry', desc: 'Sweet, juicy and a little bit sticky.', icon: crops(128, 16), stack: 20, heal: 0.5, energy: 0.2 },
-  leek: { name: 'Spring Leek', desc: 'Crunchy, fresh and very soup-ready.', icon: crops(128, 48), stack: 20, heal: 0.75, energy: 0.1 },
-  tuber: { name: 'Sweet Tuber', desc: 'Dug up from the meadow. Very filling!', icon: crops(128, 80), stack: 20, heal: 1.5 },
+  berry: { name: 'Wild Strawberry', desc: 'Sweet, juicy and a little bit sticky.', icon: crops(128, 16), stack: 20, heal: 0.08, energy: 0.2 },
+  leek: { name: 'Spring Leek', desc: 'Crunchy, fresh and very soup-ready.', icon: crops(128, 48), stack: 20, heal: 0.12, energy: 0.1 },
+  tuber: { name: 'Sweet Tuber', desc: 'Dug up from the meadow. Very filling!', icon: crops(128, 80), stack: 20, heal: 0.25 },
   mushroom_red: { name: 'Red Mushroom', desc: 'A polka-dotted little cap. Pretty, not for snacking.', icon: strip('mushroom_red'), stack: 20 },
   mushroom_blue: { name: 'Glow Cap', desc: 'A blue mushroom that hums softly at night.', icon: strip('mushroom_blue'), stack: 20 },
   acorn: { name: 'Shiny Acorn', desc: 'Polished by many squirrel paws.', icon: single('acron', 10, 9), stack: 30, throw: 1 },
-  honey: { name: 'Jar of Honey', desc: 'Golden and sweet. A spoonful goes a long way.', icon: single('jar_01', 10, 12), stack: 10, heal: 1, energy: 0.3 },
-  jam: { name: 'Berry Jam', desc: "Somebody's grandma made this.", icon: single('jar_02', 10, 13), stack: 10, heal: 1.5 },
-  milk: { name: 'Fresh Milk', desc: 'Still a little bit warm. Smooth and refreshing.', icon: single('milk', 10, 12), stack: 10, heal: 0.5, energy: 0.5 },
-  egg: { name: 'Soft Egg', desc: 'Laid this morning, probably.', icon: single('egg', 10, 11), stack: 10, heal: 1, throw: 1 },
+  honey: { name: 'Jar of Honey', desc: 'Golden and sweet. A spoonful goes a long way.', icon: single('jar_01', 10, 12), stack: 10, heal: 0.17, energy: 0.3 },
+  jam: { name: 'Berry Jam', desc: "Somebody's grandma made this.", icon: single('jar_02', 10, 13), stack: 10, heal: 0.25 },
+  milk: { name: 'Fresh Milk', desc: 'Still a little bit warm. Smooth and refreshing.', icon: single('milk', 10, 12), stack: 10, heal: 0.08, energy: 0.5 },
+  egg: { name: 'Soft Egg', desc: 'Laid this morning, probably.', icon: single('egg', 10, 11), stack: 10, heal: 0.17, throw: 1 },
   coin: { name: 'Lucky Coin', desc: 'Warm to the touch. Always lands on its good side.', icon: single('coin', 8, 7), stack: 9999, throw: 1 },
   gold: { name: 'Gold Nugget', desc: 'Heavier than it looks. Great for throwing.', icon: single('ore_gold', 10, 10), stack: 30, throw: 2 },
   gem: { name: 'Blue Gemstone', desc: 'Twinkles even in the dark. Hits hard when thrown.', icon: single('ore_bluestone', 10, 10), stack: 30, throw: 3 },
   rock: { name: 'Smooth Rock', desc: 'A good, honest throwing rock.', icon: single('rock', 10, 10), stack: 20, throw: 2 },
   mug: { name: 'Cozy Mug', desc: 'Best friend of rainy afternoons. Breaks when thrown!', icon: single('mug_01', 5, 9), stack: 5, throw: 2, fragile: true },
+  wood: { name: 'Wood', desc: 'Logs and sticks from the trees you chop. Swords and other weapons are crafted from it at the shop.', icon: single('wood', 11, 11), stack: 99 },
   wool: { name: 'Ball of Wool', desc: 'Soft enough to nap on.', icon: single('wool', 10, 10), stack: 20 },
   // (the id stays "truffle" so old saves keep working)
   truffle: { name: 'Sticky Grenade', desc: 'Throw it: it sticks to whatever it hits and explodes a few seconds later. A red circle on the ground shows the blast.', icon: single('grenade', 12, 14), stack: 10, throw: 2, bomb: true },
+  stungrenade: { name: 'Stun Grenade', desc: 'Throw it: after a moment it flashes and stuns every monster nearby for a few seconds. A blue circle on the ground shows how far it reaches.', icon: single('grenade_stun', 12, 14), stack: 10, throw: 1, bomb: true },
+  smokegrenade: { name: 'Smoke Grenade', desc: 'Throw it: it puffs out a thick cloud for several seconds. Stand inside and enemies cannot see you (attacking gives you away for a moment).', icon: single('grenade_smoke', 12, 14), stack: 10, throw: 1, bomb: true },
   sword: { name: 'Sword', desc: 'Select this slot, then left-click to swing (hold to charge a dash). Select another slot and left-click does whatever that slot is for.', icon: { file: 'sword', sx: 0, sy: 0, sw: 14, sh: 14, sheetW: 14, sheetH: 14 }, stack: 1, wave: true },
   barricade: { name: 'Barricade Box', desc: 'Select it and left-click where you want the wall (or press Q). Hold left-click to lock it, move the mouse to turn it, release to place. Pick one up again with Space.', icon: single('crate_top', 16, 14), stack: 9, wave: true },
   // Survival (Apocalypse) pickups
-  bandage: { name: 'Bandage', desc: 'Not pretty, but it holds.', icon: apocIcon('icon_bandage'), stack: 10, heal: 1 },
-  canned: { name: 'Canned Food', desc: 'Dented, undated, delicious.', icon: apocIcon('icon_canned'), stack: 10, heal: 1.5, energy: 0.1 },
-  soup: { name: 'Canned Soup', desc: 'Still a little bit warm somehow.', icon: apocIcon('icon_soup'), stack: 10, heal: 1, energy: 0.4 },
-  medkit: { name: 'First Aid Kit', desc: 'The good stuff. Heals a lot.', icon: apocIcon('icon_medkit'), stack: 5, heal: 3.5 },
+  bandage: { name: 'Bandage', desc: 'Not pretty, but it holds.', icon: apocIcon('icon_bandage'), stack: 10, heal: 0.17 },
+  canned: { name: 'Canned Food', desc: 'Dented, undated, delicious.', icon: apocIcon('icon_canned'), stack: 10, heal: 0.25, energy: 0.1 },
+  soup: { name: 'Canned Soup', desc: 'Still a little bit warm somehow.', icon: apocIcon('icon_soup'), stack: 10, heal: 0.17, energy: 0.4 },
+  medkit: { name: 'First Aid Kit', desc: 'The good stuff. Heals a lot.', icon: apocIcon('icon_medkit'), stack: 5, heal: 0.58 },
   // Free Roam supplies: they live in the two quick slots (Z / X), not in the backpack
-  hppack: { name: 'HP Pack', desc: 'Bandages, a tonic and a tiny pillow. Restores 50 HP. Press Z.', icon: apocIcon('icon_medkit'), stack: 9, heal: 3 },
-  soupcan: { name: 'Soup Can', desc: 'A warm can of soup. Restores 60% stamina. Press X.', icon: apocIcon('icon_soup'), stack: 9, energy: 0.6 },
+  hppack: { name: 'HP Pack', desc: 'Bandages, a tonic and a tiny pillow. Restores 90% of your health.', icon: apocIcon('icon_medkit'), stack: 9, heal: 0.9 },
+  soupcan: { name: 'Soup Can', desc: 'A warm can of soup. Restores 60% of your stamina.', icon: apocIcon('icon_soup'), stack: 9, energy: 0.6 },
   seeds: { name: 'Mystery Seeds', desc: 'Who knows what they will grow into?', icon: single('seeds_generic', 11, 10), stack: 50 },
 };
 
@@ -134,3 +137,33 @@ for (const [id, def] of Object.entries(ITEMS)) {
   }
   def.stack = 99;
 }
+
+// Rarity: the colour of the frame around an item, in the backpack, the shop and on the ground.
+export const RARITIES = {
+  common: { name: 'Common', color: '#a79c8c' },
+  uncommon: { name: 'Uncommon', color: '#58b85c' },
+  rare: { name: 'Rare', color: '#3f95f0' },
+  epic: { name: 'Epic', color: '#a366ee' },
+  legendary: { name: 'Legendary', color: '#f0a21e' },
+};
+const RARITY_OF = {
+  tuber: 'uncommon', mushroom_red: 'uncommon', milk: 'uncommon', honey: 'uncommon', jam: 'uncommon', soup: 'uncommon', barricade: 'uncommon', hppack: 'uncommon', soupcan: 'uncommon',
+  mushroom_blue: 'rare', gold: 'rare', truffle: 'rare', stungrenade: 'rare', smokegrenade: 'rare', medkit: 'rare', sword: 'uncommon',
+  gem: 'epic',
+};
+export const rarityOf = (id) => RARITY_OF[id] || 'common';
+// swords, staffs and the rest: the dearer, the rarer
+export const rarityByCost = (cost) => (cost <= 14 ? 'common' : cost <= 28 ? 'uncommon' : cost <= 40 ? 'rare' : cost <= 52 ? 'epic' : 'legendary');
+
+// What a shop pays when you sell something back. Items without a price here can't be sold.
+const SELL = {
+  berry: 1, leek: 1, tuber: 2, mushroom_red: 1, mushroom_blue: 2, acorn: 1, honey: 3, jam: 3, milk: 2, egg: 1, gold: 8, gem: 12,
+  rock: 1, mug: 2, wool: 1, stungrenade: 4, smokegrenade: 3, truffle: 4, barricade: 2, bandage: 2, canned: 2, soup: 2, medkit: 5, seeds: 1,
+};
+export const sellValue = (id) => SELL[id] || 0;
+// Swords, guns and shop supplies go back for half of what they cost
+export const sellPrice = (cost) => Math.max(1, Math.floor(cost / 2));
+
+// How many things the HP ('hp') or Stamina ('stam') slot can use: the pack, plus every food and drink that does the same job
+export const supplyTotal = (kind, supplies = {}, consumables = {}) =>
+  (supplies[kind] || 0) + Object.entries(consumables).reduce((n, [id, q]) => n + (ITEMS[id] && (kind === 'hp' ? ITEMS[id].heal : ITEMS[id].energy) ? q : 0), 0);

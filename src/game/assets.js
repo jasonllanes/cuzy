@@ -1,5 +1,7 @@
 import { MONSTER_SPRITES } from './monsters';
 import { APOC_KEYS } from './apoc';
+import { TINY_IMAGES } from './tiny';
+import { WEAPONS } from './weapons';
 
 const SUNNY_PARTS = ['base', 'shorthair', 'bowlhair', 'spikeyhair', 'mophair', 'longhair', 'curlyhair'];
 
@@ -14,12 +16,15 @@ const NAMES = [
   ...Array.from({ length: 32 }, (_, i) => `retro/c${i + 1}`),
   'adam_idle', 'adam_run', 'alex_idle', 'alex_run',
   'amelia_idle', 'amelia_run', 'bob_idle', 'bob_run',
-  'items/crate_top',
+  'items/crate_top', 'items/wood', 'items/grenade_stun', 'items/grenade_smoke',
+  ...['scout1', 'scout2', 'scout3', 'scout4', 'scout5', 'scout6', 'postman1', 'postman2', 'postman3'].map((n) => `v2/chars/${n}`),
   'interior/farm', 'interior/modern',
   'dev/chars',
   'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/wood', 'guns/pistol', 'guns/shotgun', 'guns/rifle', 'guns/plasma', 'maps/asphalt', 'maps/mountain', 'props/beach_ball',
   ...Array.from({ length: 40 }, (_, i) => `weapons/w${String(i + 1).padStart(2, '0')}`),
   ...MONSTER_SPRITES.map((n) => `monsters/${n}`),
+  ...TINY_IMAGES,
+  ...WEAPONS.filter((w) => w.file).map((w) => `weapons/${w.file}`),
   ...APOC_KEYS.map((k) => `apoc/${k}`),
 ];
 

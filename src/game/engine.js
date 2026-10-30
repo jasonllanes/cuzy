@@ -1,20 +1,22 @@
 import { CHUNK_PX, GRASS, SAND, T, WATER } from './world';
-import { ITEMS, LOOT_APOC, isConsumable, rollLoot, throwStats } from './items';
+import { ITEMS, LOOT_APOC, isConsumable, rollLoot, sellPrice, sellValue, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
 import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
+import { TINY } from './tiny';
 import { BARRICADE_COST, BARRICADE_RECT, REPAIR_COST, WaveMirror, WaveSim } from './waves';
 import { ALLIES } from './allies';
 import { Bots } from './bots';
+import { AiPlayers } from './aiPlayers';
 import { Streaks } from './streaks';
 import { sfx } from './sfx';
 import { TEAMS } from './teams';
 import { store } from './store';
-import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, emptyUpgrades, upgradeCost } from './upgrades';
+import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, WOOD_SHOP, emptyUpgrades, upgradeCost } from './upgrades';
 
 // how far above the feet a hero's name tag floats; the villager is shorter than the others
-const tagHeight = (hero) => (hero.kind === 'retro' ? 26 : hero.kind === 'dev' ? 30 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
+const tagHeight = (hero) => (hero.kind === 'v2' ? 36 : hero.kind === 'retro' ? 26 : hero.kind === 'dev' ? 30 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
 
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
@@ -43,10 +45,13 @@ const SPEED = 62;
 const SPRINT_MULT = 1.75;
 const RESPAWN_TIME = 5; // seconds spent downed
 export const GRENADE_COST = 8;
+const CONSUME_CAP = 99; // the most of one kind of food or drink you can carry
 export const HEAL_CD = 6; // seconds between healing items
 export const STAM_CD = 5; // seconds between stamina items
 const WADE_SLOWDOWN = 0.4; // speed multiplier while paddling through water
 const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const V2_FOOD = ['berry', 'honey', 'jam', 'milk', 'egg', 'bandage', 'canned', 'soup'];
+const V2_OPEN_TEXT = { atm: 'Cha-ching! The ATM spits out cash.', food: 'Clunk! The machine drops some snacks.', mail: 'You open the mailbox: something was in it.', junk: 'You dig through the bin and find something.', grave: 'The lid creaks open and something glints inside.', supply: 'You pry it open and the supplies spill out!' };
 const HOURS_PER_SECOND = 24 / 360; // a full day lasts six real minutes
 const MIN_ZOOM_OFFSET = -2;
 const MAX_ZOOM_OFFSET = 3;
@@ -89,10 +94,11 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll }) {
+  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onLevelUp }) {
     this.canvas = canvas;
     this.onStorage = onStorage;
     this.onOpenStorage = onOpenStorage;
+    this.onLevelUp = onLevelUp;
     this.ctx = canvas.getContext('2d');
     this.world = world;
     this.img = world.frost ? frostImages(assets.img) : assets.img; // the frozen map gets snowy sprites
@@ -131,6 +137,8 @@ export class Game {
     this.weather = { kind: 'clear', k: 1, cloud: 0.3, rain: 0, snow: 0 };
     this.weatherForce = null; // set by the -weather cheat
     this.level = 1; // character level
+    this.xpOrbs = []; // XP on its way to you after a kill
+    this.target = null; // the enemy you last hit
     this.xp = 0;
     this.touchMode = false; // mobile controls: the screen is not a mouse
     this.aimOverride = null; // a touch aim: an angle, or 'auto' for the nearest enemy
@@ -150,6 +158,8 @@ export class Game {
     this.theme = world.apoc ? 'apoc' : 'cozy';
     this.wave = (mode === 'waves' || mode === 'survival') && !demo ? (isHost ? new WaveSim(this, difficulty) : new WaveMirror(this, difficulty)) : null;
     this.hostId = session?.host ?? null;
+    this.difficultyId = difficulty;
+    this.aiSim = null; // in a fight room the host's game plays the room's computer players
     // in Free Roam rooms every player slot has its own house in a tight cluster
     this.roomHomes = this.mp && mode === 'free' ? world.homeCluster(Math.max(session.room.max || 4, 2), hashString(session.room.code)) : null;
     this.faces = new Map();
@@ -212,8 +222,12 @@ export class Game {
     this.inventory = sanitize(saved?.inventory);
     // coins live in a purse, not in the backpack (older saves had them as items: move them over)
     this.coins = Math.max(0, Math.floor(Number(saved?.coins) || 0));
+    this.wood = Math.max(0, Math.floor(Number(saved?.wood) || 0)); // wood for crafting weapons, in a purse like the coins
     if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
-    for (const k of saved?.felled || []) this.world.felled.add(String(k)); // trees you cut down stay down
+    for (const k of saved?.felled || []) {
+      this.world.felled.add(String(k)); // trees you cut down stay down... for a while
+      this.world.regrow.set(String(k), 30 + Math.random() * 240);
+    }
     if (saved?.felled?.length) this.world.chunks.clear();
     for (let i = 0; i < this.inventory.length; i++) {
       if (this.inventory[i]?.id === 'coin') {
@@ -248,8 +262,15 @@ export class Game {
       hp: Math.min(SUPPLY_CAP, saved?.supplies?.hp || 0),
       stam: Math.min(SUPPLY_CAP, saved?.supplies?.stam || 0),
     };
+    // food, drink and medicine live in the two quick slots' lists (HP and Stamina), not in the backpack: that holds the throwables
+    this.consumables = {};
+    for (const [id, q] of Object.entries(saved?.consumables || {})) {
+      if (ITEMS[id] && isConsumable(ITEMS[id]) && q > 0) this.consumables[id] = Math.min(CONSUME_CAP, Math.floor(q));
+    }
+    this.absorbConsumables(); // (older saves kept them in the backpack)
     // skills are bought once in the shop; Dash and Spiral are the two hold-to-charge sword skills, one equipped at a time
     this.skills = { shield: false, invis: false, dash: false, spiral: false, equipped: 'dash', equippedUtil: null, ...saved?.skills };
+    this.syncSkills();
     this.combat?.refreshMaxHp(true);
     this.treasures = saved?.treasures || 0;
     this.foraged = saved?.foraged || 0;
@@ -270,19 +291,21 @@ export class Game {
         this.zoomBy(1);
       } else if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
         this.zoomBy(-1);
-      } else if (e.code === 'Space') {
+      } else if (e.code === (this.wave ? 'Space' : 'KeyF')) {
+        // pick up, open and enter: Space in the wave modes, F in Free Roam (where Space is the dash)
         e.preventDefault();
         if (!e.repeat) {
           this.spaceDown = true;
           if (this.mount) this.dismount();
           else this.interactPressed = true;
         }
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        if (!e.repeat && !this.dead) this.combat?.skillKeyDown();
       } else if (this.dead) {
         // downed heroes just wait for the respawn
       } else if (e.code === 'KeyF' && !e.repeat) {
         this.combat?.activateShield();
-      } else if (e.code === 'KeyC' && !e.repeat) {
-        this.combat?.activateInvis();
       } else if (e.code === 'KeyQ' && !e.repeat && this.wave) {
         this.rotateWall(-1); // counter-clockwise
       } else if (e.code === 'KeyE' && !e.repeat && this.wave && this.inventory[this.selectedSlot]?.id === 'barricade') {
@@ -290,17 +313,19 @@ export class Game {
       } else if (e.code === 'KeyH' && !e.repeat) {
         this.combat?.startRecall();
       } else if (e.code === 'KeyR' && !e.repeat) {
-        this.combat?.cycleGun();
+        if (this.wave) this.combat?.cycleGun();
+        else this.combat?.activateUtil(); // Free Roam: your Shield or Invisibility
       }
     };
     this.onKeyUp = (e) => {
       if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault();
       if (CONTROL_KEYS[e.code]) this.keys.delete(CONTROL_KEYS[e.code]);
-      if (e.code === 'Space') {
+      if (e.code === (this.wave ? 'Space' : 'KeyF')) {
         this.spaceDown = false;
         this.spaceLock = false;
         this.spaceHold = 0;
       }
+      if (e.code === 'Space' && !this.wave) this.combat?.skillKeyUp();
     };
     this.onBlur = () => {
       this.spaceDown = false;
@@ -407,7 +432,7 @@ export class Game {
         JSON.stringify({
           x: this.inside ? this.inside.out.x : this.dungeon ? this.dungeon.out.x : this.player.x,
           y: this.inside ? this.inside.out.y : this.dungeon ? this.dungeon.out.y : this.player.y,
-          inside: !!this.inside,
+          inside: !!this.inside && !this.inside.b,
           level: this.level,
           xp: this.xp,
           weapons: this.weapons,
@@ -420,10 +445,12 @@ export class Game {
           day: this.day,
           inventory: this.inventory,
           coins: this.coins,
+          wood: this.wood,
           felled: [...this.world.felled].slice(-4000),
           kills: this.combat?.kills || 0,
           upgrades: this.upgrades,
           supplies: this.supplies,
+          consumables: this.consumables,
           skills: this.skills,
           home: this.home,
         }),
@@ -480,6 +507,7 @@ export class Game {
     this.collected.clear();
     this.inventory = emptyInventory();
     this.coins = 0;
+    this.wood = 0;
     this.emitInventory();
     this.treasures = 0;
     this.foraged = 0;
@@ -491,8 +519,10 @@ export class Game {
     this.storage = Array(STORAGE_SLOTS).fill(null);
     this.emitStorage();
     this.supplies = { hp: 0, stam: 0 };
+    this.consumables = {};
     this.skills = { shield: false, invis: false, dash: false, spiral: false, equipped: 'dash', equippedUtil: null };
     this.world.felled.clear(); // the trees you cut down grow back
+    this.world.regrow.clear();
     this.world.treeHp.clear();
     this.world.chunks.clear();
     this.stamina = 1;
@@ -681,20 +711,192 @@ export class Game {
       this.combat.hp = this.combat.maxHp;
       sfx.play('levelup');
       this.combat.floaters.push({ x: this.player.x, y: this.player.y - 56, text: `LEVEL ${this.level}!`, color: '#ffd24a', t: 0 });
+      this.levelUpFx(this.syncSkills(true));
       this.onToast?.(`⭐ Level ${this.level}! Max HP is now ${hp100(this.combat.maxHp)}, and you are fully healed.`);
       this.save();
     }
   }
 
+  // Skills come with the character level (Dash 6, Spiral 8, Shield 10, Invisibility 15). `relock` also takes back the ones above your level.
+  syncSkills(announce = false, relock = false) {
+    const unlocked = [];
+    if (this.wave) return unlocked;
+    for (const s of SKILL_SHOP) {
+      if (this.level >= s.level && !this.skills[s.id]) {
+        this.skills[s.id] = true;
+        const slot = s.sword ? 'equipped' : 'equippedUtil';
+        const other = SKILL_SHOP.some((o) => o !== s && o.group === s.group && this.skills[o.id]);
+        if (!other || !this.skills[this.skills[slot]]) this.skills[slot] = s.id; // the first of its kind is equipped for you; later ones are yours to choose
+        unlocked.push(s);
+        if (announce && !this.onLevelUp) this.onToast?.(`${s.icon} You've unlocked ${s.name}! Open the shop (B) to equip it and upgrade it.`);
+      } else if (relock && this.level < s.level && this.skills[s.id]) {
+        this.skills[s.id] = false;
+        if (this.skills.equipped === s.id) this.skills.equipped = null;
+        if (this.skills.equippedUtil === s.id) this.skills.equippedUtil = null;
+      }
+    }
+    return unlocked;
+  }
+
+  // the celebration for gaining a level: a pillar of light and rings around you, and a card for each skill that just unlocked
+  levelUpFx(unlocked = []) {
+    this.levelFx = { t: 0 };
+    this.onLevelUp?.({ level: this.level, unlocked: unlocked.map((s) => ({ id: s.id, icon: s.icon, name: s.name, desc: s.desc, level: s.level, group: s.group })) });
+  }
+
+  drawLevelFx(ctx) {
+    const f = this.levelFx;
+    const t = f.t;
+    const x = Math.round(this.player.x);
+    const y = Math.round(this.player.y);
+    const a = Math.max(0, 1 - t / 1.8);
+    ctx.save();
+    // a column of light that thins out as it rises
+    const g = ctx.createLinearGradient(0, y, 0, y - 80);
+    g.addColorStop(0, `rgba(255,226,120,${0.55 * a})`);
+    g.addColorStop(1, 'rgba(255,226,120,0)');
+    ctx.fillStyle = g;
+    const half = 11 * Math.max(0.2, 1 - t / 1.8);
+    ctx.fillRect(x - half, y - 80, half * 2, 80);
+    // rings spreading over the ground
+    for (const delay of [0, 0.22, 0.44]) {
+      const p = (t - delay) / 0.9;
+      if (p <= 0 || p >= 1) continue;
+      const r = 6 + p * 38;
+      ctx.strokeStyle = `rgba(255,214,90,${(1 - p) * 0.9})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(x, y - 2, r, r * 0.45, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // sparkles drifting up
+    for (let i = 0; i < 18; i++) {
+      const rise = (t * 46 + i * 11) % 64;
+      const px = x + Math.cos(i * 2.4) * (5 + (i % 5) * 4);
+      const py = y - 4 - rise;
+      const fade = a * (1 - rise / 64);
+      ctx.fillStyle = i % 3 === 0 ? `rgba(255,255,255,${fade})` : `rgba(255,214,90,${fade})`;
+      ctx.fillRect(Math.round(px), Math.round(py), i % 4 === 0 ? 2 : 1, i % 4 === 0 ? 2 : 1);
+    }
+    ctx.restore();
+  }
+
   setLevel(n) {
+    const before = this.level;
     this.level = Math.max(1, Math.min(MAX_CHAR_LEVEL, Math.round(n)));
     this.xp = 0;
+    const unlocked = this.syncSkills(true, true);
+    if (this.level > before) this.levelUpFx(unlocked);
     this.combat.refreshMaxHp(true);
     this.save();
   }
 
-  monsterKill(name, xp = XP.wave, boss = false) {
-    this.addXp(xp);
+  // the key that picks things up and opens doors: Space in the wave modes, F in Free Roam
+  actKey() {
+    return this.wave ? 'Space' : 'F';
+  }
+
+  // the enemy you are hitting, for the card at the top of the screen
+  setTarget(ref, kind) {
+    this.target = { ref, kind, at: this.t };
+  }
+
+  targetHud() {
+    const tg = this.target;
+    if (!tg) return null;
+    const m = tg.ref;
+    const dead = m.state === 'dead';
+    const life = dead ? 1.8 : 4.5;
+    const age = this.t - tg.at;
+    if (age > life) {
+      this.target = null;
+      return null;
+    }
+    const skel = tg.kind === 'skel';
+    const def = skel ? null : MONSTERS[m.type];
+    const lv = m.lv || 1;
+    return {
+      type: skel ? 'bones' : m.type,
+      name: skel ? (m.elite ? 'Skeleton Captain' : 'Skeleton') : def.name,
+      lv,
+      color: MONSTER_RARITY[Math.min(10, lv)].color,
+      rarity: MONSTER_RARITY[Math.min(10, lv)].name,
+      hp: Math.max(0, m.hp),
+      max: skel ? (m.elite ? m.max || 3 : 3) : m.max,
+      boss: !!(def?.boss || m.nightBoss || m.miniBoss),
+      fading: age > life - 0.7,
+    };
+  }
+
+  // XP flies out of whatever you defeated as glowing orbs, then is pulled to you; you get it as each orb arrives
+  xpBurst(x, y, xp) {
+    const n = Math.max(2, Math.min(9, Math.round(xp / 8)));
+    const share = Math.floor(xp / n);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 30 + Math.random() * 60;
+      this.xpOrbs.push({ x, y: y - 6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.7 - 20, xp: share + (i === 0 ? xp - share * n : 0), age: 0, r: 2 + Math.random() * 1.2 });
+    }
+  }
+
+  updateXpOrbs(dt) {
+    const p = this.player;
+    let got = 0;
+    this.xpOrbs = this.xpOrbs.filter((o) => {
+      o.age += dt;
+      if (o.age < 0.4) {
+        o.x += o.vx * dt;
+        o.y += o.vy * dt;
+        o.vx *= 0.92;
+        o.vy *= 0.92;
+        return true;
+      }
+      const dx = p.x - o.x;
+      const dy = p.y - 8 - o.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const speed = 80 + (o.age - 0.4) * 340;
+      const step = Math.min(d, speed * dt);
+      o.x += (dx / d) * step;
+      o.y += (dy / d) * step;
+      if (d < 7 || o.age > 7) {
+        got += o.xp;
+        return false;
+      }
+      return true;
+    });
+    if (got > 0) {
+      this.addXp(got, true);
+      const g = (this.xpGain ||= { n: 0, t: 0 });
+      g.n += got;
+      g.t = 0;
+      sfx.play('pickup', 0.35);
+    }
+    if (this.xpGain && (this.xpGain.t += dt) > 0.5) {
+      this.combat.floaters.push({ x: p.x, y: p.y - 44, text: `+${Math.round(this.xpGain.n)} XP`, color: '#b38cff', t: 0 });
+      this.xpGain = null;
+    }
+  }
+
+  drawXpOrbs(ctx) {
+    for (const o of this.xpOrbs) {
+      const x = Math.round(o.x);
+      const y = Math.round(o.y);
+      ctx.fillStyle = 'rgba(179,140,255,0.28)';
+      ctx.beginPath();
+      ctx.arc(x, y, o.r + 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#c9a8ff';
+      ctx.beginPath();
+      ctx.arc(x, y, o.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x - 1, y - 1, 1, 1);
+    }
+  }
+
+  monsterKill(name, xp = XP.wave, boss = false, at = null) {
+    if (at && !this.demo) this.xpBurst(at.x, at.y, xp);
+    else this.addXp(xp);
     this.monsterKills++;
     if (this.winBy === 'monsters') {
       if (this.mp) this.mp.net.send({ t: 'mkill' });
@@ -773,7 +975,7 @@ export class Game {
         this.spaceHold = 0;
         this.interactPressed = false;
         sfx.play('pickup');
-        this.onToast?.(`You hopped on the ${this.mount.type}! Tap Space to hop off.`);
+        this.onToast?.(`You hopped on the ${this.mount.type}! Tap ${this.actKey()} to hop off.`);
       }
     } else if (!this.spaceDown) {
       this.spaceHold = 0;
@@ -786,7 +988,7 @@ export class Game {
     if (!a || this.mount || this.dead) return;
     const [sx, sy] = this.toScreen(a.x, a.y - (a.type === 'cow' ? 34 : 22), camX, camY);
     const pct = Math.min(1, this.spaceHold / 0.6);
-    this.pill(`Hold Space · ride the ${a.type}`, sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
+    this.pill(`Hold ${this.actKey()} · ride the ${a.type}`, sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
     if (pct > 0) {
       const { ctx, zoom } = this;
       const w = zoom * 26;
@@ -941,7 +1143,7 @@ export class Game {
       this.stamina = 1;
     } else if (ev.type === 'mdie') {
       c.kills++;
-      this.monsterKill(ev.name || 'Monster', Math.round(XP.wave * lvXp(ev.lv || 1)) + (ev.boss ? 80 : 0), !!ev.boss);
+      this.monsterKill(ev.name || 'Monster', Math.round(XP.wave * lvXp(ev.lv || 1)) + (ev.boss ? 80 : 0), !!ev.boss, ev.x != null ? { x: ev.x, y: ev.y } : null);
       sfx.play('monsterDie', 0.6);
       if (ev.power) c.drops.push({ x: ev.x, y: ev.y, id: 'power', pw: ev.power, age: 0, net: `pw${ev.pid}` });
       for (const l of ev.loot) {
@@ -1113,6 +1315,16 @@ export class Game {
     this.coins = Math.min(9999999, this.coins + Math.floor(n));
   }
 
+  giveWood(n) {
+    if (n > 0) this.wood = Math.min(999999, this.wood + Math.floor(n));
+  }
+
+  spendWood(n) {
+    if (this.wood < n) return false;
+    this.wood -= n;
+    return true;
+  }
+
   // Drop some coins on the ground for anyone to pick up (coins can be dropped, but never thrown)
   dropCoins(n, grace = 2) {
     n = Math.min(Math.floor(n), this.coins);
@@ -1123,7 +1335,7 @@ export class Game {
       const qty = Math.floor(n / pieces) + (k < n % pieces ? 1 : 0);
       const lid = `${this.mp?.you ?? 'me'}-${Date.now().toString(36)}${k}`;
       const a = Math.random() * Math.PI * 2;
-      const drop = { x: this.player.x, y: this.player.y - 4, z: 8, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, vz: 110, fly: true, burst: true, id: 'coin', qty, age: 0, net: lid, nopick: grace };
+      const drop = { x: this.player.x, y: this.player.y - 4, z: 8, vx: Math.cos(a) * 30, vy: Math.sin(a) * 18, vz: 110, fly: true, burst: true, manual: true, id: 'coin', qty, age: 0, net: lid, nopick: grace };
       this.combat.drops.push(drop);
       this.mp?.net.send({ t: 'fx', kind: 'loot', lid, x: drop.x, y: drop.y, qty });
     }
@@ -1191,7 +1403,8 @@ export class Game {
   }
 
   // Z / X: the two quick slots
-  useSupply(kind) {
+  // (`packOnly`: the list asked for the pack itself, so no falling back to the other food)
+  useSupply(kind, packOnly = false) {
     if (this.dead || (this.wave && !this.world.apoc)) return;
     const c = this.combat;
     const item = kind === 'hp' ? ITEMS.hppack : ITEMS.soupcan;
@@ -1200,6 +1413,11 @@ export class Game {
       return;
     }
     if (this.supplies[kind] <= 0) {
+      // out of packs: the Z / X key uses some other food or drink instead
+      if (!packOnly && this.consumableList(kind).length) {
+        this.eatBest(kind);
+        return;
+      }
       this.onToast?.(`No ${item.name}s left. Find them in fights, or buy some in the shop (U).`);
       return;
     }
@@ -1215,7 +1433,7 @@ export class Game {
     this.cds[kind] = kind === 'hp' ? HEAL_CD : STAM_CD;
     sfx.play(kind === 'hp' ? 'heal' : 'drink');
     if (kind === 'hp') {
-      const healed = Math.min(c.maxHp - c.hp, item.heal);
+      const healed = Math.min(c.maxHp - c.hp, item.heal * c.maxHp);
       c.hp += healed;
       c.floaters.push({ x: this.player.x, y: this.player.y - 34, text: `+${hp100(healed)}`, color: '#ff5d7a', t: 0 });
     } else {
@@ -1261,15 +1479,11 @@ export class Game {
       if (!pay(info.cost, info.name)) return;
       this.supplies[id]++;
       sfx.play('buy');
-    } else if (kind === 'skill') {
-      const info = SKILL_SHOP.find((s) => s.id === id);
-      if (this.skills[id]) return;
-      if (!pay(info.cost, info.name)) return;
-      this.skills[id] = true;
-      // a newly bought skill is equipped straight away (one sword skill and one utility skill at a time)
-      this.skills[info.sword ? 'equipped' : 'equippedUtil'] = id;
-      sfx.play('levelup');
-      this.onToast?.(`${info.icon} ${info.name} unlocked and equipped!`);
+    } else if (kind === 'wood') {
+      const pack = WOOD_SHOP.find((w) => w.qty === id);
+      if (!pack || !pay(pack.cost, `${pack.qty} wood`)) return;
+      this.giveWood(pack.qty);
+      sfx.play('buy');
     } else if (kind === 'equip') {
       const info = SKILL_SHOP.find((s) => s.id === id);
       if (!this.skills[id]) return;
@@ -1278,7 +1492,14 @@ export class Game {
     } else if (kind === 'weapon') {
       const info = WEAPONS.find((w) => w.id === id);
       if (!info || this.weapons.owned[id]) return;
+      const wood = info.wood || 0;
+      if (wood && this.wood < wood) {
+        sfx.play('nope');
+        this.onToast?.(`${info.name} needs 🪵 ${wood} wood. You have ${this.wood}: chop trees or buy some.`);
+        return;
+      }
       if (!pay(info.cost, info.name)) return;
+      if (wood) this.spendWood(wood);
       this.weapons.owned[id] = true;
       this.weapons.equipped = id;
       sfx.play('levelup');
@@ -1311,7 +1532,7 @@ export class Game {
   // where every boss is right now, so the map and the arrow can point to them
   bossTargets() {
     const out = [];
-    for (const w of this.combat?.wilds || []) if (w.nightBoss && w.state !== 'dead') out.push({ x: w.x, y: w.y, name: MONSTERS[w.type].name, burning: !!w.burning });
+    for (const w of this.combat?.wilds || []) if ((w.nightBoss || w.miniBoss) && w.state !== 'dead') out.push({ x: w.x, y: w.y, name: MONSTERS[w.type].name, burning: !!w.burning, mini: !!w.miniBoss });
     for (const m of this.wave?.monsters || []) if (MONSTERS[m.type]?.boss && m.state !== 'dead') out.push({ x: m.x, y: m.y, name: MONSTERS[m.type].name });
     return out;
   }
@@ -1410,6 +1631,77 @@ export class Game {
     this.weapons.equipped = id;
     sfx.play('levelup');
     this.onToast?.(`⚔️ ${info.name} bought and equipped!`);
+  }
+
+  // Sell something back for coins: a sword or a gun you own, a backpack slot (one, or the whole stack), or a shop supply
+  sell(kind, id, all = false) {
+    if (this.dead) return;
+    const c = this.combat;
+    const paid = (n, what) => {
+      this.giveCoins(n);
+      sfx.play('coin');
+      this.onToast?.(`💰 Sold ${what} for ${n} coin${n > 1 ? 's' : ''}.`);
+      this.emitHud();
+      this.save();
+    };
+    if (kind === 'weapon') {
+      const w = WEAPONS.find((x) => x.id === id);
+      if (!w || w.id === 'trusty' || !this.weapons.owned[id]) return;
+      delete this.weapons.owned[id];
+      if (this.weapons.equipped === id) this.weapons.equipped = 'trusty';
+      if (!this.wave) this.giveWood(Math.floor((w.wood || 0) / 2)); // half the wood comes back too
+      paid(sellPrice(w.cost), w.name);
+    } else if (kind === 'wood') {
+      const n = all ? this.wood : Math.min(1, this.wood);
+      if (n < 1) return;
+      this.wood -= n;
+      paid(n, `${n} wood`);
+    } else if (kind === 'gun') {
+      const g = GUNS[id];
+      if (!g || id === 'pistol' || !c.owned[id]) return;
+      c.owned[id] = false;
+      if (c.gun === id) c.equipGun('pistol');
+      paid(sellPrice(g.price), g.name);
+    } else if (kind === 'item') {
+      const slot = this.inventory[id];
+      const value = slot ? sellValue(slot.id) : 0;
+      if (!slot || !value) return;
+      const n = all ? slot.qty : 1;
+      const name = ITEMS[slot.id].name;
+      removeFromSlot(this.inventory, id, n);
+      this.emitInventory();
+      paid(value * n, n > 1 ? `${n} × ${name}` : name);
+    } else if (kind === 'consumable') {
+      const have = this.consumables[id] || 0;
+      const value = sellValue(id);
+      if (!have || !value) return;
+      const n = all ? have : 1;
+      for (let k = 0; k < n; k++) this.takeConsumable(id);
+      paid(value * n, n > 1 ? `${n} × ${ITEMS[id].name}` : ITEMS[id].name);
+    } else if (kind === 'supply') {
+      const info = SUPPLY_SHOP.find((s) => s.id === id);
+      const have = this.supplies[id] || 0;
+      if (!info || have < 1) return;
+      const n = all ? have : 1;
+      this.supplies[id] = have - n;
+      paid(sellPrice(info.cost) * n, n > 1 ? `${n} × ${info.name}` : info.name);
+    }
+  }
+
+  countItem(id) {
+    return this.inventory.reduce((n, s) => n + (s && s.id === id ? s.qty : 0), 0);
+  }
+
+  takeItem(id, qty) {
+    let need = qty;
+    for (let i = 0; i < this.inventory.length && need > 0; i++) {
+      const s = this.inventory[i];
+      if (!s || s.id !== id) continue;
+      const n = Math.min(need, s.qty);
+      removeFromSlot(this.inventory, i, n);
+      need -= n;
+    }
+    this.emitInventory();
   }
 
   // Buy a Sticky Grenade
@@ -1617,14 +1909,14 @@ export class Game {
 
   // the level number over a wave monster, in its rarity colour; a legendary also glows gold underfoot
   drawLevelTag(ctx, m, x, y, top) {
-    if (MONSTERS[m.type]?.boss || m.nightBoss) {
+    if (MONSTERS[m.type]?.boss || m.nightBoss || m.miniBoss) {
       ctx.save();
       ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'center';
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(30,20,30,0.9)';
       ctx.fillStyle = '#ff4d4d';
-      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : '☠ BOSS ☠';
+      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : m.miniBoss ? '⚔ MINI BOSS ⚔' : '☠ BOSS ☠';
       ctx.strokeText(label, x, top);
       ctx.fillText(label, x, top);
       ctx.restore();
@@ -1655,7 +1947,7 @@ export class Game {
   drawBossSkill(ctx, m, def) {
     const sk = m.skill;
     if (!sk || m.state === 'dead') return;
-    const sc = def.scale || 1;
+    const sc = m.scale || def.scale || 1;
     const x = m.x;
     const y = m.y - 2;
     ctx.save();
@@ -1722,7 +2014,7 @@ export class Game {
   // The slash when a boss attacks: a wide crescent across the way it is facing
   drawBossSlash(ctx, m, def) {
     if (!(m.atk > 0) || m.state === 'dead') return;
-    const sc = def.scale || 1;
+    const sc = m.scale || def.scale || 1;
     const p = 1 - Math.min(1, m.atk / 0.3);
     const face = def.apoc ? [Math.PI / 2, -Math.PI / 2, 0, Math.PI][m.dirv ?? 0] : m.face < 0 ? Math.PI : 0;
     const sweep = face - 1.1 + p * 2.2;
@@ -1745,16 +2037,136 @@ export class Game {
 
   drawMonster(ctx, m) {
     const def = MONSTERS[m.type];
-    const boss = def.boss || m.nightBoss;
-    if (boss) this.drawBossSkill(ctx, m, def);
+    const boss = def.boss || m.nightBoss || m.miniBoss;
+    if (boss || m.skill) this.drawBossSkill(ctx, m, def); // a charge or a spin shows its red warning first
     this.drawMonsterBody(ctx, m);
+    if (m.stunT > 0 && m.state !== 'dead') this.combat.drawStun(ctx, m.x, m.y - 24 * (m.scale || def.scale || 1), m.stunColor);
     if (boss) this.drawBossSlash(ctx, m, def);
+  }
+
+  // The Tiny RPG monsters: a full animation set, chosen by what it is doing right now
+  drawTiny(ctx, m, def) {
+    const info = TINY.chars[def.tiny];
+    const sheet = this.img[`tiny/${def.tiny}`];
+    const sc = (m.scale || def.scale || 1) * lvSize(m.lv || 1);
+    const flyer = def.kind === 'fly';
+    const hover = flyer ? 7 + Math.sin(m.anim * 4) * 1.5 : 0;
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    const dead = m.state === 'dead';
+    if (Math.hypot(m.x - (m.lx ?? m.x), m.y - (m.ly ?? m.y)) > 0.03) m.mvT = this.t;
+    m.lx = m.x;
+    m.ly = m.y;
+    let row = 'idle';
+    let f = Math.floor(m.anim * 6);
+    if (dead) {
+      row = 'death';
+      f = Math.floor((m.t / 0.6) * info.death[1]);
+    } else if (m.state === 'hurt') {
+      row = 'hurt';
+      f = Math.floor((m.t / 0.25) * info.hurt[1]);
+    } else if (m.swing) {
+      row = info[m.swing.anim] ? m.swing.anim : 'atk1';
+      f = Math.floor((m.swing.t / m.swing.dur) * info[row][1]);
+    } else if (m.skill?.phase === 1) {
+      row = 'walk';
+      f = Math.floor(m.anim * 16);
+    } else if (this.t - (m.mvT ?? -9) < 0.2) {
+      row = 'walk';
+      f = Math.floor(m.anim * 10);
+    }
+    const [r, n] = info[row] || info.idle;
+    f = dead || row === 'hurt' || m.swing ? Math.min(n - 1, f) : f % n;
+    const boss = m.nightBoss || m.miniBoss;
+
+    ctx.fillStyle = 'rgba(60,40,30,0.22)';
+    ctx.fillRect(x - info.w * 0.4 * sc, y - 1, info.w * 0.8 * sc, 2 + sc);
+    if (m.swing?.warn && !m.swing.did && !dead) this.drawSwingWarning(ctx, m, x, y - 6 - hover);
+    if (boss && !dead) {
+      ctx.fillStyle = m.miniBoss ? `rgba(255,170,40,${0.25 + 0.2 * Math.sin(m.anim * 5)})` : `rgba(255,40,40,${0.25 + 0.2 * Math.sin(m.anim * 5)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 11 * sc, 4 * sc, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.save();
+    if (boss && !dead) {
+      ctx.shadowColor = m.burning ? 'rgba(255,150,40,0.95)' : m.miniBoss ? 'rgba(255,190,60,0.95)' : 'rgba(255,30,30,0.95)';
+      ctx.shadowBlur = 9;
+    }
+    ctx.translate(x + (m.atk > 0 ? m.face * 2 : 0), Math.round(y - hover));
+    if (m.face < 0) ctx.scale(-1, 1);
+    if (dead && m.t > 0.55) ctx.globalAlpha = Math.max(0, 1 - (m.t - 0.55) / 0.3);
+    ctx.drawImage(sheet, f * 100, r * 100, 100, 100, -info.cx * sc, -info.foot * sc, 100 * sc, 100 * sc);
+    if (m.state === 'hurt') {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(sheet, f * 100, r * 100, 100, 100, -info.cx * sc, -info.foot * sc, 100 * sc, 100 * sc);
+    }
+    ctx.restore();
+    if (m.swing?.block && !dead) {
+      ctx.strokeStyle = 'rgba(150,200,255,0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x, y - hover - info.h * 0.5 * sc, info.h * 0.6 * sc, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (m.burning && !dead) {
+      for (let i = 0; i < 6; i++) {
+        const ph = (this.t * 3 + i * 0.37) % 1;
+        ctx.fillStyle = ph < 0.5 ? '#ffb02e' : '#ff5a1f';
+        ctx.fillRect(Math.round(x + (i - 2.5) * 3 * sc), Math.round(y - hover - 4 * sc - ph * 14 * sc), 2, 3);
+      }
+    }
+    const top = y - hover - info.h * sc;
+    if (!dead && (m.hp < m.max || m.wild)) {
+      const w = Math.max(12, info.w * sc * 0.8);
+      ctx.fillStyle = 'rgba(60,40,30,0.75)';
+      ctx.fillRect(x - w / 2 - 1, top - 5, w + 2, 4);
+      ctx.fillStyle = '#ff7a8f';
+      ctx.fillRect(x - w / 2, top - 4, Math.max(1, Math.round(w * (m.hp / m.max))), 2);
+    }
+    if (!dead && m.lv) this.drawLevelTag(ctx, m, x, y, top - (m.hp < m.max || m.wild ? 9 : 5));
+  }
+
+  // The red warning of a blow that is about to land: a fan where the swing will reach, or the line an arrow will take
+  drawSwingWarning(ctx, m, x, y) {
+    const s = m.swing;
+    const p = Math.min(1, s.t / (s.at * s.dur));
+    ctx.save();
+    if (s.warn === 'fan') {
+      const a0 = m.face < 0 ? Math.PI : 0;
+      ctx.fillStyle = `rgba(255,50,50,${0.1 + 0.28 * p})`;
+      ctx.strokeStyle = `rgba(255,80,70,${0.4 + 0.5 * p})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, s.reach, a0 - 1.15, a0 + 1.15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (s.warn === 'line') {
+      const pl = this.player;
+      const a = Math.atan2(pl.y - 8 - y, pl.x - x);
+      const len = Math.min(s.range || 100, 130);
+      ctx.strokeStyle = `rgba(255,70,60,${0.25 + 0.5 * p})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawMonsterBody(ctx, m) {
     const def = MONSTERS[m.type];
     if (def.apoc) {
       this.drawZombie(ctx, m, def);
+      return;
+    }
+    if (def.tiny) {
+      this.drawTiny(ctx, m, def);
       return;
     }
     const sc = (def.scale || 1) * lvSize(m.lv || 1);
@@ -2030,6 +2442,7 @@ export class Game {
       hp: p.hp ?? 6,
       lv: p.lv || 1,
       hidden: !!p.hidden,
+      ai: !!p.ai, // a computer player, played by the host's game
       shield: 0,
       animT: 0,
       bubble: null,
@@ -2087,6 +2500,14 @@ export class Game {
     } else if (m.t === 'peer_leave') {
       this.remotes.delete(m.id);
       delete this.teamMap[m.id];
+      if (m.host != null) this.hostId = m.host;
+    } else if (m.t === 'ais') {
+      // the host's list of computer players: seat the new ones, drop the ones that went
+      const ids = new Set((m.list || []).map((p) => p.id));
+      for (const r of [...this.remotes.values()]) if (r.ai && !ids.has(r.id)) this.remotes.delete(r.id);
+      for (const p of m.list || []) if (!this.remotes.has(p.id)) this.addRemote(p);
+    } else if (m.t === 'aihurt') {
+      this.aiSim?.hurtBy(m); // a hit on a computer player: the host's game works it out
     } else if (m.t === 'settings' && m.room) {
       this.cheats = !!m.room.allowCheats; // the host can switch cheats on or off
       this.rules = { melee: m.room.allowMelee !== false, throw: m.room.allowThrow !== false };
@@ -2111,7 +2532,11 @@ export class Game {
       this.combat.hitByPlayer(m);
     } else if (m.t === 'kill') {
       this.streaks.kill(String(m.killerId), String(m.victimId), { killer: m.killer, victim: m.victim }, m.killerId === this.mp.you, undefined, m.first);
-      if (m.killerId === this.mp.you) this.addXp(XP.player);
+      if (m.killerId === this.mp.you) {
+        const v = this.remotes.get(String(m.victimId));
+        if (v) this.xpBurst(v.x, v.y, XP.player);
+        else this.addXp(XP.player);
+      }
     } else if (m.t === 'fell') {
       this.streaks.died(String(m.id));
     } else if (m.t === 'win') {
@@ -2160,6 +2585,7 @@ export class Game {
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
+      if (r.sim) continue; // a computer player this game moves itself
       // snap if we are far apart (first packet, teleport), otherwise glide
       if (Math.hypot(r.tx - r.x, r.ty - r.y) > 160) {
         r.x = r.tx;
@@ -2180,26 +2606,6 @@ export class Game {
   sendChat(text) {
     this.myBubble = { text, t: 0 };
     this.mp?.net.send({ t: 'chat', text });
-  }
-
-  teleportToPeer(id) {
-    const r = this.remotes.get(id);
-    if (!r) return;
-    if (r.x > 20000) {
-      this.onToast?.(`${r.name} is underground in a dungeon.`);
-      return;
-    }
-    this.leaveDungeon(false);
-    if (this.inside) {
-      this.inside = null;
-      this.fade = null;
-      this.storageOpen = false;
-    }
-    this.player.x = r.x + 14;
-    this.player.y = r.y + 4;
-    this.cam.x = this.player.x;
-    this.cam.y = this.player.y;
-    this.onToast?.(`Hopped over to ${r.name}!`);
   }
 
   // Where the cursor points in world pixels
@@ -2336,6 +2742,9 @@ export class Game {
     const p = this.player;
     this.updateFade(dt);
     this.updateWeather(dt);
+    if (this.levelFx && (this.levelFx.t += dt) > 1.8) this.levelFx = null;
+    if (this.xpOrbs.length || this.xpGain) this.updateXpOrbs(dt);
+    if (!this.demo && !this.dungeon) this.world.growBack(dt, p.x, p.y);
     if (this.dungeon) this.updateDungeon(dt);
     if (this.demo) {
       this.cam.x += dt * 7;
@@ -2445,13 +2854,19 @@ export class Game {
         else this.updateInteraction();
       }
       this.updateDeath(dt);
-      if (this.mouseHeld[2] && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot);
+      if (this.mouseHeld[2] && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot); // right click always throws what is selected in the backpack
+      // still holding left click when the last throw, shot or cast is over: the charge bar starts again by itself
+      if (this.mouseHeld[0] && !this.dead && !this.celeb && !this.wave && !this.combat.hold && !this.combat.dash && !this.combat.spin && !this.combat.thrown && !this.paused && this.rules?.melee !== false && this.combat.canFight()) this.combat.holdStart();
       this.updateCelebration(dt);
       this.updateWallHold(dt);
       this.combat.update(dt);
       if (!this.balls && !this.demo && this.home) this.balls = new Balls(this);
       this.balls?.update(dt);
       if (!this.inside && !this.dungeon) this.bots?.update(dt);
+      if (this.mp?.pvp && this.hostId === this.mp.you && this.home) {
+        if (!this.aiSim && [...this.remotes.values()].some((r) => r.ai)) this.aiSim = new AiPlayers(this, this.difficultyId);
+        this.aiSim?.update(dt);
+      }
       this.wave?.update(dt);
       if (this.mp) {
         // everyone in the room reads the same clock
@@ -2492,8 +2907,11 @@ export class Game {
       ty: Math.floor((this.inside ? this.inside.out.y : this.dungeon ? this.dungeon.out.y : p.y) / T),
       inside: !!this.inside,
       level: this.level,
-      xp: Math.floor(this.xp),
-      xpNeed: xpNeed(this.level),
+      xp: this.level >= MAX_CHAR_LEVEL ? 1 : Math.floor(this.xp),
+      xpNeed: this.level >= MAX_CHAR_LEVEL ? 1 : xpNeed(this.level),
+      xpLeft: this.level >= MAX_CHAR_LEVEL ? 0 : Math.max(1, xpNeed(this.level) - Math.floor(this.xp)),
+      target: this.targetHud(),
+      maxLevel: this.level >= MAX_CHAR_LEVEL,
       dungeon: this.dungeon ? KINDS[this.dungeon.kind].name : null,
       weather: { kind: this.weather.kind, name: WEATHER[this.weather.kind].name, icon: this.hour >= 19.5 || this.hour < 5.5 ? WEATHER[this.weather.kind].night : WEATHER[this.weather.kind].icon, indoors: !!this.weather.indoors },
       weapons: { owned: { ...this.weapons.owned }, equipped: this.weapons.equipped },
@@ -2512,6 +2930,7 @@ export class Game {
       upg: this.upgrades,
       stats: this.statsHud(),
       supplies: { ...this.supplies },
+      consumables: { ...this.consumables },
       mount: this.mount ? { type: this.mount.type, hp: this.mount.hp ?? MOUNT_HP[this.mount.type], maxHp: MOUNT_HP[this.mount.type], stamina: this.mount.stamina ?? 1, exhausted: !!this.mount.exhausted, total: Math.round(100 * (MOUNT_POOL[this.mount.type] || 1)) } : null,
       mkills: this.winBy === 'monsters' && !this.mp ? { count: this.monsterKills, target: MONSTER_TARGET } : null,
       celeb: this.celeb ? { name: this.celeb.name, mine: this.celebMine(), sub: this.celeb.sub } : null,
@@ -2521,6 +2940,7 @@ export class Game {
       invisT: this.combat.invisT,
       invisCd: this.combat.invisCd,
       coins: this.coinCount(),
+      wood: this.wood,
       tEnergy: this.combat.tEnergy,
       tLocked: this.combat.tLocked,
       gun: this.combat.gun,
@@ -2577,6 +2997,8 @@ export class Game {
       this.pickBarricade(best.id);
     } else if (this.interactPressed && best?.inter === 'dungeon') {
       this.enterDungeon(best);
+    } else if (this.interactPressed && best?.inter === 'building') {
+      this.enterBuilding(best.b);
     } else if (this.interactPressed && best?.inter === 'dexit') {
       this.exitDungeon();
     } else if (this.interactPressed && best?.inter === 'chest') {
@@ -2585,13 +3007,13 @@ export class Game {
       const drops = [{ item: best.forage.item, qty: 1 }];
       const merged = drops.reduce((m, d) => ({ ...m, [d.item]: (m[d.item] || 0) + d.qty }), {});
       const trial = this.inventory.map((slot) => slot && { ...slot });
-      const fits = Object.entries(merged).every(([id, qty]) => addItem(trial, id, qty) === 0);
+      const fits = Object.entries(merged).every(([id, qty]) => (isConsumable(ITEMS[id]) ? (this.consumables[id] || 0) + qty <= CONSUME_CAP : addItem(trial, id, qty) === 0));
       if (!fits) {
         this.onToast?.('Your backpack is full!');
       } else {
         this.collected.add(best.id);
         sfx.play('forage');
-        for (const [id, qty] of Object.entries(merged)) addItem(this.inventory, id, qty);
+        for (const [id, qty] of Object.entries(merged)) this.stow(id, qty);
         const text = Object.entries(merged).map(([id, qty]) => (qty > 1 ? `${qty}× ${ITEMS[id].name}` : ITEMS[id].name)).join(' & ');
         this.foraged++;
         this.onToast?.(`You picked up ${text}.`);
@@ -2608,7 +3030,8 @@ export class Game {
     const loot = this.world.apoc ? LOOT_APOC : undefined;
     const epoch = Math.floor(this.day / 3); // dungeon chests fill up again every three days
     const sd = seed + (o.rich ? epoch * 7 : 0);
-    const rolls = [rollLoot(hash2(o.x, o.y, sd), hash2(o.y, o.x, sd), loot), rollLoot(hash2(o.x, 1, sd + 3), hash2(1, o.y, sd + 3), loot)];
+    let rolls = [rollLoot(hash2(o.x, o.y, sd), hash2(o.y, o.x, sd), loot), rollLoot(hash2(o.x, 1, sd + 3), hash2(1, o.y, sd + 3), loot)];
+    if (o.lootKind) rolls = this.v2Loot(o, sd, rolls);
     if (o.rich) {
       const tier = this.dungeon?.tier || 1;
       rolls.push(rollLoot(hash2(o.x, 2, sd + 5), hash2(2, o.y, sd + 5), loot), rollLoot(hash2(o.x, 3, sd + 9), hash2(3, o.y, sd + 9), loot), { item: 'coin', qty: 3 + Math.floor(Math.random() * 4) * tier });
@@ -2625,10 +3048,10 @@ export class Game {
     pieces.forEach((pc, i) => {
       const a = (i / pieces.length) * Math.PI * 2 + Math.random() * 0.9;
       const sp = 26 + Math.random() * 30;
-      this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: 110 + Math.random() * 60, fly: true, burst: true, id: pc.id, qty: pc.qty, age: 0 });
+      this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: 110 + Math.random() * 60, fly: true, burst: true, id: pc.id, qty: pc.qty, age: 0, ins: !!this.inside });
     });
-    this.combat.floaters.push({ x: o.x, y: o.y - 22, text: 'Pop!', color: '#ffb347', t: 0 });
-    this.onToast?.(this.world.apoc ? 'The fridge swings open and supplies spill out! Walk over them to pick them up.' : 'The chest bursts open! Walk over the loot to pick it up.');
+    this.combat.floaters.push({ x: o.x, y: o.y - 22, text: o.lootKind ? 'Clack!' : 'Pop!', color: '#ffb347', t: 0 });
+    this.onToast?.(this.world.apoc ? 'The fridge swings open and supplies spill out! Walk over them to pick them up.' : o.lootKind ? V2_OPEN_TEXT[o.lootKind] || 'You rummage through it and the loot spills out!' : 'The chest bursts open! Walk over the loot to pick it up.');
     this.save();
   }
 
@@ -2854,6 +3277,42 @@ export class Game {
     else this.transition(go);
   }
 
+  // Any V2 building: a blink, and you are in a room of your own (the same room as a cottage, with its chest full of loot)
+  enterBuilding(b) {
+    if (!this.canHaveInterior() || this.inside || !b) return;
+    this.transition(() => {
+      if (this.mount) {
+        this.dismount();
+        this.onToast?.('You left your ride at the door.');
+      }
+      this.inside = { out: { x: b.x, y: b.y + 14 }, sleepCd: 0, b };
+      this.player.x = ROOM.w / 2;
+      this.player.y = ROOM.h - 28;
+      this.player.dir = 'up';
+      this.player.moving = false;
+      this.cam.x = ROOM.w / 2;
+      this.cam.y = ROOM.h / 2;
+      this.combat?.cancelHold();
+      this.mouseHeld[0] = false;
+      sfx.play('pickup');
+      this.onToast?.(`🚪 ${b.name}`);
+    });
+  }
+
+  // the loot of a V2 container, by what it is
+  v2Loot(o, sd, base) {
+    const coin = (a, b) => ({ item: 'coin', qty: a + Math.floor(hash2(o.x, o.y, sd + 11) * (b - a + 1)) });
+    const food = (k) => ({ item: V2_FOOD[Math.floor(hash2(o.x, k, sd + 12) * V2_FOOD.length)], qty: 1 });
+    switch (o.lootKind) {
+      case 'atm': return [coin(8, 20), coin(2, 6)];
+      case 'food': return [food(1), food(2), coin(1, 3)];
+      case 'mail': return [coin(1, 4), base[0]];
+      case 'grave': return [...base, { item: 'gold', qty: 1 + Math.floor(hash2(o.x, 5, sd) * 2) }];
+      case 'junk': return [base[0], coin(0, 2).qty ? coin(0, 2) : base[1]];
+      default: return [...base, coin(1, 5)];
+    }
+  }
+
   exitHouse(instant = false) {
     if (!this.inside) return;
     const go = () => {
@@ -2913,10 +3372,14 @@ export class Game {
         best = { inter, x: s.x, y: s.y, label: s.label };
       }
     }
-    if (!best && p.y > 140 && p.x > DOOR.x0 - 10 && p.x < DOOR.x1 + 10) best = { inter: 'door', x: ROOM.w / 2, y: ROOM.h - 20, label: 'Space · go outside' };
+    if (!best && p.y > 140 && p.x > DOOR.x0 - 10 && p.x < DOOR.x1 + 10) best = { inter: 'door', x: ROOM.w / 2, y: ROOM.h - 20, label: `${this.actKey()} · go outside` };
     this.prompt = best;
     if (this.interactPressed && best && !this.fade) {
-      if (best.inter === 'chest') {
+      if (best.inter === 'chest' && this.inside.b) {
+        const o = { id: `bi${this.inside.b.id}`, x: best.x, y: best.y, rich: true, lootKind: this.inside.b.type === 'shop' ? 'atm' : 'supply' };
+        if (this.looted(o)) this.onToast?.('The chest is empty. It fills up again in a few days.');
+        else this.burstChest(o);
+      } else if (best.inter === 'chest') {
         sfx.play('chest');
         this.emitStorage();
         this.onOpenStorage?.();
@@ -2978,7 +3441,7 @@ export class Game {
         else this.interactPressed = true;
         break;
       case 'eat':
-        this.useItem(this.selectedSlot);
+        this.eatBest();
         break;
       case 'shield':
         c.activateShield();
@@ -3042,7 +3505,7 @@ export class Game {
   }
 
   cheatGive(id, qty) {
-    const left = addItem(this.inventory, id, qty);
+    const left = this.stow(id, qty);
     if (left > 0) this.combat.drops.push({ x: this.player.x, y: this.player.y, id, qty: left, age: 0, ins: !!this.inside });
     this.emitInventory();
     this.save();
@@ -3104,7 +3567,7 @@ export class Game {
     const [vx, vy] = DIR_VEC[p.dir] || [0, 1];
     this.combat.drops.push({
       x: p.x + vx * 6, y: p.y + vy * 4, z: 10, vz: 70, vx: vx * 38 + (Math.random() - 0.5) * 10, vy: vy * 22 + (Math.random() - 0.5) * 8,
-      fly: true, burst: true, nopick: 1.2, id: slot.id, qty: n, age: 0, ins: !!this.inside,
+      fly: true, burst: true, manual: true, nopick: 1.2, id: slot.id, qty: n, age: 0, ins: !!this.inside,
     });
     sfx.play('pickup');
     this.emitInventory();
@@ -3149,6 +3612,16 @@ export class Game {
       },
     });
     for (const d of this.combat.drops) if (d.ins) this.combat.drawDrop(ctx, d, this.t);
+    if (this.inside?.b) {
+      // the name of the place, on a little sign over the door wall
+      ctx.font = '700 8px sans-serif';
+      ctx.textAlign = 'center';
+      const w = ctx.measureText(this.inside.b.name).width + 12;
+      ctx.fillStyle = 'rgba(70,45,28,0.9)';
+      ctx.fillRect(Math.round(ROOM.w / 2 - w / 2), 4, w, 12);
+      ctx.fillStyle = '#fff2d6';
+      ctx.fillText(this.inside.b.name, ROOM.w / 2, 13);
+    }
     const dark = this.darkness();
     if (dark > 0) {
       ctx.fillStyle = `rgba(24,20,60,${0.28 * dark})`;
@@ -3174,7 +3647,120 @@ export class Game {
     return { inter: 'water', x: p.x + vx * 6, y: p.y + vy * 6 + 4 };
   }
 
+  // Everything edible or drinkable that found its way into the backpack moves to the quick slots' lists
+  absorbConsumables() {
+    let moved = false;
+    for (let i = 0; i < this.inventory.length; i++) {
+      const slot = this.inventory[i];
+      const def = slot && ITEMS[slot.id];
+      if (!def || !isConsumable(def)) continue;
+      this.stowConsumable(slot.id, slot.qty);
+      this.inventory[i] = null;
+      moved = true;
+    }
+    return moved;
+  }
+
+  // Put something you picked up where it belongs: the HP / Stamina lists for consumables, the backpack for the rest.
+  // Returns how many did not fit.
+  stow(id, qty) {
+    const def = ITEMS[id];
+    if (def && isConsumable(def)) return this.stowConsumable(id, qty);
+    return addItem(this.inventory, id, qty);
+  }
+
+  stowConsumable(id, qty) {
+    const key = id === 'hppack' ? 'hp' : id === 'soupcan' ? 'stam' : null;
+    if (key) {
+      const room = Math.max(0, SUPPLY_CAP - this.supplies[key]);
+      const add = Math.min(room, qty);
+      this.supplies[key] += add;
+      return qty - add;
+    }
+    const room = Math.max(0, CONSUME_CAP - (this.consumables[id] || 0));
+    const add = Math.min(room, qty);
+    if (add > 0) this.consumables[id] = (this.consumables[id] || 0) + add;
+    return qty - add;
+  }
+
+  // What the HP ('hp') or Stamina ('stam') slot can use right now: the pack first, then every food and drink that does it
+  consumableList(kind) {
+    const out = [];
+    const pack = kind === 'hp' ? 'hppack' : 'soupcan';
+    if (this.supplies[kind] > 0) out.push({ id: pack, qty: this.supplies[kind] });
+    for (const [id, qty] of Object.entries(this.consumables)) {
+      const def = ITEMS[id];
+      if (qty > 0 && def && (kind === 'hp' ? def.heal : def.energy)) out.push({ id, qty });
+    }
+    return out;
+  }
+
+  takeConsumable(id) {
+    if (id === 'hppack' || id === 'soupcan') {
+      this.supplies[id === 'hppack' ? 'hp' : 'stam']--;
+      return;
+    }
+    if (--this.consumables[id] <= 0) delete this.consumables[id];
+  }
+
+  // Eat or drink one of something from the lists
+  eat(id) {
+    if (this.dead) return;
+    if (id === 'hppack') return this.useSupply('hp', true);
+    if (id === 'soupcan') return this.useSupply('stam', true);
+    const def = ITEMS[id];
+    if (!def || !isConsumable(def) || !(this.consumables[id] > 0)) return;
+    if (this.mount) {
+      this.feedMount(def, () => this.takeConsumable(id));
+      return;
+    }
+    if ((def.heal && this.cds.hp > 0) || (def.energy && this.cds.stam > 0)) {
+      this.onToast?.(`Wait a moment (${Math.ceil(Math.max(def.heal ? this.cds.hp : 0, def.energy ? this.cds.stam : 0))}s) before eating or drinking again.`);
+      return;
+    }
+    const c = this.combat;
+    const needHp = !!def.heal && c.hp < c.maxHp;
+    const needEn = !!def.energy && this.stamina < 0.98;
+    if (!needHp && !needEn) {
+      this.onToast?.(def.heal && !def.energy ? 'Your hearts are already full.' : def.energy && !def.heal ? 'You are not tired.' : 'You are already in top shape.');
+      return;
+    }
+    if (def.heal) this.cds.hp = HEAL_CD;
+    if (def.energy) this.cds.stam = STAM_CD;
+    this.takeConsumable(id);
+    const healed = Math.min(c.maxHp - c.hp, (def.heal || 0) * c.maxHp);
+    c.hp = Math.min(c.maxHp, c.hp + (def.heal || 0) * c.maxHp);
+    this.stamina = Math.min(1, this.stamina + (def.energy || 0));
+    if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
+    const bits = [];
+    if (healed > 0) bits.push(`+${hp100(healed)} HP`);
+    if (def.energy) bits.push('+stamina');
+    this.onToast?.(`${(def.energy || 0) * 2 >= (def.heal || 0) && def.energy ? 'Glug!' : 'Yum!'} ${def.name}${bits.length ? ` (${bits.join(', ')})` : ''}.`);
+    sfx.play(def.energy && !def.heal ? 'drink' : 'eat');
+    this.emitHud();
+    this.save();
+  }
+
+  // The E key (and the touch button): whatever helps most. Hearts first when you are hurt, otherwise stamina.
+  eatBest(kind) {
+    const c = this.combat;
+    const want = kind || (c.hp < c.maxHp ? 'hp' : this.stamina < 0.98 ? 'stam' : null);
+    if (!want) {
+      this.onToast?.('You are in top shape already.');
+      return;
+    }
+    const foods = this.consumableList(want).filter((e) => e.id !== 'hppack' && e.id !== 'soupcan');
+    const missing = want === 'hp' ? c.maxHp - c.hp : 1 - this.stamina;
+    const val = (e) => (want === 'hp' ? ITEMS[e.id].heal : ITEMS[e.id].energy);
+    // the smallest one that covers what is missing, or else the biggest there is
+    foods.sort((a, b) => val(a) - val(b));
+    const pick = foods.find((e) => val(e) >= missing) || foods[foods.length - 1];
+    if (pick) this.eat(pick.id);
+    else this.useSupply(want, true);
+  }
+
   emitInventory() {
+    if (this.absorbConsumables()) this.emitHud?.();
     if (this.wave && !this.inventory.some((s) => s?.id === 'sword')) addItem(this.inventory, 'sword', 1); // never without a weapon
     this.onInventory?.(this.inventory.map((slot) => slot && { ...slot }));
   }
@@ -3201,7 +3787,7 @@ export class Game {
     const def = slot && ITEMS[slot.id];
     if (!def || !isConsumable(def)) return;
     if (this.mount) {
-      this.feedMount(i, def);
+      this.feedMount(def, () => removeFromSlot(this.inventory, i, 1));
       return;
     }
     if ((def.heal && this.cds.hp > 0) || (def.energy && this.cds.stam > 0)) {
@@ -3212,8 +3798,8 @@ export class Game {
     if (def.energy) this.cds.stam = STAM_CD;
     removeFromSlot(this.inventory, i, 1);
     const c = this.combat;
-    const healed = Math.min(c.maxHp - c.hp, def.heal || 0);
-    c.hp = Math.min(c.maxHp, c.hp + (def.heal || 0));
+    const healed = Math.min(c.maxHp - c.hp, (def.heal || 0) * c.maxHp);
+    c.hp = Math.min(c.maxHp, c.hp + (def.heal || 0) * c.maxHp);
     this.stamina = Math.min(1, this.stamina + (def.energy || 0));
     if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
     const bits = [];
@@ -3226,26 +3812,27 @@ export class Game {
   }
 
   // While riding, food goes to the animal: hearts heal it, energy tops up its stamina
-  feedMount(i, def) {
+  feedMount(def, take) {
     const m = this.mount;
     const max = MOUNT_HP[m.type];
     m.hp ??= max;
     m.stamina ??= 1;
     const name = m.type === 'cow' ? 'cow' : 'chicken';
-    const heal = Math.min(max - m.hp, def.heal || 0);
+    const heal = Math.min(max - m.hp, (def.heal || 0) * 6);
     const boost = Math.min(1 - m.stamina, def.energy || 0);
     if (heal <= 0 && boost <= 0) {
       this.onToast?.(`Your ${name} is already in top shape.`);
       return;
     }
-    removeFromSlot(this.inventory, i, 1);
-    m.hp = Math.min(max, m.hp + (def.heal || 0));
+    take();
+    m.hp = Math.min(max, m.hp + (def.heal || 0) * 6);
     m.stamina = Math.min(1, m.stamina + (def.energy || 0));
     if (m.exhausted && m.stamina >= 0.3) m.exhausted = false;
     if (heal > 0) this.combat.floaters.push({ x: this.player.x, y: this.player.y - 26, text: `+${Math.round(heal * 10) / 10} ♥`, color: '#ff5d7a', t: 0 });
     this.onToast?.(`Your ${name} munches the ${def.name}${heal > 0 ? ` (+${Math.round(heal * 10) / 10} HP)` : ''}${boost > 0 ? ' and perks up' : ''}.`);
     sfx.play('eat');
     this.emitInventory();
+    this.emitHud();
   }
 
   // A hit that would have landed on the rider lands on the mount. At zero it is knocked out and you drop to the ground.
@@ -3403,7 +3990,7 @@ export class Game {
       for (let cx = cx0 - 1; cx <= cx1 + 1; cx++) {
         for (const o of this.world.getChunk(cx, cy).objects) {
           if (o.ground) {
-            ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, o.ox, o.oy, o.sw, o.sh);
+            if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, o.ox, o.oy, o.sw, o.sh);
           } else if (!(o.inter === 'forage' && this.collected.has(o.id))) {
             drawList.push(o);
           }
@@ -3430,7 +4017,7 @@ export class Game {
     for (const o of drawList) {
       switch (o.kind) {
         case 'tree':
-          ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
+          if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
           break;
         case 'house':
           // see-through while you are indoors, so you can still spot yourself
@@ -3441,7 +4028,13 @@ export class Game {
           this.glows.push([o.ox + 22, o.oy + 68, 26], [o.ox + 36, o.oy + 47, 22], [o.ox + 48, o.oy + 78, 20]);
           break;
         case 'chest':
-          if (o.apoc) {
+          if (o.sheet) {
+            // a V2 container (bin, crate, ATM...): dimmed once it has been searched
+            if (!img[o.sheet]) break;
+            if (this.looted(o)) ctx.globalAlpha = 0.5;
+            ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
+            ctx.globalAlpha = 1;
+          } else if (o.apoc) {
             // a supply fridge: dimmed once it has been searched
             const f = img[`apoc/${o.apoc}`];
             if (this.looted(o)) ctx.globalAlpha = 0.45;
@@ -3484,6 +4077,7 @@ export class Game {
           ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
+          if (this.levelFx) this.drawLevelFx(ctx);
           if (this.wave && this.world.apoc) this.combat.drawGun(ctx, this.player.x, this.player.y);
           if (!this.wave) this.drawHealthBar(ctx, { x: this.player.x, y: this.player.y - this.rideLift(), hp: this.combat.hp, max: this.combat.maxHp, hero: this.hero, lv: this.level });
           break;
@@ -3524,6 +4118,7 @@ export class Game {
       }
     }
 
+    if (this.xpOrbs.length) this.drawXpOrbs(ctx);
     if (this.wave) this.drawWaveExtras(ctx);
     this.drawCloudShadows(camX, camY);
 
@@ -3669,14 +4264,16 @@ export class Game {
 
   // A small portrait of the hero's head: cropped from the sheet for the retro heroes, an initial for the rest
   faceOf(hero, name, color) {
-    const key = `${hero.id}|${hero.kind === 'retro' ? '' : name}`;
+    const key = `${hero.id}|${hero.kind === 'retro' || hero.kind === 'v2' ? '' : name}`;
     let cv = this.faces.get(key);
     if (cv) return cv;
     cv = document.createElement('canvas');
     cv.width = 12;
     cv.height = 11;
     const c = cv.getContext('2d');
-    if (hero.kind === 'retro') {
+    if (hero.kind === 'v2') {
+      c.drawImage(this.img[`v2/chars/${hero.sheet}`], 290, 34, 12, 11, 0, 0, 12, 11);
+    } else if (hero.kind === 'retro') {
       c.drawImage(this.img[`retro/c${hero.n}`], 18, 0, 12, 11, 0, 0, 12, 11);
     } else if (hero.kind === 'dev') {
       const L = devLayout(this.img['dev/chars']);
@@ -3826,8 +4423,9 @@ export class Game {
   drawPrompt(o, camX, camY) {
     const bob = Math.sin(this.t * 5) * 1.5;
     const [sx, sy] = this.toScreen(o.x, o.y - (o.inter === 'chest' ? 24 : 22) + bob, camX, camY);
-    const text = o.label || (o.inter === 'chest' ? 'Space · open' : o.inter === 'water' ? 'Space · drink' : 'Space · pick up');
-    this.pill(this.touchMode ? text.replace('Space', '✋ Use') : text, sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
+    const k = this.actKey();
+    const text = o.label || (o.inter === 'chest' ? `${k} · open` : o.inter === 'water' ? `${k} · drink` : `${k} · pick up`);
+    this.pill(this.touchMode ? text.replace(/^(Space|F)(?= ·)/, '✋ Use') : text, sx, sy, this.zoom * 4, '#fff', 'rgba(232,124,150,0.95)');
   }
 
   // The small corner map, and the big one opened with M
@@ -3889,7 +4487,23 @@ export class Game {
       for (const s of this.combat.skeletons) if (s.state !== 'dead') dot(s.x, s.y, '#f4f0e6', r);
       for (const w of this.combat.wilds) if (w.state !== 'dead') dot(w.x, w.y, '#b45cd8', r);
       for (const m of this.wave?.monsters || []) if (m.state !== 'dead') dot(m.x, m.y, '#e0384a', r);
-      for (const o of this.remotes.values()) if (!o.hidden) dot(o.x, o.y, o.bot ? '#f2a33c' : '#5aaee8', r);
+    }
+    // every other player (and AI rival) shows as their own little face, kept on the edge of the map when they are farther away
+    const face = (x, y, hero, name, ring, me = false) => {
+      if (!hero) return;
+      const big = size > 120;
+      const fw = (big ? 10 : 8) * (me ? 1.2 : 1);
+      const fh = fw * (11 / 12);
+      const mx = Math.min(size - fw / 2 - 2, Math.max(fw / 2 + 2, size / 2 + (x / T - this.player.x / T) / step));
+      const my = Math.min(size - fh / 2 - 2, Math.max(fh / 2 + 2, size / 2 + (y / T - this.player.y / T) / step));
+      ctx.fillStyle = ring;
+      ctx.fillRect(Math.round(mx - fw / 2) - 1, Math.round(my - fh / 2) - 1, fw + 2, fh + 2);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.faceOf(hero, name, ring), Math.round(mx - fw / 2), Math.round(my - fh / 2), fw, fh);
+    };
+    if (!this.demo && this.combat) {
+      for (const b of this.bots?.list || []) if (Number.isFinite(b.x)) face(b.x, b.y, b.hero, b.name, '#f2a33c');
+      for (const o of this.remotes.values()) if (!o.hidden) face(o.x, o.y, o.hero, o.name, o.bot || o.ai ? '#f2a33c' : '#5aaee8');
     }
     // bosses: a big pulsing red marker, kept on the edge of the map when they are farther away than it reaches
     for (const b of this.bossTargets()) {
@@ -3908,12 +4522,13 @@ export class Game {
         ctx.fillText('☠', bx, by - br - 3);
       }
     }
-    const pr = size > 120 ? 3 : 2;
-    ctx.fillStyle = '#ff6f91';
-    ctx.fillRect(size / 2 - pr, size / 2 - pr, pr * 2, pr * 2);
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(size / 2 - pr - 0.5, size / 2 - pr - 0.5, pr * 2 + 1, pr * 2 + 1);
+    // you: your own face in the middle, framed in pink
+    if (this.hero && !this.demo) face(this.player.x, this.player.y, this.hero, this.name, '#ff6f91', true);
+    else {
+      const pr = size > 120 ? 3 : 2;
+      ctx.fillStyle = '#ff6f91';
+      ctx.fillRect(size / 2 - pr, size / 2 - pr, pr * 2, pr * 2);
+    }
   }
 
   // Called by the map overlay: give the game a canvas to keep painting, or null to let go

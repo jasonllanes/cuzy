@@ -1,12 +1,14 @@
 import { ALLIES, ALLY_KINDS, MAX_ALLIES, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
 import { MAX_LEVEL, UPGRADES, upgradeCost } from '../game/upgrades';
+import { sellPrice } from '../game/items';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
-import { EFFECTS, WEAPONS, swingTime, weaponIconFile } from '../game/weapons';
+import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
 import { GRENADE_COST } from '../game/engine';
+import SellPanel from './SellPanel';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
-export default function UpgradePanel({ hud, game, onClose, survival = false }) {
+export default function UpgradePanel({ hud, game, onClose, inventory = [], survival = false }) {
   const team = hud.wave?.allies || 0;
   const cap = hud.wave?.teamCap ?? teamCap(hud.wave?.baseLevel || 0);
   const levelOf = (id) => (id === 'house' ? hud.wave?.baseLevel || 0 : hud.upg?.[id] || 0);
@@ -16,7 +18,7 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
       <div className="panel upgrades">
         <header className="inv-head">
           <h2>🛒 Buy</h2>
-          <span className="lvl-chip" title="Character level: kill monsters and players for XP">⭐ Lv {hud.level || 1} <i><b style={{ width: `${Math.min(100, ((hud.xp || 0) / (hud.xpNeed || 40)) * 100)}%` }} /></i> {hud.xp || 0}/{hud.xpNeed || 40} XP</span>
+          <span className="lvl-chip" title="Character level: kill monsters and players for XP">⭐ Lv {hud.level || 1} <i><b style={{ width: `${Math.min(100, ((hud.xp || 0) / (hud.xpNeed || 40)) * 100)}%` }} /></i> {hud.maxLevel ? 'MAX' : `${hud.xp || 0}/${hud.xpNeed || 40} XP · ${hud.xpLeft ?? '?'} to level up`}</span>
           <span className="coin-chip big">🪙 {hud.coins}</span>
           <button className="btn small-btn" onClick={onClose} aria-label="Close upgrades">✕</button>
         </header>
@@ -80,14 +82,17 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
                 const have = !!hud.weapons.owned?.[w.id];
                 const on = hud.weapons.equipped === w.id;
                 return (
-                  <div key={w.id} className="recruit-chip hire" style={{ borderColor: w.tint }}>
+                  <div key={w.id} className={`recruit-chip hire rar rar-${weaponRarity(w)}`}>
                     <span>
                       <b><i className="wicon small" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(w)}.png)` }} /> {w.name}</b>
                       <small>{EFFECTS[w.effect].name}: {EFFECTS[w.effect].desc} · 💥 {(2 + w.dmg + (hud.upg?.melee || 0)).toFixed(1)} · ⏱ {swingTime(w, 0).toFixed(2)}s</small>
                     </span>
-                    <button className="btn go small-btn" disabled={on || (!have && hud.coins < w.cost)} onClick={() => game.buyMelee(w.id)}>
-                      {on ? 'Equipped' : have ? 'Equip' : `🪙 ${w.cost}`}
-                    </button>
+                    <span className="row-btns">
+                      <button className="btn go small-btn" disabled={on || (!have && hud.coins < w.cost)} onClick={() => game.buyMelee(w.id)}>
+                        {on ? 'Equipped' : have ? 'Equip' : `Buy 🪙 ${w.cost}`}
+                      </button>
+                      {have && <button className="btn small-btn" onClick={() => game.sell('weapon', w.id)}>Sell 🪙 {sellPrice(w.cost)}</button>}
+                    </span>
                   </div>
                 );
               })}
@@ -106,9 +111,12 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
                 return (
                   <div key={id} className="recruit-chip hire">
                     <span><b><img className="gun-img small" src={`${import.meta.env.BASE_URL}assets/guns/${id}.png`} alt="" /> {g.name}</b><small>{g.blurb}</small></span>
-                    <button className="btn go small-btn" disabled={on || (!have && hud.coins < g.price)} onClick={() => game.buyGun(id)}>
-                      {on ? 'Equipped' : have ? 'Equip' : `🪙 ${g.price}`}
-                    </button>
+                    <span className="row-btns">
+                      <button className="btn go small-btn" disabled={on || (!have && hud.coins < g.price)} onClick={() => game.buyGun(id)}>
+                        {on ? 'Equipped' : have ? 'Equip' : `Buy 🪙 ${g.price}`}
+                      </button>
+                      {have && id !== 'pistol' && <button className="btn small-btn" onClick={() => game.sell('gun', id)}>Sell 🪙 {sellPrice(g.price)}</button>}
+                    </span>
                   </div>
                 );
               })}
@@ -129,6 +137,8 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
             ))}
           </div>
         </div>
+
+        <SellPanel hud={hud} game={game} inventory={inventory} />
       </div>
     </div>
   );

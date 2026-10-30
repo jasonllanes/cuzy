@@ -95,7 +95,8 @@ canvas { image-rendering: pixelated; display: block; }
   overflow-y: auto;
 }
 
-.backdrop, .backdrop canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.backdrop { position: fixed; inset: 0; width: 100%; height: 100%; }
+.backdrop canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .backdrop::after {
   content: '';
   position: absolute;
@@ -929,7 +930,9 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .home-btn.play b { color: #3d8a47; }
 .home-btn.exit { background: transparent; border-style: dashed; text-align: center; }
 .page-title { margin: 8px 0 4px; font: 700 1.5rem var(--pixel); color: var(--rose); }
-.menu-back { display: block; margin: 0 auto 6px; font: 700 0.85rem var(--pixel); color: var(--ink-soft); background: none; border: none; cursor: pointer; text-decoration: underline dashed; }
+.menu-back { display: block; margin: 4px auto 10px; padding: 10px 22px; font: 700 1.05rem var(--pixel); color: var(--ink); background: #fff3df; border: 3px solid var(--wood); border-radius: 14px; box-shadow: 0 3px 0 var(--wood); cursor: pointer; }
+.menu-back:hover { background: #ffe6c2; }
+.menu-back:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--wood); }
 .about-page { max-height: 70vh; overflow-y: auto; padding-right: 6px; }
 .credits { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 8px; }
 .credit { display: grid; gap: 1px; background: #fff; border: 3px solid var(--wood); border-radius: 12px; padding: 8px 12px; font-size: 0.85rem; }
@@ -1261,3 +1264,150 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 
 .gun-img { image-rendering: pixelated; max-width: 48px; max-height: 26px; object-fit: contain; }
 .gun-img.small { display: inline-block; vertical-align: middle; max-width: 40px; max-height: 20px; }
+
+/* computer players in a waiting room */
+.wait-badge.ai { background: #d9ecff; border-color: #5aaee8; color: #1b3a5c; }
+.seat-x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 0; display: grid; place-items: center; border-radius: 50%; border: 2px solid var(--wood); background: #fff; color: var(--ink-soft); font: 700 0.7rem var(--pixel); cursor: pointer; }
+.seat-x:hover { background: #ffe0e0; color: #b22; }
+.team-slot.filled { position: relative; }
+
+/* Multiplay: who you play as, right at the top */
+.who-strip { display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin: 6px 0 10px; background: #fff3df; border: 3px solid var(--wood); border-radius: 14px; }
+.who-strip .sprite-preview { width: 44px; height: 70px; flex: none; }
+.who-text { display: grid; flex: 1; min-width: 0; }
+.who-text b { font: 700 1.1rem var(--pixel); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who-text small { color: var(--ink-soft); }
+.who-edit { display: grid; gap: 6px; margin-bottom: 10px; }
+.heroes.mini { max-height: 220px; overflow-y: auto; }
+.home-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.splash.reconnect { flex-direction: column; gap: 14px; }
+
+/* selling things back */
+.sell-note .sell-empty { color: var(--ink-soft); margin: 6px 0; }
+.sell-note .recruit-chip b { display: flex; align-items: center; gap: 6px; }
+
+
+/* the list behind the HP and Stamina slots */
+.supply-slot.is-open { transform: translateY(-3px); }
+.supply-backdrop { position: absolute; inset: 0; z-index: 4; }
+.supply-menu { position: absolute; z-index: 6; bottom: 100px; left: calc(50% + 300px); width: min(300px, 92vw); max-height: 55vh; overflow-y: auto; display: grid; gap: 6px; padding: 10px; background: var(--paper); border: 3px solid var(--wood); border-radius: 16px; box-shadow: 0 6px 16px rgba(91, 70, 54, 0.35); }
+.supply-menu.hp { border-color: #e07a8c; }
+.supply-menu.stam { border-color: #5fc58a; }
+.supply-menu header { display: flex; align-items: center; justify-content: space-between; font: 700 1rem var(--pixel); }
+.supply-menu .hint { margin: 2px 0; }
+.supply-row { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #fff; border: 2px solid var(--wood-light, #e6cfa8); border-radius: 12px; cursor: pointer; }
+.supply-row:hover { background: #fff3df; }
+.supply-row > span:not(.item-icon) { flex: 1; display: grid; }
+.supply-row .item-icon { flex: none; }
+.supply-row small { color: var(--ink-soft); }
+.supply-row i { font: 700 0.9rem var(--pixel); font-style: normal; color: var(--ink-soft); }
+@media (max-width: 1100px) { .supply-menu { left: auto; right: 14px; bottom: 240px; } }
+.game.mobile .supply-menu { left: 50%; right: auto; transform: translateX(-50%); bottom: 130px; }
+
+/* the portrait beside your name */
+.hud-id { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.hud-portrait { display: grid; place-items: center; width: 60px; height: 60px; flex: none; background: #fff3df; border: 3px solid var(--wood); border-radius: 12px; box-shadow: inset 0 0 0 2px #fff9ec; overflow: hidden; }
+.hud-portrait .avatar { margin: 0; }
+.hud-id .hud-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.score-who .avatar { margin-right: 6px; }
+
+/* Buy / Equip / Sell sit side by side on one line */
+.row-btns, .recruit-chip.hire .row-btns { display: flex; flex-flow: row nowrap; align-items: center; gap: 6px; flex: none; }
+.row-btns .btn { white-space: nowrap; }
+
+/* the Open World map stands out from the presets */
+.map-card.open-world { grid-column: 1 / -1; border-style: dashed; background: linear-gradient(120deg, #fff7e6, #eaf6ff 55%, #ffeaea); }
+
+.row-btns { align-items: stretch; }
+
+/* rarity: the frame and the tint behind an item */
+.rar-common { --rar: #a79c8c; --rar-bg: #f6f1e8; }
+.rar-uncommon { --rar: #58b85c; --rar-bg: #e9f7e6; }
+.rar-rare { --rar: #3f95f0; --rar-bg: #e5f0ff; }
+.rar-epic { --rar: #a366ee; --rar-bg: #f0e6ff; }
+.rar-legendary { --rar: #f0a21e; --rar-bg: #fff0cd; }
+.rar { border-color: var(--rar); background: var(--rar-bg); }
+.rar-epic, .rar-legendary { box-shadow: 0 0 0 1px var(--rar), 0 0 8px var(--rar); }
+.hot-slot.rar.selected, .inv-slot.rar.selected { border-color: var(--rose); }
+.sword-card.rar-common, .sword-card.rar-uncommon, .sword-card.rar-rare, .sword-card.rar-epic, .sword-card.rar-legendary { border-color: var(--rar); background: linear-gradient(135deg, var(--rar-bg), #fff 70%); }
+.sword-card.is-equipped { border-color: var(--rose); }
+.upg-icon.rar { border: 2px solid var(--rar); border-radius: 10px; padding: 3px; }
+.rar-tag { font: 700 0.62rem var(--pixel); font-style: normal; color: #fff; background: var(--rar); border-radius: 8px; padding: 1px 7px; vertical-align: middle; }
+.recruit-chip.rar { border-color: var(--rar); background: linear-gradient(120deg, var(--rar-bg), #fff 60%); }
+.skill-card.is-locked { opacity: 0.75; }
+.chest-upgrade { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: #fff; border: 3px solid var(--wood); border-radius: 12px; padding: 6px 12px; margin: 6px 0; font-size: 0.85rem; }
+.wood-chip { margin-top: 4px; }
+
+/* levelling up */
+.levelup-flash { position: fixed; inset: 0; z-index: 60; pointer-events: none; display: grid; place-content: start center; justify-items: center; padding-top: 16vh; gap: 4px; }
+.levelup-glow { position: fixed; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(255, 226, 120, 0.42), rgba(255, 226, 120, 0) 62%); animation: lvl-glow 1.7s ease-out forwards; }
+.levelup-flash b { position: relative; font: 700 clamp(1.8rem, 5vw, 3rem) var(--pixel); color: #fff3b0; text-shadow: 0 3px 0 #c47a00, 0 0 18px #ffc94d; animation: lvl-text 1.7s ease-out forwards; }
+.levelup-flash small { position: relative; font: 700 0.9rem var(--pixel); color: #fff; text-shadow: 0 2px 0 #8d5a00; animation: lvl-text 1.7s ease-out forwards; }
+@keyframes lvl-glow { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lvl-text { 0% { opacity: 0; transform: translateY(14px) scale(0.7); } 18% { opacity: 1; transform: translateY(0) scale(1.12); } 30% { transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(-16px); } }
+
+/* the skill flash cards */
+.unlock-cards { position: fixed; z-index: 70; left: 50%; top: 31%; transform: translateX(-50%); display: flex; gap: 16px; align-items: flex-start; justify-content: center; max-width: 96vw; flex-wrap: wrap; pointer-events: none; }
+.unlock-card { position: relative; pointer-events: none; width: 230px; padding: 30px 16px 18px; text-align: center; background: linear-gradient(160deg, #fffaf0, #ffeccc); border: 4px solid #f0a21e; border-radius: 18px; box-shadow: 0 6px 0 #b9741a, 0 0 28px rgba(255, 200, 80, 0.7); display: grid; gap: 4px; justify-items: center; animation: card-pop 0.6s cubic-bezier(0.2, 1.4, 0.4, 1) both; overflow: hidden; }
+.unlock-card.leaving { animation: card-out 0.6s ease-in forwards; }
+.unlock-card h3 { margin: 0; font: 700 1.35rem var(--pixel); color: var(--ink); }
+.unlock-card small { font: 700 0.75rem var(--pixel); color: var(--ink-soft); }
+.unlock-card p { margin: 2px 0; font-size: 0.8rem; color: var(--ink); }
+.unlock-card em { font-style: normal; font-size: 0.72rem; color: var(--ink-soft); }
+.unlock-icon { font-size: 3.4rem; line-height: 1; filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.15)); animation: card-bob 1.6s ease-in-out infinite; }
+.unlock-ribbon { position: absolute; top: 0; left: 0; right: 0; padding: 3px 0; font: 700 0.62rem var(--pixel); letter-spacing: 0.06em; color: #fff; background: linear-gradient(90deg, #f0a21e, #ff7a3c, #f0a21e); }
+.unlock-close { pointer-events: auto; position: absolute; top: 24px; right: 6px; width: 24px; height: 24px; border: 2px solid var(--wood); border-radius: 50%; background: #fff; color: var(--ink); font-size: 0.7rem; cursor: pointer; line-height: 1; }
+.unlock-close:hover { background: #ffe0e6; }
+.unlock-timer { position: absolute; left: 0; bottom: 0; height: 5px; width: 100%; background: #f0a21e; transform-origin: left; animation: card-timer linear forwards; }
+@keyframes card-pop { 0% { opacity: 0; transform: translateY(40px) rotate(-8deg) scale(0.5); } 100% { opacity: 1; transform: none; } }
+@keyframes card-out { to { opacity: 0; transform: translateY(-26px) scale(0.9); } }
+@keyframes card-bob { 50% { transform: translateY(-4px) scale(1.05); } }
+@keyframes card-timer { to { transform: scaleX(0); } }
+
+/* the access code */
+.access-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.access-form input { flex: 1 1 160px; min-width: 0; }
+.access-bad { color: var(--rose-dark, #c0395a); font-size: 0.8rem; font-weight: 700; }
+.dev-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+
+/* the picked map blinks, so it is easy to see */
+.map-card.on, .diff-chip.map-card.on { animation: map-blink 1.1s ease-in-out infinite; }
+@keyframes map-blink { 0%, 100% { box-shadow: 0 0 0 0 rgba(238, 93, 125, 0); background: #fff0f3; } 50% { box-shadow: 0 0 0 4px rgba(238, 93, 125, 0.45), 0 0 14px rgba(238, 93, 125, 0.5); background: #ffd9e2; } }
+
+/* gold and wood sit together */
+.head-chips { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.head-chips .coin-chip.big { margin-left: 0; }
+.coin-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.coin-row .wood-chip { margin-top: 0; }
+
+/* the enemy you are hitting */
+.target-card { position: fixed; z-index: 30; top: 6px; left: calc(50% + 140px); display: flex; align-items: center; gap: 10px; min-width: 250px; padding: 6px 14px 6px 8px; background: #fffaf0; border: 3px solid var(--tc, #5fd16a); border-radius: 16px; box-shadow: 0 4px 0 rgba(0, 0, 0, 0.15), 0 0 12px color-mix(in srgb, var(--tc, #5fd16a) 55%, transparent); pointer-events: none; animation: target-in 0.2s ease-out; transition: opacity 0.7s; }
+.target-card.fading { opacity: 0; }
+.target-card.boss { border-width: 4px; }
+.target-icon { display: grid; place-items: center; width: 52px; height: 52px; background: color-mix(in srgb, var(--tc, #5fd16a) 18%, #fff); border: 2px solid var(--tc, #5fd16a); border-radius: 12px; overflow: hidden; flex: none; }
+.target-info { flex: 1; min-width: 0; }
+.target-top { display: flex; align-items: center; gap: 8px; }
+.target-top b { font: 700 0.95rem var(--pixel); color: var(--ink); white-space: nowrap; }
+.target-top i { font: 700 0.7rem var(--pixel); font-style: normal; color: #fff; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35); padding: 1px 8px; border-radius: 999px; }
+.target-top small { color: var(--ink-soft); font-size: 0.68rem; margin-left: auto; }
+.target-bar { height: 9px; margin-top: 4px; background: #e8d9c6; border-radius: 999px; overflow: hidden; border: 2px solid #c9b79a; }
+.target-bar b { display: block; height: 100%; background: linear-gradient(#ff8fa3, #ee4a68); transition: width 0.15s; }
+@keyframes target-in { from { opacity: 0; transform: translateY(-8px); } }
+@media (max-width: 1100px) { .target-card { top: 56px; left: 50%; transform: translateX(-50%); min-width: 220px; animation: none; } }
+
+/* the pause menu is wide instead of tall: buttons on the left, settings on the right */
+.pause-card.pause-wide { width: min(900px, 95vw); min-width: 0; grid-template-columns: 1fr 1fr; grid-template-areas: 'h h' 'p p' 'a b' 'c b'; gap: 8px 26px; text-align: left; align-items: start; padding: 18px 28px; }
+.pause-wide > h2 { grid-area: h; text-align: center; }
+.pause-wide > .hint { grid-area: p; text-align: center; margin: -4px 0 2px; }
+.pause-wide .pm-grid { grid-area: a; align-content: start; }
+.pause-wide .pause-b { grid-area: b; align-content: start; gap: 8px; }
+.pause-wide .pm-foot { grid-area: c; align-content: start; }
+.pause-wide .pause-b .settings-h { margin: 0; }
+@media (max-width: 700px) { .pause-card.pause-wide { grid-template-columns: 1fr; grid-template-areas: 'h' 'p' 'a' 'b' 'c'; } }
+
+/* the shop's tabs: stats and skills in two columns, supplies beside throwables */
+.stat-grid, .skill-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.shop-cols.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .stat-grid, .skill-grid, .shop-cols.two { grid-template-columns: 1fr; } }
+.shop-tabs { flex-wrap: wrap; }

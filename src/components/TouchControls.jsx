@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useLayout } from '../game/controls';
+import { supplyTotal } from '../game/items';
 import { TOUCH, lockDistOf, lockStyles, placeOf, placeStyle, useViewCtx } from '../game/touchLayout';
 
 const RADIUS = 52; // how far the knob must go for full speed
@@ -165,7 +166,7 @@ function TouchButton({ c, game, cooldown = 0, text, disabled = false, onTap }) {
 
 // Everything you need without a keyboard. Each one sits where the player put it (Settings > Edit button layout);
 // out of the box the quick items sit above the hotbar, Home and Shop beside it, and the shield above the attack button.
-export default function TouchControls({ game, hud, survival, waves, onChat, onShop }) {
+export default function TouchControls({ game, hud, survival, waves, onChat, onShop, onSupply }) {
   const layout = useLayout();
   const ctx = useViewCtx(layout);
   const util = hud.util;
@@ -186,7 +187,7 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
     stam: hud.cds?.stam ? hud.cds.stam / 5 : 0,
     attack: hud.dashCd ? Math.min(1, hud.dashCd / 1.2) : 0,
   };
-  const taps = { chat: onChat, shop: onShop };
+  const taps = { chat: onChat, shop: onShop, hp: () => onSupply?.('hp'), stam: () => onSupply?.('stam') };
   return (
     <div className="touch-controls" onContextMenu={(e) => e.preventDefault()}>
       {TOUCH.map((c) => {
@@ -195,12 +196,12 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
         let text;
         let disabled = false;
         if (c.id === 'hp') {
-          text = String(hud.supplies?.hp ?? 0);
-          disabled = !hud.supplies?.hp;
+          text = String(supplyTotal('hp', hud.supplies, hud.consumables));
+          disabled = !supplyTotal('hp', hud.supplies, hud.consumables);
         }
         if (c.id === 'stam') {
-          text = String(hud.supplies?.stam ?? 0);
-          disabled = !hud.supplies?.stam;
+          text = String(supplyTotal('stam', hud.supplies, hud.consumables));
+          disabled = !supplyTotal('stam', hud.supplies, hud.consumables);
         }
         const item = c.id === 'throw' && survival ? { ...c, label: '🔫 Shoot', icon: '🔫', text: 'Shoot' } : c;
         return (

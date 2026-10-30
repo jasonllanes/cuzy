@@ -10,6 +10,7 @@ import { MAX_CHAR_LEVEL, hp100 } from './stats';
 export const COMMANDS = [
   { name: 'gold', usage: '-gold 9999', desc: 'Give yourself coins' },
   { name: 'level', usage: '-level 1-50', desc: 'Set your character level' },
+  { name: 'wood', usage: '-wood 9999', desc: 'Give yourself wood for crafting weapons' },
   { name: 'upgrades', usage: '-upgrades 1-9', desc: 'Set every shop upgrade to this level' },
   { name: 'xp', usage: '-xp 500', desc: 'Give yourself experience' },
   { name: 'heal', usage: '-heal', desc: 'Full health and stamina' },
@@ -39,6 +40,13 @@ export function runCommand(game, text) {
       if (!Number.isFinite(n)) return 'Usage: -gold 9999';
       game.giveCoins(n);
       return `🪙 +${n} coins`;
+    }
+    case 'wood': {
+      const n = int(args[0] ?? 100, 1, 99999);
+      if (!Number.isFinite(n)) return 'Usage: -wood 9999';
+      game.giveWood(n);
+      game.save();
+      return `🪵 +${n} wood`;
     }
     case 'level': {
       const n = int(args[0], 1, MAX_CHAR_LEVEL);

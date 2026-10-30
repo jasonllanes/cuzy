@@ -174,3 +174,32 @@ export function rollMonsterLevel(wave) {
   const lv = 1 + Math.floor(Math.pow(Math.random(), 2.4) * cap);
   return Math.min(10, lv);
 }
+
+// The Tiny RPG pack (public/assets/tiny): whole animation sheets, so these swing, cast, block and summon.
+//   tiny: its sheet   reach: px from its feet at which it can swing   swings: the attack animations it picks from
+//   arrow: which arrow a shooter fires (1-3)   cast: the spell(s) a caster drops where you stand (radius, delay: seconds of warning)
+//   skill: block (raises its guard now and then), summon (calls skeletons), heal (mends the others) or charge (a telegraphed dash)
+Object.assign(MONSTERS, {
+  t_slime: { name: 'Green Slime', tiny: 'slime', kind: 'walk', hp: 5, speed: 16, dmg: 1, sd: 2, reach: 14, swings: ['atk1', 'atk2'] },
+  t_orc: { name: 'Orc', tiny: 'orc', kind: 'walk', hp: 8, speed: 22, dmg: 1, sd: 3, reach: 16, swings: ['atk1', 'atk2'] },
+  t_swordsman: { name: 'Swordsman', tiny: 'swordsman', kind: 'walk', hp: 8, speed: 28, dmg: 1, sd: 3, reach: 17, swings: ['atk1', 'atk2', 'atk3'] },
+  t_axeman: { name: 'Armored Axeman', tiny: 'armored_axeman', kind: 'walk', hp: 14, speed: 22, dmg: 2, sd: 5, reach: 17, swings: ['atk1', 'atk2', 'atk3'], kb: 0.5 },
+  t_soldier: { name: 'Soldier', tiny: 'soldier', kind: 'shoot', hp: 6, speed: 22, dmg: 1, sd: 2, range: 90, rate: 2.2, arrow: 1 },
+  t_archer: { name: 'Hunter', tiny: 'archer', kind: 'shoot', hp: 5, speed: 22, dmg: 1, sd: 2, range: 100, rate: 2, arrow: 2 },
+  t_skarcher: { name: 'Skeleton Archer', tiny: 'skeleton_archer', kind: 'shoot', hp: 5, speed: 20, dmg: 1, sd: 2, range: 96, rate: 2.2, arrow: 3 },
+  t_skeleton: { name: 'Skeleton Guard', tiny: 'skeleton', kind: 'walk', hp: 6, speed: 24, dmg: 1, sd: 2, reach: 16, swings: ['atk1', 'atk2'], skill: 'block' },
+  t_armskel: { name: 'Armored Skeleton', tiny: 'armored_skeleton', kind: 'walk', hp: 12, speed: 20, dmg: 2, sd: 4, reach: 17, swings: ['atk1', 'atk2'], skill: 'summon' },
+  t_gskel: { name: 'Greatsword Skeleton', tiny: 'greatsword_skeleton', kind: 'walk', hp: 16, speed: 20, dmg: 2, sd: 5, reach: 22, swings: ['atk1', 'atk2', 'atk3'], skill: 'summon', kb: 0.4 },
+  t_armorc: { name: 'Armored Orc', tiny: 'armored_orc', kind: 'walk', hp: 18, speed: 18, dmg: 2, sd: 6, reach: 18, swings: ['atk1', 'atk2', 'atk3'], skill: 'block', kb: 0.35 },
+  t_eliteorc: { name: 'Elite Orc', tiny: 'elite_orc', kind: 'walk', hp: 26, speed: 18, dmg: 3, sd: 8, reach: 20, swings: ['atk1', 'atk2', 'atk3'], kb: 0.2 },
+  t_knight: { name: 'Knight', tiny: 'knight', kind: 'walk', hp: 16, speed: 20, dmg: 2, sd: 5, reach: 18, swings: ['atk1', 'atk2', 'atk3'], skill: 'block', kb: 0.3 },
+  t_templar: { name: 'Knight Templar', tiny: 'knight_templar', kind: 'walk', hp: 22, speed: 18, dmg: 2, sd: 6, reach: 19, swings: ['atk1', 'atk2', 'atk3'], skill: 'block', kb: 0.25 },
+  t_lancer: { name: 'Lancer', tiny: 'lancer', kind: 'walk', hp: 12, speed: 24, dmg: 2, sd: 4, reach: 26, swings: ['atk1', 'atk2', 'atk3'], skill: 'charge' },
+  t_orcrider: { name: 'Orc Rider', tiny: 'orc_rider', kind: 'walk', hp: 20, speed: 26, dmg: 2, sd: 6, reach: 22, swings: ['atk1', 'atk2', 'atk3'], skill: 'charge', kb: 0.3 },
+  t_werewolf: { name: 'Werewolf', tiny: 'werewolf', kind: 'walk', hp: 12, speed: 34, dmg: 2, sd: 4, reach: 17, swings: ['atk1', 'atk2'], skill: 'charge' },
+  t_werebear: { name: 'Werebear', tiny: 'werebear', kind: 'walk', hp: 24, speed: 20, dmg: 3, sd: 7, reach: 19, swings: ['atk1', 'atk2', 'atk3'], kb: 0.2 },
+  t_wizard: { name: 'Wizard', tiny: 'wizard', kind: 'shoot', hp: 7, speed: 20, dmg: 2, sd: 3, range: 110, rate: 3.2, cast: ['wizard1', 'wizard2'], radius: 24, delay: 0.9, swings: ['atk1', 'atk2'] },
+  t_necro: { name: 'Necromancer', tiny: 'necromancer', kind: 'shoot', hp: 12, speed: 18, dmg: 2, sd: 4, range: 110, rate: 3.6, cast: ['necro_attack'], radius: 22, delay: 0.9, swings: ['atk2'], skill: 'summon' },
+  t_priest: { name: 'Priest', tiny: 'priest', kind: 'shoot', hp: 8, speed: 20, dmg: 1, sd: 2, range: 100, rate: 3.4, cast: ['priest_attack'], radius: 16, delay: 0.8, swings: ['atk1'], skill: 'heal' },
+  t_bat: { name: 'Cave Bat', tiny: 'bat', kind: 'fly', hp: 3, speed: 50, dmg: 1, sd: 1, reach: 12, swings: ['atk1', 'atk2'] },
+});

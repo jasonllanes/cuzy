@@ -99,7 +99,7 @@ export class SupaNet {
     this.identity = { name: 'Friend', hero: 'adam' };
     this.lobbyCh = null;
     this.lobbyReady = false;
-    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0 };
+    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0 };
     this.resetRoom();
     this.connect();
   }
@@ -116,12 +116,28 @@ export class SupaNet {
     return this.hostId === this.me;
   }
 
+  // Computer players (AI) sit in seats like heroes do, but only the host's game plays them. Everyone keeps them in `members`
+  // (flagged `ai`), so the seats, scores and teams treat them like anyone else; real players are what the rest counts on.
+  humans() {
+    return [...this.members.values()].filter((m) => !m.ai);
+  }
+
+  aiList() {
+    return [...this.members.values()].filter((m) => m.ai).map((m) => this.publicPlayer(m));
+  }
+
+  sendAis() {
+    if (this.isHost && this.channel) this.out({ t: 'ais', list: this.aiList() });
+  }
+
   resetRoom() {
     this.channel = null;
     this.code = null;
     this.cfg = null;
     this.members = new Map(); // id -> { id, name, hero, slot, at }
     this.posOf = new Map(); // id -> last known position
+    this.known = new Map(); // everyone who has been in the room: id -> their details (to put back someone wrongly marked as gone)
+    this.strays = {}; // id -> how many positions arrived from someone we think has left
     this.teamMap = {}; // id -> team number (the host decides; everyone keeps a copy)
     this.hostId = null;
     this.started = false;
@@ -455,7 +471,10 @@ export class SupaNet {
     const state = this.channel.presenceState();
     for (const [key, metas] of Object.entries(state)) {
       const m = metas[0];
-      if (m && key !== this.me && m.id) this.members.set(m.id, m);
+      if (m && key !== this.me && m.id) {
+        this.members.set(m.id, m);
+        this.known.set(m.id, m);
+      }
     }
   }
 
@@ -484,7 +503,8 @@ export class SupaNet {
     clearTimeout(this.timers.back);
     clearTimeout(this.flushT);
     clearTimeout(this.timers.hostWatch);
-    const others = [...this.members.values()].filter((m) => m.id !== this.me).sort((a, b) => a.at - b.at);
+    clearInterval(this.timers.aiSync);
+    const others = this.humans().filter((m) => m.id !== this.me).sort((a, b) => a.at - b.at);
     const alone = others.length === 0;
     const wasHost = this.isHost;
     const code = this.code;
@@ -553,7 +573,7 @@ export class SupaNet {
     const url = `${this.sb.supabaseUrl}/rest/v1/rooms?code=eq.${encodeURIComponent(this.code)}`;
     const key = this.sb.supabaseKey;
     const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
-    const others = [...this.members.values()].filter((m) => m.id !== this.me).sort((a, b) => a.at - b.at);
+    const others = this.humans().filter((m) => m.id !== this.me).sort((a, b) => a.at - b.at);
     try {
       if (!others.length) fetch(url, { method: 'DELETE', headers, keepalive: true }).catch(() => {});
       else if (this.isHost) {
@@ -574,7 +594,7 @@ export class SupaNet {
   // ---------- who is here ----------
 
   publicPlayer(m) {
-    return { id: m.id, slot: m.slot, team: this.teamMap[m.id] ?? null, name: m.name, hero: m.hero, ...(this.posOf.get(m.id) || { x: 0, y: 0, dir: 'down', moving: false, hp: 6 }) };
+    return { id: m.id, slot: m.slot, team: this.teamMap[m.id] ?? null, name: m.name, hero: m.hero, ...(m.ai ? { ai: true } : {}), ...(this.posOf.get(m.id) || { x: 0, y: 0, dir: 'down', moving: false, hp: 6 }) };
   }
 
   scoreList() {
@@ -593,7 +613,7 @@ export class SupaNet {
 
   // everyone works out the same host: the member who has been here longest
   electHost() {
-    const sorted = [...this.members.values()].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+    const sorted = this.humans().sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
     return sorted[0]?.id || this.me;
   }
 
@@ -601,6 +621,7 @@ export class SupaNet {
     for (const m of list || []) {
       if (!m.id || m.id === this.me || this.members.has(m.id)) continue;
       this.members.set(m.id, m);
+      this.known.set(m.id, m);
       if (this.syncing) continue;
       if (this.isHost) this.assignTeam(m.id);
       this.emit({ t: 'peer_join', player: this.publicPlayer(m) });
@@ -609,15 +630,21 @@ export class SupaNet {
         if (this.paused) this.out({ t: 'paused', on: true, by: this.members.get(this.me)?.name || 'the host' }); // joined while paused
         this.sendTeams();
         this.sendScores();
+        this.sendAis();
         this.touchRow();
       }
     }
   }
 
-  onPresenceLeave(list) {
+  // `force`: they said goodbye themselves, so Presence still listing them for a moment does not count
+  onPresenceLeave(list, force = false) {
     if (this.syncing || !this.channel) return;
+    // A flaky connection makes Presence say "left" and "joined" for the same player, sometimes in the wrong order. If the
+    // full list still has them, they never left (taking them out would leave a player who is there but cannot be seen).
+    const here = this.channel.presenceState();
     for (const m of list || []) {
       if (!m.id || m.id === this.me || !this.members.has(m.id)) continue;
+      if (!force && here[m.id]?.length) continue;
       this.members.delete(m.id);
       this.kills.delete(m.id);
       delete this.teamMap[m.id];
@@ -630,6 +657,17 @@ export class SupaNet {
         this.sendScores();
         this.touchRow();
       }
+    }
+  }
+
+  // someone we thought had left keeps sending their position: if the room's list still has them, they are back in the room
+  recoverMember(id) {
+    this.strays[id] = (this.strays[id] || 0) + 1;
+    // the room's list first; failing that, once they have kept playing for a moment (a packet from someone who really left stops soon)
+    const meta = this.channel?.presenceState()[id]?.[0] || (this.strays[id] >= 8 ? this.known.get(id) : null);
+    if (meta?.id === id) {
+      this.strays[id] = 0;
+      this.onPresenceJoin([meta]);
     }
   }
 
@@ -651,6 +689,10 @@ export class SupaNet {
   startHeartbeat() {
     clearInterval(this.timers.heartbeat);
     this.timers.heartbeat = setInterval(() => this.touchRow(), HEARTBEAT_MS);
+    clearInterval(this.timers.aiSync);
+    this.timers.aiSync = setInterval(() => {
+      if (this.members.size > 1 && [...this.members.values()].some((m) => m.ai)) this.sendAis();
+    }, 4000);
   }
 
   touchRow(extra = {}) {
@@ -670,7 +712,7 @@ export class SupaNet {
   // Only the newest position and the newest Wave Defense snapshot matter, so older ones are replaced.
   bcast(payload) {
     if (!this.channel) return;
-    if (payload.t === 'state') this.outbox = this.outbox.filter((m) => m.t !== 'state');
+    if (payload.t === 'state') this.outbox = this.outbox.filter((m) => !(m.t === 'state' && m.id === payload.id));
     else if (payload.t === 'w' && payload.k === 'snap') this.outbox = this.outbox.filter((m) => !(m.t === 'w' && m.k === 'snap'));
     this.outbox.push(payload);
     if (!this.flushT) this.flushT = setTimeout(() => this.flushOutbox(), this.flushMs);
@@ -702,9 +744,56 @@ export class SupaNet {
         if (!this.cfg.pvp || String(m.target) === this.me) return;
         if (this.cfg.teams && this.teamMap[String(m.target)] === this.teamMap[this.me]) return; // no friendly fire
         const dmg = Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
+        if (this.members.get(String(m.target))?.ai) {
+          // a computer player is played by the host's game, which works out the damage itself
+          const hurt = { t: 'aihurt', ai: String(m.target), from: this.me, dmg, fx: this.pos.x, fy: this.pos.y };
+          if (this.isHost) this.emit(hurt);
+          else this.bcast({ ...hurt, to: 'host' });
+          break;
+        }
         this.bcast({ t: 'hit', to: String(m.target), from: this.me, dmg, fx: this.pos.x, fy: this.pos.y });
         break;
       }
+      case 'addai':
+      case 'removeai':
+        this.request(m.t, m);
+        break;
+      // the host's game reports where its computer players are, what they swing and throw, who they hurt and who beat them
+      case 'aistate':
+        if (!this.isHost || !Array.isArray(m.list)) return;
+        for (const e of m.list.slice(0, 10)) {
+          const ai = this.members.get(String(e.id));
+          if (!ai?.ai) continue;
+          const pos = {
+            x: num(e.x),
+            y: num(e.y),
+            dir: ['up', 'down', 'left', 'right'].includes(e.dir) ? e.dir : 'down',
+            moving: !!e.moving,
+            hidden: !!e.hidden,
+            hp: Math.max(0, Math.min(40, Math.round((Number(e.hp) || 0) * 10) / 10)),
+            mhp: 6,
+            lv: 1,
+            mt: '',
+          };
+          this.posOf.set(ai.id, pos);
+          this.bcast({ t: 'state', id: ai.id, ...pos });
+        }
+        break;
+      case 'aifx':
+        if (!this.isHost || !this.members.get(String(m.id))?.ai) return;
+        if (m.kind === 'swing') this.bcast({ t: 'fx', id: String(m.id), kind: 'swing', a: num(m.a), w: '' });
+        else if (m.kind === 'throw') this.bcast({ t: 'fx', id: String(m.id), kind: 'throw', item: 'rock', x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) });
+        break;
+      case 'aiattack': {
+        const target = String(m.target);
+        if (!this.isHost || !this.cfg.pvp || target === this.me || !this.members.get(String(m.ai))?.ai || !this.members.has(target)) return;
+        if (this.cfg.teams && this.teamMap[target] === this.teamMap[String(m.ai)]) return;
+        this.bcast({ t: 'hit', to: target, from: String(m.ai), dmg: Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1))), fx: num(m.fx), fy: num(m.fy) });
+        break;
+      }
+      case 'aidied':
+        if (this.isHost && this.members.get(String(m.ai))?.ai) this.hKill(String(m.killer), String(m.ai));
+        break;
       case 'died':
         this.request('died', { killer: String(m.killer) });
         break;
@@ -790,7 +879,10 @@ export class SupaNet {
     if (m.t === 'bye') {
       // someone left on purpose: no need to wait for Presence to notice
       const gone = this.members.get(m.id);
-      if (gone) this.onPresenceLeave([gone]);
+      if (gone && !gone.ai) {
+        this.known.delete(gone.id);
+        this.onPresenceLeave([gone], true);
+      }
       return;
     }
     if (m.to && m.to !== 'host' && m.to !== this.me) return; // addressed to someone else
@@ -814,6 +906,26 @@ export class SupaNet {
       case 'teams':
         this.teamMap = { ...msg.teams };
         break;
+      case 'peer_join':
+        if (msg.player?.ai) this.members.set(msg.player.id, { id: msg.player.id, name: msg.player.name, hero: msg.player.hero, slot: msg.player.slot, at: Date.now(), ai: true });
+        break;
+      case 'peer_leave':
+        if (this.members.get(msg.id)?.ai) {
+          this.members.delete(msg.id);
+          this.kills.delete(msg.id);
+          delete this.teamMap[msg.id];
+        }
+        break;
+      case 'ais': {
+        // the host's full list of computer players: keep ours the same
+        const ids = new Set((msg.list || []).map((p) => p.id));
+        for (const m2 of [...this.members.values()]) if (m2.ai && !ids.has(m2.id)) this.members.delete(m2.id);
+        for (const p of msg.list || []) {
+          const old = this.members.get(p.id);
+          this.members.set(p.id, { id: p.id, name: p.name, hero: p.hero, slot: p.slot, at: old?.at || Date.now(), ai: true });
+        }
+        break;
+      }
       case 'slot': {
         const mem = this.members.get(msg.id);
         if (mem && Number.isInteger(msg.slot)) mem.slot = msg.slot;
@@ -833,6 +945,7 @@ export class SupaNet {
         break;
       case 'state': {
         const { t, id, ...pos } = msg; // eslint-disable-line no-unused-vars
+        if (!this.members.has(id) && !this.syncing) this.recoverMember(id); // they are playing, so they are here: put them back
         this.posOf.set(id, pos);
         break;
       }
@@ -861,6 +974,10 @@ export class SupaNet {
         return this.hTeam(from, m);
       case 'pause':
         return this.hPause(from, m);
+      case 'addai':
+        return this.hAddAi(from, m);
+      case 'removeai':
+        return this.hRemoveAi(from, m);
       case 'tolobby':
         // a finished wave round: back to the waiting room, for everyone
         if (this.started) this.returnToLobby();
@@ -946,7 +1063,7 @@ export class SupaNet {
 
   // if every player has finished or skipped it, the game starts at once
   checkIntro() {
-    if (this.introOpen && [...this.members.keys()].every((id) => this.introReady.has(id))) this.closeIntro();
+    if (this.introOpen && this.humans().every((m) => this.introReady.has(m.id))) this.closeIntro();
   }
 
   hStart(from) {
@@ -996,6 +1113,10 @@ export class SupaNet {
         cfg.winBy = 'duel';
         cfg.target = defaultTarget('duel');
         cfg.teams = 0;
+        if (m.mode === 'survival') {
+          // computer players only play Free Roam fights
+          for (const ai of [...this.members.values()].filter((x) => x.ai)) this.out({ t: 'peer_leave', id: ai.id, name: ai.name, host: this.hostId });
+        }
         this.reassignAll();
       }
       if (cfg.mode === 'free') {
@@ -1025,12 +1146,47 @@ export class SupaNet {
     this.checkIntro();
   }
 
+  // the host puts a computer player in a seat (its name and look come from the host's game)
+  hAddAi(from, m) {
+    const cfg = this.cfg;
+    if (from !== this.hostId || this.started || cfg.mode !== 'free' || this.members.size >= cfg.max) return;
+    let slot = Math.round(Number(m.slot));
+    const taken = new Set([...this.members.values()].map((x) => x.slot));
+    if (!Number.isInteger(slot) || slot < 0 || slot >= cfg.max || taken.has(slot)) {
+      slot = 0;
+      while (taken.has(slot)) slot++;
+    }
+    this.aiSeq = (this.aiSeq || 0) + 1;
+    const ai = { id: `ai${this.aiSeq}${this.me.slice(0, 3)}`, name: clean(m.name, 14) || 'Robo', hero: clean(m.hero, 32) || 'retro:1', slot, at: Date.now(), ai: true };
+    this.members.set(ai.id, ai);
+    this.assignTeam(ai.id);
+    this.out({ t: 'peer_join', player: this.publicPlayer(ai) });
+    this.sendTeams();
+    this.sendScores();
+    this.touchRow();
+  }
+
+  hRemoveAi(from, m) {
+    const ai = this.members.get(String(m.id));
+    if (from !== this.hostId || this.started || !ai?.ai) return;
+    this.out({ t: 'peer_leave', id: ai.id, name: ai.name, host: this.hostId });
+    this.sendTeams();
+    this.sendScores();
+    this.touchRow();
+  }
+
   // the victim reports its own defeat so the right player gets the point
   hDied(from, m) {
+    this.hKill(String(m.killer), from);
+  }
+
+  // `killer` took down `victimId` (either can be a computer player)
+  hKill(killerId, victimId) {
     const cfg = this.cfg;
     if (!cfg.pvp || !this.started || this.winning) return;
-    const killer = this.members.get(String(m.killer));
-    const victim = this.members.get(from);
+    const killer = this.members.get(killerId);
+    const victim = this.members.get(victimId);
+    const from = victimId;
     if (!killer || !victim || killer.id === from) return;
     // a player took down a player: everyone hears about it (kill streaks are global); it only scores in a "player kills" room
     const first = !this.firstDone;

@@ -1,13 +1,14 @@
 import { CHUNK_PX, WATER } from './world';
 import { sfx } from './sfx';
 import { BOSS_WIND, POWER_SLOW_TIME } from './waves';
-import { ITEMS, breaksOnImpact, iconOf, throwDamage, throwStats } from './items';
+import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
 import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
 import { MONSTERS, lvDmg, lvHp, lvXp, rollMonsterLevel } from './monsters';
+import { TINY } from './tiny';
 import { SUPPLY_CAP } from './upgrades';
 import { swingTime, weaponById, weaponIconFile } from './weapons';
-import { HP_PER_HEART, HP_PER_UPGRADE, hp100, maxHearts, monsterXp, XP } from './stats';
+import { DMG_PER_LEVEL, HP_PER_HEART, HP_PER_UPGRADE, hp100, maxHearts, monsterXp, XP } from './stats';
 
 // Skeleton camps: three guards that chase you, but give up beyond LEASH and walk home to heal
 const CAMP_WAKE = 300; // the camp stirs when you come this close
@@ -15,9 +16,24 @@ const CAMP_LEASH = 200; // how far from their post the guards will follow
 const CAMP_RESPAWN = 150; // seconds before a wiped-out camp is guarded again
 
 // Wild creatures from the ENEMY pack that roam the free world: ground things by day, flyers and hounds by night
-const WILD_DAY = ['jelly', 'redcap', 'hand', 'shrieker'];
-// night is meaner: ranged archers and watchers, and zombies shamble out of the dark
-const WILD_NIGHT = ['bat', 'bat', 'eye', 'hound', 'scarab', 'redcap', 'archer', 'watcher', 'ghoul', 'z_small', 'z_small', 'z_axe', 'z_runner', 'z_armor'];
+// Every region has its own people: what walks it by day and by night, its night boss and its mini boss.
+const BIOME_FOES = {
+  clover: { day: ['t_slime', 't_slime', 't_orc', 't_swordsman', 'jelly', 'redcap'], night: ['t_orc', 't_skeleton', 't_archer', 'bat', 'hound', 'z_small'], boss: ['t_eliteorc', 't_templar'], mini: ['t_axeman', 't_knight', 't_swordsman'] },
+  tidal: { day: ['t_slime', 't_soldier', 't_soldier', 't_swordsman', 'jelly'], night: ['t_skarcher', 't_skeleton', 't_bat', 'bat', 'watcher'], boss: ['t_orcrider', 't_eliteorc'], mini: ['t_armskel', 't_lancer', 't_orcrider'] },
+  emerald: { day: ['t_werewolf', 't_archer', 't_orc', 't_slime', 'redcap'], night: ['t_werewolf', 't_werebear', 't_bat', 'hound'], boss: ['t_werebear'], mini: ['t_werewolf', 't_werebear', 't_archer'] },
+  crystal: { day: ['t_wizard', 't_priest', 't_slime', 't_slime', 'jelly'], night: ['t_wizard', 't_necro', 't_bat', 'eye', 'ghastly'], boss: ['t_necro', 't_wizard'], mini: ['t_wizard', 't_priest', 't_necro'] },
+  marsh: { day: ['t_slime', 't_slime', 't_skeleton', 'shrieker', 'jelly'], night: ['t_necro', 't_skeleton', 't_skarcher', 'ghoul', 't_bat'], boss: ['t_necro', 't_gskel'], mini: ['t_gskel', 't_necro', 't_armskel'] },
+  lava: { day: ['t_orc', 't_armorc', 't_eliteorc', 'hound', 'scarab'], night: ['t_armorc', 't_eliteorc', 't_werebear', 'hound', 'scarab'], boss: ['t_eliteorc'], mini: ['t_armorc', 't_eliteorc', 't_werebear'] },
+  beach: { day: ['t_soldier', 't_soldier', 't_lancer', 't_swordsman', 'scarab'], night: ['t_lancer', 't_skarcher', 't_bat', 'ghoul'], boss: ['t_orcrider', 't_gskel'], mini: ['t_lancer', 't_soldier', 't_orcrider'] },
+  asphalt: { day: ['z_small', 'z_small', 't_skeleton', 'z_axe', 'hand'], night: ['t_armskel', 't_gskel', 'z_runner', 'z_armor', 'z_axe', 'bat'], boss: ['t_gskel'], mini: ['t_armskel', 't_gskel', 't_axeman'] },
+  mountain: { day: ['t_werewolf', 't_knight', 't_lancer', 't_orc', 'redcap'], night: ['t_werebear', 't_orcrider', 't_knight', 't_bat', 'hound'], boss: ['t_werebear', 't_orcrider'], mini: ['t_orcrider', 't_werewolf', 't_knight'] },
+  wood: { day: ['t_knight', 't_templar', 't_axeman', 't_priest', 't_swordsman'], night: ['t_templar', 't_necro', 't_skeleton', 't_skarcher', 't_bat'], boss: ['t_templar'], mini: ['t_knight', 't_templar', 't_axeman'] },
+};
+// the region a spot belongs to (the open world is a patchwork of all of them)
+export const biomeOf = (world, x, y) => (world.mixed ? world.biomeAt(Math.floor(x / 16), Math.floor(y / 16)) : world.tileset) || 'clover';
+const foesAt = (world, x, y) => BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover;
+const pickOf = (a) => a[Math.floor(Math.random() * a.length)];
+const MINION = 't_skeleton';
 // some flyers that spit from a distance, besides the shooters in MONSTERS
 const RANGED_EXTRA = { eye: { range: 72, rate: 2.6 }, ghastly: { range: 80, rate: 2.8 } };
 // [item, chance, min, max]
@@ -29,6 +45,7 @@ const WILD_LOOT = [
 ];
 
 const SUPPLY_ITEMS = { hppack: 'hp', soupcan: 'stam' };
+const MAGNET_R = 60; // how far away loot starts flying to you
 
 const MAX_HP = 6;
 const SWORD_DMG = 2;
@@ -90,6 +107,14 @@ export const GUN_ORDER = ['pistol', 'shotgun', 'rifle', 'plasma'];
 export const BOMB_R = 46; // blast radius in pixels
 export const GRENADE_REACH = 190; // how far a grenade can be thrown
 const BOMB_FUSE = 2.8; // seconds from the throw to the bang
+// every kind of grenade: what it does, how long until it goes off and how far it reaches
+const GRENADES = {
+  truffle: { kind: 'blast', fuse: BOMB_FUSE, R: BOMB_R },
+  stungrenade: { kind: 'stun', fuse: 1.5, R: 54 },
+  smokegrenade: { kind: 'smoke', fuse: 1.1, R: 50 },
+};
+const STUN_TIME = 3.5;
+const SMOKE_TIME = 9;
 const THROW_UNLOCK = 0.35; // once empty, wait until it refills this far
 export const RECALL_TIME = 2.5;
 export const RECALL_CD = 20;
@@ -120,7 +145,7 @@ const SKELETON_LOOT = [
 // where a creature's body is centred: flyers hover above the ground, big ones are taller
 const bodyY = (m) => {
   const def = MONSTERS[m.type];
-  return m.y - 8 * (def.scale || 1) - (def.kind === 'fly' || def.fly ? 7 : 0);
+  return m.y - (def.tiny ? TINY.chars[def.tiny].h / 2 : 8) * (m.scale || def.scale || 1) - (def.kind === 'fly' || def.fly ? 7 : 0);
 };
 
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -136,6 +161,7 @@ export class Combat {
     this.skeletons = [];
     this.wilds = [];
     this.wildShots = []; // what the ranged monsters spit and shoot
+    this.spells = []; // spells that are about to land (or just did) on the ground
     this.treeBars = []; // the health bar of a tree you have just hit
     this.wildT = 8;
     this.camps = new Map(); // chunk key -> { on, killed, until }
@@ -143,6 +169,7 @@ export class Combat {
     this.campScan = 0;
     this.projectiles = [];
     this.bombs = []; // Sticky Grenades that have been thrown
+    this.smokes = []; // clouds from smoke grenades: { x, y, t, life, R }
     this.blasts = []; // the flash of one going off
     this.remoteShots = [];
     this.drops = [];
@@ -162,6 +189,8 @@ export class Combat {
     this.slowT = 0; // Slow-mo still running, for the screen tint
     this.blastT = 0; // the flash of a Big Blast
     this.hold = null; // {t} while the left button is down
+    this.skillHold = null; // {t} while Space is held to charge the dash
+    this.thrown = null; // the trident in flight: { x, y, a, out, range, hit, ... }
     this.dash = null;
     this.dashCd = 0;
     this.trail = [];
@@ -206,7 +235,7 @@ export class Combat {
   }
 
   meleeDmg() {
-    return SWORD_DMG + (this.weapon()?.dmg || 0) + this.up('melee') * (this.g.wave ? 1 : 0.4);
+    return SWORD_DMG + (this.weapon()?.dmg || 0) + this.up('melee') * (this.g.wave ? 1 : 0.4) + (this.g.wave ? 0 : DMG_PER_LEVEL * ((this.g.level || 1) - 1));
   }
 
   swingCooldown() {
@@ -234,13 +263,13 @@ export class Combat {
   }
 
   throwBonus() {
-    return this.up('throw') * (this.g.wave ? 1 : 0.3);
+    return this.up('throw') * (this.g.wave ? 1 : 0.3) + (this.g.wave ? 0 : DMG_PER_LEVEL * ((this.g.level || 1) - 1));
   }
 
   // Free Roam: a full second between throws to start, shaved down by Successive throw.
   // (Wave Defense paces throws with its throw meter instead.)
   throwCooldown() {
-    return this.g.wave ? 0.2 : 1 - 0.12 * this.up('rapid');
+    return this.g.wave ? 0.2 : 1;
   }
 
   meleeReach() {
@@ -300,12 +329,229 @@ export class Combat {
     if (this.swingCd > 0) return;
     const a = this.aim();
     const w = this.weapon();
+    if (w?.kind === 'staff') return this.castBolt(w, a);
+    if (w?.kind === 'trident' && this.thrown) {
+      this.g.onToast?.('🔱 Your trident is out there. Wait for it to come back.');
+      return;
+    }
     this.swing = { t: 0, a, hit: false, w: w?.id };
     sfx.play('swing');
     this.swingCd = this.swingCooldown();
     this.revealT = 1.5;
     this.g.mp?.net.send({ t: 'fx', kind: 'swing', a, w: w?.id });
     this.faceAim(a);
+  }
+
+  // ---------- staffs, slingshots and tridents ----------
+
+  // a bolt of whatever the staff is made of
+  castBolt(w, a) {
+    const [cx, cy] = this.center();
+    const speed = 210;
+    const dmg = this.meleeDmg() * 0.9;
+    this.swingCd = this.swingCooldown();
+    this.revealT = 1.5;
+    this.projectiles.push({
+      x: cx + Math.cos(a) * 8, y: cy + Math.sin(a) * 8, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+      id: 'gem', dmg, life: w.reach / speed, rot: 0, free: true, spell: w.effect, color: w.spell.color, pierce: w.effect === 'arcane' ? 3 : 0,
+    });
+    sfx.play('throw', 0.8);
+    this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'gem', x: cx, y: cy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed });
+    this.faceAim(a);
+  }
+
+  // hold + release: a spell lands at the cursor after a short warning
+  castGround(w, power) {
+    const g = this.g;
+    const cost = DASH_STAMINA / g.staminaCap();
+    if (this.swingCd > 0) return;
+    if (g.stamina < cost) {
+      g.onToast?.('Too tired to cast!');
+      this.attack();
+      return;
+    }
+    g.stamina -= cost;
+    const [cx, cy] = this.center();
+    const m = g.mouseWorld();
+    const range = w.reach * 1.05;
+    const d = Math.hypot(m.x - cx, m.y - cy) || 1;
+    const k = Math.min(1, range / d);
+    const sp = w.spell;
+    const radius = 20 + 16 * power;
+    this.spells.push({
+      x: cx + (m.x - cx) * k, y: cy + (m.y - cy) * k + 8, t: -0.45, delay: 0.45, fx: sp.fx, hue: sp.hue, color: sp.color, frames: TINY.fx[sp.fx],
+      radius, dmg: this.meleeDmg() * (1.2 + 1.1 * power), mine: true, effect: w.effect, did: false,
+    });
+    this.swingCd = this.swingCooldown() * 1.4;
+    this.revealT = 1.5;
+    sfx.play('wave', 0.6);
+    this.faceAim(Math.atan2(m.y - cy, m.x - cx));
+  }
+
+  // a slingshot stone, or a fan of them
+  shootSling(w, a, range = w.reach) {
+    const [cx, cy] = this.center();
+    const sh = w.shots;
+    const dmg = this.meleeDmg() * sh.mul;
+    this.swingCd = this.swingCooldown();
+    this.revealT = 1.5;
+    for (let i = 0; i < sh.n; i++) {
+      const aa = a + (sh.n > 1 ? (i / (sh.n - 1) - 0.5) * 2 * sh.spread : (Math.random() - 0.5) * 2 * sh.spread) + (sh.n > 1 ? (Math.random() - 0.5) * 0.08 : 0);
+      const speed = sh.speed * (0.92 + Math.random() * 0.16);
+      this.projectiles.push({
+        x: cx + Math.cos(aa) * 8, y: cy + Math.sin(aa) * 8, vx: Math.cos(aa) * speed, vy: Math.sin(aa) * speed,
+        id: 'rock', dmg, life: range / speed, rot: 0, free: true, pierce: sh.pierce, stone: true,
+      });
+    }
+    sfx.play('throw', 0.7);
+    this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'rock', x: cx, y: cy, vx: Math.cos(a) * sh.speed, vy: Math.sin(a) * sh.speed });
+    this.faceAim(a);
+  }
+
+  // how far a trident thrown (or a stone shot) after holding for t seconds would fly
+  tridentRange(w, t) {
+    if (w.kind === 'sling') return 80 + (w.reach * 1.8 - 80) * Math.min(1, t / 0.9);
+    return w.throw.min + (w.throw.max - w.throw.min) * Math.min(1, t / 1.1);
+  }
+
+  // let go of a held left click with a trident (hurl it) or a slingshot (fire), as far as the hold allowed
+  releaseCharge(w, t) {
+    const a = this.aim();
+    if (w.kind === 'sling') {
+      if (this.swingCd <= 0) this.shootSling(w, a, this.tridentRange(w, t));
+      return;
+    }
+    if (this.thrown) return;
+    const [cx, cy] = this.center();
+    this.thrown = {
+      x: cx, y: cy, a, out: true, range: this.tridentRange(w, t), went: 0, hit: new Set(), rot: a, speed: w.throw.speed, age: 0,
+      dmg: this.meleeDmg() * 1.3, w: w.id, effect: w.effect,
+    };
+    this.swingCd = Math.max(this.swingCd, 0.25);
+    this.revealT = 1.5;
+    sfx.play('dash', 0.8);
+    this.faceAim(a);
+  }
+
+  updateTrident(dt) {
+    const th = this.thrown;
+    const [cx, cy] = this.center();
+    th.age += dt;
+    th.rot = th.out ? th.a : Math.atan2(cy - th.y, cx - th.x); // the tip leads the way, out and back
+    const step = th.speed * (th.out ? 1 : 1.15) * dt;
+    if (th.out) {
+      const nx = th.x + Math.cos(th.a) * step;
+      const ny = th.y + Math.sin(th.a) * step;
+      if (this.g.world.isBlocked(nx - 1, ny - 1, 2, 2, true, true)) th.went = th.range; // stuck in something: back it comes (water is no obstacle)
+      else {
+        th.x = nx;
+        th.y = ny;
+        th.went += step;
+      }
+      if (th.went >= th.range) {
+        th.out = false;
+        th.hit = new Set();
+        th.dmg *= 0.7;
+      }
+    } else {
+      const d = Math.hypot(cx - th.x, cy - th.y);
+      if (d < 10 || th.age > 8) {
+        this.thrown = null;
+        sfx.play('pickup', 0.8);
+        return;
+      }
+      th.x += ((cx - th.x) / d) * Math.min(d, step);
+      th.y += ((cy - th.y) / d) * Math.min(d, step);
+    }
+    // everything along the way gets skewered once per leg
+    for (const s of this.skeletons) {
+      if (s.state === 'dead' || th.hit.has(`s${s.id}`) || Math.hypot(s.x - th.x, s.y - 8 - th.y) > 13) continue;
+      th.hit.add(`s${s.id}`);
+      this.damageSkeleton(s, th.dmg, th.x - Math.cos(th.a) * 8, th.y - Math.sin(th.a) * 8, 140);
+    }
+    for (const m of this.monstersNear(th.x, th.y, 9)) {
+      if (th.hit.has(`m${m.id}`)) continue;
+      th.hit.add(`m${m.id}`);
+      this.hitMonster(m, th.dmg, th.x - Math.cos(th.a) * 8, th.y - Math.sin(th.a) * 8, th.effect === 'tide' ? 220 : 140);
+      if (th.effect === 'tide') m.slowT = 2.5;
+    }
+    if (this.g.fight) {
+      for (const r of this.g.remotes.values()) {
+        if (r.hidden || this.g.sameTeam(r) || th.hit.has(`r${r.id}`) || Math.hypot(r.x - th.x, r.y - 8 - th.y) > 12) continue;
+        th.hit.add(`r${r.id}`);
+        this.hitRemote(r, th.dmg);
+      }
+    }
+    for (const b of this.g.balls?.list || []) {
+      if (th.hit.has(`b${b.i}`) || Math.hypot(th.x - b.x, th.y - (b.y - 5 - b.z)) > 10) continue;
+      th.hit.add(`b${b.i}`);
+      this.g.balls.hit(b, Math.cos(th.a), Math.sin(th.a), 200);
+    }
+    this.chopTrees(th.x, th.y, 9, th.dmg * 0.5, null, 0, th.hit);
+  }
+
+  // freeze a monster or skeleton in place for a while
+  stunTarget(t, secs, color = '#ffe36b') {
+    t.stunT = Math.max(t.stunT || 0, secs);
+    t.stunColor = color;
+    t.swing = null;
+    t.skill = null;
+  }
+
+  // what a spell does besides damage
+  spellEffect(effect, kind, t, dmg, x, y, strong = false) {
+    if (!t) return;
+    const [bx, by] = this.bodyOf(kind, t);
+    if (effect === 'frost') {
+      // frostbite: frozen solid for a moment (bosses shrug most of it off), then still slow
+      if (kind !== 'rem') this.stunTarget(t, (strong ? 2.4 : 1.6) * (t.nightBoss || t.miniBoss ? 0.5 : 1), '#9fe3ff');
+      t.slowT = 2.5;
+      this.floaters.push({ x: bx, y: by - 20, text: '❄ FROZEN', color: '#8fd6ff', t: 0 });
+    } else if (effect === 'fire') {
+      if (!this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 3, wait: 0.5, dmg: 0.5 + dmg * 0.12 });
+    } else if (effect === 'venom') {
+      if (!this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 5, wait: 0.6, dmg: 0.45 + dmg * 0.1 });
+      this.floaters.push({ x: bx, y: by - 20, text: '☠', color: '#8fe05a', t: 0 });
+    } else if (effect === 'storm') {
+      this.chain([{ kind, t, dmg }], x, y);
+    }
+  }
+
+  // ---------- Space: your sword skill (Free Roam) ----------
+
+  skillKeyDown() {
+    if (this.skillHold) return;
+    if (!this.allowed('melee')) return;
+    if (!this.canFight()) {
+      this.warnIndoors();
+      return;
+    }
+    if (!this.g.activeSkill()) {
+      if (this.g.t - (this.skillToastAt ?? -9) > 2) {
+        this.skillToastAt = this.g.t;
+        this.g.onToast?.('💨 Dash unlocks at level 6, Spiral Sword at level 8.');
+      }
+      return;
+    }
+    this.skillHold = { t: 0 };
+  }
+
+  // let go of Space: a tap is a short dash, and holding first makes it stronger
+  skillKeyUp() {
+    const h = this.skillHold;
+    if (!h) return;
+    this.skillHold = null;
+    const skill = this.g.activeSkill();
+    if (!skill || !this.canFight()) return;
+    const power = Math.max(0.2, Math.min(1, h.t / (HOLD_MIN + CHARGE_TIME)));
+    if (skill === 'spiral') this.startSpin(power, true);
+    else this.startDash(power, true);
+  }
+
+  // R: whichever utility skill you have equipped
+  activateUtil() {
+    if (this.g.activeUtil() === 'invis') this.activateInvis();
+    else this.activateShield();
   }
 
   // ---------- dash (hold + release left click) ----------
@@ -316,31 +562,46 @@ export class Combat {
       this.warnIndoors();
       return;
     }
+    if (!this.g.wave && this.weapon()?.kind === 'trident' && this.thrown) return; // it is still out there
     this.hold = { t: 0 };
   }
 
   cancelHold() {
     this.hold = null;
+    this.skillHold = null;
   }
 
+  // Left click let go. Free Roam: a tap swings (or bashes, or fires a bolt); holding first does the weapon's big move:
+  // a staff drops a spell at the cursor, a trident is hurled and a slingshot fires, as far as you held. Dash and Spiral are on Space.
+  // The wave modes keep the old hold-to-dash.
   holdEnd() {
     if (!this.hold) return;
     const t = this.hold.t;
     this.hold = null;
-    const skill = this.g.activeSkill();
-    if (!this.canFight()) this.warnIndoors();
-    else if (t < HOLD_MIN || !skill) this.attack();
-    else if (skill === 'spiral') this.startSpin(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
-    else this.startDash(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
+    const w = this.weapon();
+    const kind = w?.kind;
+    if (!this.canFight()) {
+      this.warnIndoors();
+      return;
+    }
+    if (this.g.wave) {
+      const skill = this.g.activeSkill();
+      if (t < HOLD_MIN || !skill) this.attack();
+      else if (skill === 'spiral') this.startSpin(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
+      else this.startDash(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
+    } else if (t < HOLD_MIN) this.attack();
+    else if (kind === 'staff') this.castGround(w, Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
+    else if (kind === 'trident' || kind === 'sling') this.releaseCharge(w, t);
+    else this.attack();
   }
 
-  startDash(power) {
+  startDash(power, quiet = false) {
     const g = this.g;
     if (this.dash) return;
     const cost = DASH_STAMINA / g.staminaCap();
     if (this.dashCd > 0 || g.stamina < cost) {
       if (g.stamina < cost) g.onToast?.('Too tired to dash!');
-      this.attack();
+      if (!quiet) this.attack();
       return;
     }
     const a = this.aim();
@@ -361,13 +622,13 @@ export class Combat {
     g.mp?.net.send({ t: 'fx', kind: 'swing', a });
   }
 
-  startSpin(power) {
+  startSpin(power, quiet = false) {
     const g = this.g;
     if (this.spin || this.dash) return;
     const cost = DASH_STAMINA / g.staminaCap();
     if (this.dashCd > 0 || g.stamina < cost) {
       if (g.stamina < cost) g.onToast?.('Too tired to spin!');
-      this.attack();
+      if (!quiet) this.attack();
       return;
     }
     g.stamina -= cost;
@@ -513,7 +774,7 @@ export class Combat {
   activateShield() {
     if (this.shieldCd > 0) return;
     if (this.g.activeUtil() !== 'shield') {
-      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'Buy the Shield in the shop first (B).');
+      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'The Shield unlocks at level 10.');
       return;
     }
     this.shieldT = SHIELD_DUR;
@@ -527,7 +788,7 @@ export class Combat {
   activateInvis() {
     if (this.invisCd > 0 || this.invisT > 0) return;
     if (this.g.activeUtil() !== 'invis') {
-      this.g.onToast?.(this.g.skills.invis ? 'Equip Invisibility in the shop (B).' : 'Buy Invisibility in the shop first (B).');
+      this.g.onToast?.(this.g.skills.invis ? 'Equip Invisibility in the shop (B).' : 'Invisibility unlocks at level 15.');
       return;
     }
     this.invisT = INVIS_DUR;
@@ -587,7 +848,9 @@ export class Combat {
   // Throw a Sticky Grenade: it flies a short way, sticks to the first enemy it touches (or just lands), and goes off after a few seconds
   throwGrenade(slot) {
     const inv = this.g.inventory;
-    if (!inv[slot] || inv[slot].id !== 'truffle') return;
+    const item = inv[slot]?.id;
+    const gren = GRENADES[item];
+    if (!gren) return;
     removeFromSlot(inv, slot, 1);
     this.g.emitInventory();
     const a = this.aim();
@@ -607,7 +870,7 @@ export class Combat {
     this.bombs.push({
       x: x0, y: y0, vx: (tx - x0) / flight, vy: (ty - y0) / flight,
       fly: flight, flightMax: flight, dist, tx, ty,
-      fuse: BOMB_FUSE, max: BOMB_FUSE, stuck: null, R: BOMB_R,
+      fuse: gren.fuse, max: gren.fuse, stuck: null, R: gren.R, kind: gren.kind, item,
     });
     this.revealT = 1.5;
     sfx.play('throw', 0.8);
@@ -618,6 +881,7 @@ export class Combat {
   updateBombs(dt) {
     const { world } = this.g;
     this.blasts = this.blasts.filter((bl) => (bl.t += dt) < 0.45);
+    if (this.smokes.length) this.smokes = this.smokes.filter((s) => (s.t += dt) < s.life);
     if (!this.bombs.length) return;
     this.bombs = this.bombs.filter((b) => {
       if (b.fly > 0) {
@@ -638,7 +902,7 @@ export class Combat {
             break;
           }
         }
-        if (!b.stuck && world.isBlocked(b.x - 1, b.y - 1, 2, 2, false, true)) {
+        if (!b.stuck && world.isBlocked(b.x - 1, b.y - 1, 2, 2, true, true)) {
           b.x = px;
           b.y = py;
           b.fly = 0;
@@ -659,6 +923,27 @@ export class Combat {
   }
 
   explode(b) {
+    if (b.kind === 'smoke') {
+      // a thick cloud: whoever stands in it cannot be seen
+      this.smokes.push({ x: b.x, y: b.y, t: 0, life: SMOKE_TIME, R: b.R });
+      sfx.play('wave', 0.4);
+      return;
+    }
+    if (b.kind === 'stun') {
+      this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R, tone: 'stun' });
+      sfx.play('boom', 0.5);
+      for (const m of this.monstersNear(b.x, b.y, b.R)) {
+        this.stunTarget(m, m.nightBoss || m.miniBoss ? STUN_TIME * 0.5 : STUN_TIME);
+        this.floaters.push({ x: m.x, y: m.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
+      }
+      for (const s of this.skeletons) {
+        if (s.state !== 'dead' && Math.hypot(s.x - b.x, s.y - 8 - b.y) <= b.R) {
+          this.stunTarget(s, STUN_TIME);
+          this.floaters.push({ x: s.x, y: s.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
+        }
+      }
+      return;
+    }
     this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R });
     sfx.play('boom');
     // anything normal inside the circle is blown away; tougher things take a big hit
@@ -791,7 +1076,7 @@ export class Combat {
     const inv = this.g.inventory;
     const stack = inv[slot];
     if (!stack) return;
-    if (stack.id === 'truffle') {
+    if (GRENADES[stack.id]) {
       this.throwGrenade(slot);
       return;
     }
@@ -832,7 +1117,11 @@ export class Combat {
     const room = this.g.inside ? { id: 'interior' } : this.g.world.houseAt(this.g.player.x, this.g.player.y - 2);
     const wasHidden = this.hidden;
     this.insideId = room?.id ?? null;
-    this.hidden = this.g.dead ? true : (!!room || this.invisT > 0) && this.revealT <= 0;
+    const pl = this.g.player;
+    const inSmoke = this.smokes.some((s) => Math.hypot(pl.x - s.x, pl.y - 4 - s.y) < s.R);
+    this.hidden = this.g.dead ? true : (!!room || this.invisT > 0 || inSmoke) && this.revealT <= 0;
+    if (inSmoke && !this.wasInSmoke && !this.g.dead) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the smoke', color: '#cfd6e0', t: 0 });
+    this.wasInSmoke = inSmoke;
     if (this.hidden && !wasHidden && !this.g.dead && room && !this.g.inside) this.g.onToast?.('Hiding indoors: skeletons and rivals can’t see you.');
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.recallCd = Math.max(0, this.recallCd - dt);
@@ -859,6 +1148,8 @@ export class Combat {
     this.invisCd = Math.max(0, this.invisCd - dt);
     if (this.spin) this.updateSpin(dt);
     if (this.hold) this.hold.t += dt;
+    if (this.skillHold) this.skillHold.t += dt;
+    if (this.thrown) this.updateTrident(dt);
     if (this.dash) this.updateDash(dt);
     this.trail = this.trail.filter((tr) => (tr.t += dt) < 0.22);
 
@@ -990,11 +1281,13 @@ export class Combat {
       this.wildT = 3 + Math.random() * 3;
       const night = this.g.darkness();
       const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 2;
-      if (this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15 ? WILD_NIGHT : WILD_DAY);
+      if (this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
       if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
     }
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
+    if (this.wildQ?.length) this.wilds.push(...this.wildQ.splice(0));
     this.updateWildShots(dt);
+    this.updateSpells(dt);
   }
 
   updateWildShots(dt) {
@@ -1007,7 +1300,7 @@ export class Combat {
         this.hurtPlayer(s.dmg, s.x - s.vx, s.y - s.vy, { by: s.by });
         return false;
       }
-      return s.life > 0 && !this.g.world.isBlocked(s.x - 1, s.y - 1, 2, 2);
+      return s.life > 0 && !this.g.world.isBlocked(s.x - 1, s.y - 1, 2, 2, true);
     });
   }
 
@@ -1024,6 +1317,11 @@ export class Combat {
       this.spawnPack('z_small', 5, '🧟 Zombies are shambling out of the dark!');
     } else if (night < 0.1) {
       this.zombieNight = false;
+    }
+    this.miniT = (this.miniT ?? 55 + Math.random() * 50) - 3.5;
+    if (this.miniT <= 0) {
+      this.miniT = 25;
+      if (!this.wilds.some((w) => w.miniBoss && w.state !== 'dead') && this.spawnMiniBoss()) this.miniT = 140 + Math.random() * 110;
     }
     const boss = this.wilds.some((w) => w.nightBoss && w.state !== 'dead');
     if (night > 0.6 && !boss && !this.nightBossDone) {
@@ -1064,7 +1362,7 @@ export class Combat {
 
   spawnNightBoss() {
     const { world, player: p, home } = this.g;
-    const type = ['stonetroll', 'ogre', 'ettin'][Math.floor(Math.random() * 3)];
+    const type = pickOf(foesAt(world, p.x, p.y).boss); // always one of the animated characters
     for (let i = 0; i < 10; i++) {
       const ang = Math.random() * Math.PI * 2;
       const x = p.x + Math.cos(ang) * (190 + Math.random() * 40);
@@ -1074,11 +1372,34 @@ export class Combat {
       const w = this.makeWild(type, x, y, 8);
       w.hp = w.max = Math.round(w.max * 2.2);
       w.nightBoss = true;
+      if (MONSTERS[type].tiny) w.scale = 2;
       this.wilds.push(w);
       this.g.announceBoss('🌑 THE NIGHT BOSS HAS BEEN SUMMONED', `${MONSTERS[type].name} · follow the red arrow · it burns at sunrise`);
       return;
     }
     this.nightBossDone = false; // nowhere to put it; try again
+  }
+
+  // A small but tough boss from the region you are in: it never burns away, and it pays well
+  spawnMiniBoss() {
+    const { world, player: p, home } = this.g;
+    const type = pickOf(foesAt(world, p.x, p.y).mini);
+    for (let i = 0; i < 10; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const x = p.x + Math.cos(ang) * (170 + Math.random() * 40);
+      const y = p.y + Math.sin(ang) * (170 + Math.random() * 40);
+      if (Math.hypot(x - home.x, y - home.y) < 160) continue;
+      if (world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER || world.isBlocked(x - 6, y - 6, 12, 6)) continue;
+      const w = this.makeWild(type, x, y, 6);
+      w.hp = w.max = Math.round(w.max * 4.5);
+      w.miniBoss = true;
+      w.dmgMul = 1.3;
+      if (MONSTERS[type].tiny) w.scale = 1.5;
+      this.wilds.push(w);
+      this.g.announceBoss('⚔️ A MINI BOSS APPEARS', `${MONSTERS[type].name} · small but tough · follow the arrow`);
+      return true;
+    }
+    return false;
   }
 
   // the tougher the days get, the higher the levels that can show up (and at night, two more)
@@ -1100,16 +1421,17 @@ export class Combat {
     };
   }
 
-  spawnWild(pool) {
+  spawnWild(night) {
     const { world, player: p, home } = this.g;
-    const type = pool[Math.floor(Math.random() * pool.length)];
-    const def = MONSTERS[type];
-    const flyer = def.kind === 'fly';
     for (let i = 0; i < 6; i++) {
       const ang = Math.random() * Math.PI * 2;
       const d = 160 + Math.random() * 80;
       const x = p.x + Math.cos(ang) * d;
       const y = p.y + Math.sin(ang) * d;
+      const foes = foesAt(world, x, y);
+      const type = pickOf(night ? foes.night : foes.day);
+      const def = MONSTERS[type];
+      const flyer = def.kind === 'fly';
       if (Math.hypot(x - home.x, y - home.y) < 160) continue;
       const tx = Math.floor(x / 16);
       const ty = Math.floor(y / 16);
@@ -1127,8 +1449,8 @@ export class Combat {
     const dy = p.y - w.y;
     const dist = Math.hypot(dx, dy) || 1;
     w.anim += dt;
-    if (w.state === 'dead') return (w.t += dt) < 0.5;
-    if (!w.nightBoss && dist > (this.g.dungeon ? 3000 : 430)) return false;
+    if (w.state === 'dead') return (w.t += dt) < (def.tiny ? 0.85 : 0.5);
+    if (!w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : 430)) return false;
     if (w.nightBoss && !this.g.dungeon && this.g.darkness() < 0.15) w.burning = true; // sunrise
     if (w.burning) {
       // it burns away in the daylight. Nothing drops from something that burned to death.
@@ -1153,6 +1475,7 @@ export class Combat {
       }
     };
     if (w.state === 'hurt') {
+      w.swing = null;
       w.t += dt;
       step(w.kx * dt, w.ky * dt);
       w.kx *= 0.9;
@@ -1163,18 +1486,30 @@ export class Combat {
       }
       return true;
     }
+    if (w.stunT > 0) {
+      w.stunT -= dt;
+      w.swing = null;
+      return true;
+    }
     w.cd -= dt;
     w.atk = Math.max(0, w.atk - dt);
     const rng = def.kind === 'shoot' ? def : RANGED_EXTRA[w.type];
     const dark = this.g.darkness();
-    if (w.nightBoss && this.nightBossSkill(w, def, dt, dist, dx, dy, step)) return true;
-    const aggro = Math.max(w.nightBoss ? 180 : 100, rng ? rng.range + 24 : 0) + dark * 50;
-    const hitNow = Math.max(1, Math.round(def.dmg * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * dark)));
-    const by = { kind: 'monster', id: w.id, name: w.nightBoss ? `the night boss ${def.name}` : def.name };
+    const hitNow = Math.max(1, Math.round(def.dmg * (w.dmgMul || 1) * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * dark)));
+    const by = { kind: 'monster', id: w.id, name: w.nightBoss ? `the night boss ${def.name}` : w.miniBoss ? `the mini boss ${def.name}` : def.name };
+    if (w.swing) {
+      // in the middle of an attack: it stands its ground until the animation is done
+      this.tickSwing(w, dt);
+      return true;
+    }
+    if (def.tiny && dist < 260 && !this.hidden && !this.g.dead && this.tinySkill(w, def, dt, dist, hitNow, by)) return true;
+    if ((w.nightBoss || w.miniBoss || def.skill === 'charge') && this.nightBossSkill(w, def, dt, dist, dx, dy, step)) return true;
+    const aggro = Math.max(w.nightBoss || w.miniBoss ? 180 : 100, rng ? rng.range + 24 : 0) + dark * 50;
     if (dist < aggro && !this.hidden && !this.g.dead) {
       w.face = dx >= 0 ? 1 : -1;
       w.dirv = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 2 : 3) : dy > 0 ? 0 : 1;
-      const speed = def.speed * 1.25 * (1 + 0.25 * dark); // faster in the dark
+      if (w.slowT > 0) w.slowT -= dt;
+      const speed = def.speed * 1.25 * (1 + 0.25 * dark) * (w.slowT > 0 ? 0.45 : 1); // faster in the dark, slower when frozen
       // bats swoop in on a weaving line
       const weave = w.type === 'bat' ? Math.sin(w.anim * 5 + w.phase) * 0.7 : 0;
       const ux = dx / dist;
@@ -1185,14 +1520,27 @@ export class Combat {
         else if (dist < rng.range * 0.4) step(-ux * speed * 0.7 * dt, -uy * speed * 0.7 * dt);
         if (dist < rng.range && w.cd <= 0) {
           w.cd = rng.rate * (0.8 + Math.random() * 0.4);
-          w.atk = 0.3;
-          this.wildShots.push({ x: w.x, y: w.y - 6, vx: ux * 95, vy: uy * 95, life: 1.8, dmg: hitNow, by });
+          if (def.tiny) this.tinyShoot(w, def, hitNow, by);
+          else {
+            w.atk = 0.3;
+            this.wildShots.push({ x: w.x, y: w.y - 6, vx: ux * 95, vy: uy * 95, life: 1.8, dmg: hitNow, by });
+          }
         }
-      } else if (dist > 14) step((ux - uy * weave) * speed * dt, (uy + ux * weave) * speed * dt);
+      } else if (dist > (def.reach || 14) * (w.scale || 1)) step((ux - uy * weave) * speed * dt, (uy + ux * weave) * speed * dt);
       else if (w.cd <= 0) {
-        w.cd = 1.2;
-        w.atk = 0.2;
-        this.hurtPlayer(hitNow, w.x, w.y, { by });
+        w.cd = def.tiny ? 1 + Math.random() * 0.6 : 1.2;
+        if (def.tiny) {
+          // the blow lands partway through the swing, so you can step out of it
+          const reach = (def.reach || 14) * (w.scale || 1) + 8;
+          const boss = w.nightBoss || w.miniBoss; // a boss winds up slowly, so the red fan is easy to read and dodge
+          this.startSwing(w, pickOf(def.swings), boss ? 1.5 : 0.6, boss ? 0.75 : 0.55, () => {
+            w.atk = 0.2;
+            if (!this.hidden && !this.g.dead && Math.hypot(this.g.player.x - w.x, this.g.player.y - w.y) <= reach) this.hurtPlayer(hitNow, w.x, w.y, { by });
+          }, { warn: 'fan', reach });
+        } else {
+          w.atk = 0.2;
+          this.hurtPlayer(hitNow, w.x, w.y, { by });
+        }
       }
     } else {
       w.wanderT -= dt;
@@ -1223,23 +1571,144 @@ export class Combat {
     }
   }
 
+  // ---------- the animated (Tiny RPG) monsters ----------
+
+  // start an attack animation; `act` happens `at` (0..1) of the way through it
+  startSwing(w, anim, dur, at, act, extra = null) {
+    w.swing = { anim, t: 0, dur, at, act, did: false, ...extra };
+    const p = this.g.player;
+    w.face = p.x >= w.x ? 1 : -1;
+  }
+
+  tickSwing(w, dt) {
+    const s = w.swing;
+    s.t += dt;
+    w.anim += dt;
+    if (!s.did && s.t >= s.at * s.dur) {
+      s.did = true;
+      s.act?.();
+    }
+    if (s.t >= s.dur) w.swing = null;
+  }
+
+  // archers loose an arrow, casters mark the ground where you stand and the spell lands a moment later
+  tinyShoot(w, def, dmg, by) {
+    const p = this.g.player;
+    const slow = w.nightBoss || w.miniBoss ? 1.7 : 1; // bosses give a longer warning
+    if (def.cast) {
+      const fx = pickOf(def.cast);
+      this.spells.push({ x: p.x, y: p.y, t: -def.delay * slow, delay: def.delay * slow, fx, frames: TINY.fx[fx], radius: def.radius, dmg, by, did: false });
+      this.startSwing(w, pickOf(def.swings), 0.7 * slow, 0.5, null);
+      return;
+    }
+    this.startSwing(w, 'atk1', 0.65 * slow, 0.6, () => {
+      const a = Math.atan2(p.y - 6 - (w.y - 8), p.x - w.x);
+      w.atk = 0.2;
+      sfx.play('swing', 0.5);
+      this.wildShots.push({ x: w.x, y: w.y - 8, vx: Math.cos(a) * 125, vy: Math.sin(a) * 125, life: 1.8, dmg, by, arrow: def.arrow });
+    }, { warn: 'line', range: def.range });
+  }
+
+  // block, summon and heal: the things a monster does between blows
+  tinySkill(w, def, dt, dist, dmg, by) {
+    if (!def.skill || def.skill === 'charge') return false;
+    w.skT = (w.skT ?? 2 + Math.random() * 4) - dt;
+    if (w.skT > 0) return false;
+    const wake = (secs) => {
+      w.skT = secs + Math.random() * 4;
+      return true;
+    };
+    if (def.skill === 'block') {
+      if (dist > 150) return false;
+      this.startSwing(w, 'special', 1.1, 1, null, { block: true });
+      return wake(5);
+    }
+    if (def.skill === 'summon') {
+      const minions = this.wilds.filter((m) => m.minionOf === w.id && m.state !== 'dead').length;
+      if (dist > 240 || minions >= 3) {
+        w.skT = 2;
+        return false;
+      }
+      this.startSwing(w, 'special', 0.95, 0.55, () => {
+        if (def.tiny === 'necromancer') this.spells.push({ x: w.x, y: w.y, t: 0, fx: 'necro_summon', frames: TINY.fx.necro_summon, fxOnly: true });
+        for (let k = 0; k < 2; k++) {
+          const m = this.makeWild(MINION, w.x + (k ? 20 : -20), w.y + 4, Math.max(1, (w.lv || 1) - 1));
+          m.minionOf = w.id;
+          m.cd = 1.2;
+          (this.wildQ ||= []).push(m); // (joins the others after this update pass)
+        }
+        sfx.play('wave', 0.5);
+      });
+      return wake(14);
+    }
+    if (def.skill === 'heal') {
+      const hurt = this.wilds.filter((m) => m !== w && m.state !== 'dead' && m.hp < m.max * 0.75 && Math.hypot(m.x - w.x, m.y - w.y) < 150);
+      if (!hurt.length) {
+        w.skT = 2;
+        return false;
+      }
+      this.startSwing(w, 'special', 0.8, 0.5, () => {
+        for (const m of hurt) {
+          m.hp = Math.min(m.max, m.hp + m.max * 0.3);
+          this.spells.push({ x: m.x, y: m.y, t: 0, fx: 'priest_heal', frames: TINY.fx.priest_heal, fxOnly: true });
+          this.floaters.push({ x: m.x, y: m.y - 24, text: '+', color: '#8fe28a', t: 0 });
+        }
+      });
+      return wake(8);
+    }
+    return false;
+  }
+
+  updateSpells(dt) {
+    const p = this.g.player;
+    this.spells = this.spells.filter((s) => {
+      s.t += dt;
+      if (s.mine && !s.did && s.t >= 0.1) {
+        s.did = true;
+        for (const m of this.monstersNear(s.x, s.y - 4, s.radius)) {
+          this.hitMonster(m, s.dmg, s.x, s.y, 150);
+          this.spellEffect(s.effect, 'mon', m, s.dmg, s.x, s.y, true);
+        }
+        for (const sk of this.skeletons) {
+          if (sk.state === 'dead' || Math.hypot(sk.x - s.x, sk.y - s.y) > s.radius + 6) continue;
+          this.damageSkeleton(sk, s.dmg, s.x, s.y, 150);
+          this.spellEffect(s.effect, 'skel', sk, s.dmg, s.x, s.y, true);
+        }
+        if (this.g.fight) {
+          for (const r of this.g.remotes.values()) {
+            if (r.hidden || this.g.sameTeam(r) || Math.hypot(r.x - s.x, r.y - s.y) > s.radius + 6) continue;
+            this.hitRemote(r, s.dmg);
+          }
+        }
+        this.chopTrees(s.x, s.y - 4, s.radius * 0.8, Math.max(1.5, s.dmg * 0.8));
+      }
+      if (!s.mine && !s.fxOnly && !s.did && s.t >= 0.1) {
+        s.did = true;
+        if (!this.hidden && !this.g.dead && Math.hypot(p.x - s.x, p.y - s.y) <= s.radius) this.hurtPlayer(s.dmg, s.x, s.y, { by: s.by });
+      }
+      return s.t < s.frames / 12;
+    });
+  }
+
   // The night boss winds up a skill with a red mark on the ground, then dashes or spins its blade all round it
   nightBossSkill(w, def, dt, dist, dx, dy, step) {
-    const scale = def.scale || 1;
+    const scale = w.scale || def.scale || 1;
     const radius = 30 + 14 * scale;
-    const hit = (mult) => this.hurtPlayer(Math.max(1, Math.round(def.dmg * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * this.g.darkness()) * mult)), w.x, w.y, { by: { kind: 'monster', id: w.id, name: `the night boss ${def.name}` } });
-    w.skT = (w.skT ?? 3) - dt;
+    const wind = BOSS_WIND * (w.nightBoss || w.miniBoss ? 1.9 : 1.3); // the red mark builds up slowly before the blow
+    const who = w.nightBoss ? `the night boss ${def.name}` : w.miniBoss ? `the mini boss ${def.name}` : def.name;
+    const hit = (mult) => this.hurtPlayer(Math.max(1, Math.round(def.dmg * (w.dmgMul || 1) * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * this.g.darkness()) * mult)), w.x, w.y, { by: { kind: 'monster', id: w.id, name: who } });
+    w.skT = (w.skT ?? 3 + (def.skill === 'charge' ? 3 : 0)) - dt;
     let sk = w.skill;
     if (!sk) {
       if (w.skT > 0 || dist > 190 || this.hidden || this.g.dead) return false;
-      w.skill = { kind: Math.random() < 0.5 ? 'dash' : 'spiral', phase: 0, t: 0, prog: 0, ang: Math.atan2(dy, dx), hit: false };
+      w.skill = { kind: (w.nightBoss || w.miniBoss) && Math.random() < 0.5 ? 'spiral' : 'dash', phase: 0, t: 0, prog: 0, ang: Math.atan2(dy, dx), hit: false };
       return true;
     }
     sk.t += dt;
     w.face = Math.cos(sk.ang) >= 0 ? 1 : -1;
     if (sk.phase === 0) {
-      sk.prog = Math.min(1, sk.t / BOSS_WIND);
-      if (sk.t >= BOSS_WIND) {
+      sk.prog = Math.min(1, sk.t / wind);
+      if (sk.t >= wind) {
         sk.phase = 1;
         sk.t = 0;
         sk.prog = 0;
@@ -1273,19 +1742,30 @@ export class Combat {
   damageWild(w, dmg, fromX, fromY, kb) {
     if (w.state === 'dead') return;
     const def = MONSTERS[w.type];
+    if (w.swing?.block) {
+      dmg *= 0.25;
+      this.floaters.push({ x: w.x, y: w.y - 26, text: 'blocked', color: '#9ec7ff', t: 0 });
+      sfx.play('block');
+    }
     w.hp -= dmg;
     sfx.play(w.hp <= 0 ? 'monsterDie' : 'hit');
     if (w.hp <= 0) {
       w.state = 'dead';
       w.t = 0;
       this.kills++;
-      this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss) * lvXp(w.lv || 1)), !!(def.boss || w.nightBoss));
+      this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss || w.miniBoss) * lvXp(w.lv || 1) * (w.minionOf ? 0.3 : 1)), !!(def.boss || w.nightBoss || w.miniBoss), { x: w.x, y: w.y });
+      if (w.miniBoss) {
+        // a mini boss is worth the trouble
+        this.shareCoins(w.x, w.y, 6 + Math.floor(Math.random() * 6), 3);
+        for (const [id, qty] of [['gem', 1], ['gold', 2], ['wood', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
+        this.g.onToast?.(`⚔️ The mini boss ${def.name} is down!`);
+      }
       if (w.nightBoss) {
         // slain before dawn: a real prize (the coins can be picked up by everyone in the room)
         this.shareCoins(w.x, w.y, 10 + Math.floor(Math.random() * 8), 4);
         for (const [id, qty] of [['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
       }
-      for (const [id, chance, min, max] of WILD_LOOT) {
+      for (const [id, chance, min, max] of w.minionOf ? [] : WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1));
           if (id === 'coin' && this.g.mp) this.shareCoins(w.x, w.y, qty, 1);
@@ -1294,7 +1774,7 @@ export class Combat {
       }
       return;
     }
-    if (w.nightBoss) return; // the night boss is not knocked back or staggered
+    if (w.nightBoss || w.miniBoss || w.swing?.block) return; // bosses (and a raised guard) are not knocked back or staggered
     const ang = Math.atan2(w.y - fromY, w.x - fromX);
     w.state = 'hurt';
     w.t = 0;
@@ -1351,6 +1831,10 @@ export class Combat {
     if (s.state === 'dead') {
       s.stateT += dt;
       return s.stateT < 1.6;
+    }
+    if (s.stunT > 0) {
+      s.stunT -= dt;
+      return true;
     }
     if (dist > (this.g.dungeon ? 3000 : s.camp ? 650 : 430)) {
       // out of sight and out of mind: the camp resets, fully healed, for the next visit
@@ -1458,7 +1942,7 @@ export class Combat {
   }
 
   // a flame tick: hurts without staggering, unless it finishes the target off
-  dotHit(kind, t, dmg) {
+  dotHit(kind, t, dmg, bleed = false) {
     if (kind === 'rem') {
       this.hitRemote(t, dmg);
       return;
@@ -1469,7 +1953,7 @@ export class Combat {
     }
     t.hp -= dmg;
     const [x, y] = this.bodyOf(kind, t);
-    this.floaters.push({ x, y: y - 14, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff9a3c', t: 0 });
+    this.floaters.push({ x, y: y - 14, text: `${bleed ? '🩸' : ''}-${Math.round(dmg * 10) / 10}`, color: bleed ? '#e0384a' : '#ff9a3c', t: 0 });
   }
 
   updateDots(dt) {
@@ -1479,7 +1963,7 @@ export class Combat {
       d.wait -= dt;
       if (d.wait <= 0) {
         d.wait += 0.5;
-        this.dotHit(d.kind, d.t, d.dmg);
+        this.dotHit(d.kind, d.t, d.dmg, d.bleed);
         d.ticks--;
       }
       return d.ticks > 0;
@@ -1491,12 +1975,19 @@ export class Combat {
     const eff = w?.effect || 'none';
     let dmg = this.meleeDmg();
     const [bx, by] = this.bodyOf(kind, t);
+    const bash = eff === 'bash' && Math.random() < 0.3; // the Bone Sword now and then bashes
     if (eff === 'crit' && Math.random() < 0.25) {
       dmg *= 2;
       this.floaters.push({ x: bx, y: by - 22, text: 'CRIT!', color: '#ffc94d', t: 0 });
     }
-    this.applyHit(kind, t, dmg, cx, cy, eff === 'knock' ? 300 : 110);
+    this.applyHit(kind, t, dmg, cx, cy, eff === 'knock' || bash ? 300 : 110);
     struck.push({ kind, t, dmg });
+    if (bash) {
+      if (kind !== 'rem') this.stunTarget(t, 1.3);
+      this.floaters.push({ x: bx, y: by - 24, text: 'BASH!', color: '#ffe36b', t: 0 });
+      sfx.play('thud', 0.8);
+    }
+    if (eff === 'bleed' && !this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 3, wait: 0.5, dmg: 0.6 + (w.dmg || 0) * 0.15, bleed: true });
     if (eff === 'burn' && !this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 3, wait: 0.5, dmg: 0.6 + (w.dmg || 0) * 0.15 });
     if (eff === 'vamp' && this.hp < this.maxHp) {
       this.hp = Math.min(this.maxHp, this.hp + 0.3);
@@ -1554,8 +2045,14 @@ export class Combat {
         this.treeBars.push({ key: o.tkey, x: o.x, y: o.y - o.sh * 0.5 - 6, hp: left, max, t: 0 });
       } else {
         this.treeBars = this.treeBars.filter((b) => b.key !== o.tkey);
-        this.drops.push({ x: o.x, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 30, vy: Math.random() * 14, vz: 90, fly: true, burst: true, id: 'barricade', qty: 1, age: 0 });
-        this.g.onToast?.('🪵 The tree fell and left a Barricade Box.');
+        if (this.g.wave) {
+          this.drops.push({ x: o.x, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 30, vy: Math.random() * 14, vz: 90, fly: true, burst: true, id: 'barricade', qty: 1, age: 0 });
+          this.g.onToast?.('🪵 The tree fell and left a Barricade Box.');
+        } else {
+          const logs = { large: 3, medium: 2, sapling: 1, stump: 1 }[o.tk] || 1;
+          for (let n = 0; n < logs; n++) this.drops.push({ x: o.x + (n - (logs - 1) / 2) * 5, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 50, vy: Math.random() * 18, vz: 90 + Math.random() * 30, fly: true, burst: true, id: 'wood', qty: 1, age: 0 });
+          this.g.onToast?.(`🪵 The tree fell: ${logs} wood.`);
+        }
       }
     }
   }
@@ -1564,7 +2061,7 @@ export class Combat {
     const w = this.weapon();
     const eff = w?.effect || 'none';
     const arc = eff === 'cleave' ? 2.1 : 1.3; // half the angle the blade covers
-    const reach = w ? w.reach : SWORD_REACH;
+    const reach = w ? (w.melee ?? w.reach) : SWORD_REACH;
     const [cx, cy] = this.center();
     const struck = [];
     for (const s of this.skeletons) {
@@ -1589,6 +2086,12 @@ export class Combat {
         if (d <= reach && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc)) this.strike('rem', r, w, cx, cy, struck);
       }
     }
+    for (const b of this.g.balls?.list || []) {
+      const sx = b.x - cx;
+      const sy = b.y - 5 - cy;
+      const d = Math.hypot(sx, sy);
+      if (d <= reach + 6 && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc)) this.g.balls.hit(b, Math.cos(a), Math.sin(a), 230);
+    }
     this.chopTrees(cx, cy, reach, this.meleeDmg(), a, arc);
     if (eff === 'shock' && struck.length) this.chain(struck, cx, cy);
   }
@@ -1597,7 +2100,8 @@ export class Combat {
 
   // Hit a Wave Defense monster. The host applies it; guests ask the host to.
   hitMonster(m, dmg, fx, fy, kb = 110) {
-    const sc = MONSTERS[m.type].scale || 1;
+    const sc = m.scale || MONSTERS[m.type].scale || 1;
+    this.g.setTarget(m, 'mon');
     this.splat(m.x, m.y, this.hitColor, m.state !== 'dead' && m.hp - dmg <= 0 ? 2 : 1, fx, fy);
     if (m.wild) this.damageWild(m, dmg, fx, fy, kb);
     else this.g.wave.hitMonster(m.id, dmg, fx, fy, kb);
@@ -1609,7 +2113,7 @@ export class Combat {
     const out = [];
     for (const m of [...(this.g.wave?.monsters || []), ...this.wilds]) {
       if (m.state === 'dead') continue;
-      const sc = MONSTERS[m.type].scale || 1;
+      const sc = m.scale || MONSTERS[m.type].scale || 1;
       if (Math.hypot(m.x - cx, bodyY(m) - cy) <= reach + 4 * sc) out.push(m);
     }
     return out;
@@ -1617,6 +2121,7 @@ export class Combat {
 
   damageSkeleton(s, dmg, fromX, fromY, knockback = 110) {
     if (s.state === 'dead') return;
+    this.g.setTarget(s, 'skel');
     s.hp -= dmg;
     this.splat(s.x, s.y, this.hitColor, s.hp <= 0 ? 2 : 1, fromX, fromY);
     this.floaters.push({ x: s.x, y: s.y - 26, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
@@ -1626,7 +2131,7 @@ export class Combat {
       s.stateT = 0;
       s.anim = 0;
       this.kills++;
-      this.g.monsterKill('Skeleton', s.elite ? 60 : XP.skeleton);
+      this.g.monsterKill('Skeleton', s.elite ? 60 : XP.skeleton, false, { x: s.x, y: s.y });
       if (s.camp) {
         const st = this.camps.get(s.camp);
         if (st && ++st.killed >= 3) {
@@ -1655,6 +2160,7 @@ export class Combat {
   hurtPlayer(n, fromX, fromY, { killer = null, invuln = 1.1, by = null, knock = true } = {}) {
     if (this.invuln > 0 || this.hidden) return;
     const p = this.g.player;
+    if (!this.g.wave) n *= 1 - 0.06 * this.up('armor'); // Armor upgrade
     if (this.shieldT > 0) {
       this.floaters.push({ x: p.x, y: p.y - 34, text: 'blocked!', color: '#5aaee8', t: 0 });
       sfx.play('block');
@@ -1700,6 +2206,11 @@ export class Combat {
     sfx.play('hit');
     if (r.bot) {
       this.g.bots.hurt(r, dmg, 'me', this.g.player.x, this.g.player.y);
+      return;
+    }
+    if (r.ai && this.g.aiSim) {
+      // we host the room, so we play its computer players
+      this.g.aiSim.hurt(r, dmg, 'me', this.g.player.x, this.g.player.y);
       return;
     }
     this.g.mp.net.send({ t: 'hit', target: r.id, dmg });
@@ -1753,9 +2264,11 @@ export class Combat {
 
   clearEnemies() {
     this.bombs = [];
+    this.smokes = [];
     this.skeletons = [];
     this.wilds = [];
     this.wildShots = [];
+    this.spells = [];
     this.projectiles = [];
     this.swing = null;
     this.dash = null;
@@ -1799,9 +2312,16 @@ export class Combat {
         const ox = (p.x - s.x) / 8;
         const oy = (p.y - (s.y - 9)) / 12;
         if (ox * ox + oy * oy < 1) {
+          if (p.hit?.has(`s${s.id}`)) continue;
           this.hitColor = splatTone(p.id);
           this.damageSkeleton(s, this.pelletDmg(p, s.hp, !s.elite), px, py);
           this.hitColor = null;
+          if (p.spell) this.spellHit(p, 'skel', s);
+          if (p.pierce > 0) {
+            p.pierce--;
+            (p.hit ||= new Set()).add(`s${s.id}`);
+            continue;
+          }
           this.land(p, px, py);
           return false;
         }
@@ -1815,6 +2335,7 @@ export class Combat {
           this.hitColor = splatTone(p.id);
           this.hitMonster(m, this.pelletDmg(p, m.hp, this.isNormalFoe(m)), px, py, 90);
           this.hitColor = null;
+          if (p.spell) this.spellHit(p, 'mon', m);
           if (p.pierce > 0) {
             p.pierce--;
             (p.hit ||= new Set()).add(m.id);
@@ -1823,6 +2344,16 @@ export class Combat {
           this.land(p, px, py);
           return false;
         }
+      }
+      for (const b of this.g.balls?.list || []) {
+        if (p.hit?.has(`b${b.i}`) || Math.hypot(p.x - b.x, p.y - (b.y - 5 - b.z)) > 9) continue;
+        this.g.balls.hit(b, p.vx, p.vy, 120 + Math.hypot(p.vx, p.vy) * 0.45);
+        if (p.pierce > 0 || p.spell) {
+          (p.hit ||= new Set()).add(`b${b.i}`);
+          continue;
+        }
+        this.land(p, px, py);
+        return false;
       }
       if (this.g.fight) {
         for (const r of this.g.remotes.values()) {
@@ -1833,18 +2364,17 @@ export class Combat {
             this.hitColor = splatTone(p.id);
             this.hitRemote(r, p.dmg);
             this.hitColor = null;
+            if (p.spell) this.spellHit(p, 'rem', r);
             this.land(p, px, py);
             return false;
           }
         }
       }
       // bullets fly straight over the bus, so you can shoot from its roof side at whatever is on the other side
-      if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, false, true, p.id === 'bullet')) {
-        if (world.type(Math.floor(p.x / 16), Math.floor(p.y / 16)) === WATER) {
-          this.floaters.push({ x: p.x, y: p.y - 6, text: 'plop', color: '#5ab0d8', t: 0 });
-        } else {
-          this.land(p, px, py);
-        }
+      if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, true, true, p.id === 'bullet')) {
+        // (water and lava do not stop a shot: it flies right over them)
+        if (p.spell || p.stone) this.chopTrees(p.x, p.y, 7, Math.max(1, p.dmg * 0.9)); // bolts and stones cut at the trees they hit
+        this.land(p, px, py);
         return false;
       }
     }
@@ -1855,8 +2385,24 @@ export class Combat {
     return true;
   }
 
+  // a staff bolt connects: its element does its thing
+  spellHit(p, kind, t) {
+    this.spellEffect(p.spell, kind, t, p.dmg, p.x, p.y);
+    if (p.spell === 'fire') {
+      // a small burst: whatever stands next to it is singed too
+      this.splat(p.x, p.y, '#ff8a3c', 2);
+      for (const m of this.monstersNear(p.x, p.y, 24)) if (m !== t) this.hitMonster(m, p.dmg * 0.5, p.x, p.y, 90);
+    }
+  }
+
   land(p, x, y) {
     if (p.free) return; // the endless default pebble does not need picking up
+    if (this.g.world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER) {
+      // it came down in the water (or the lava)
+      this.floaters.push({ x, y: y - 6, text: 'plop', color: '#5ab0d8', t: 0 });
+      sfx.play('splat', 0.5);
+      return;
+    }
     sfx.play(breaksOnImpact(ITEMS[p.id]) ? 'splat' : 'thud', 0.7);
     if (breaksOnImpact(ITEMS[p.id])) {
       this.splat(x, y + 2, splatTone(p.id), 0.8);
@@ -1864,6 +2410,15 @@ export class Combat {
       return;
     }
     this.drops.push({ x, y: y + 4, id: p.id, qty: 1, age: 0 });
+  }
+
+  // Loot within reach is pulled towards you, faster the closer it gets and always faster than you can run past it
+  magnet(d, dx, dy, dist, dt) {
+    if (d.manual || dist > MAGNET_R || dist < 1) return; // (what you dropped yourself stays put until you walk over it)
+    const speed = 170 + (MAGNET_R - dist) * 4 + (this.g.sprinting ? 60 : 0);
+    const step = Math.min(dist, speed * dt);
+    d.x += (dx / dist) * step;
+    d.y += (dy / dist) * step;
   }
 
   updateDrop(d, dt) {
@@ -1901,11 +2456,8 @@ export class Combat {
     if (d.id === 'heart') {
       // a health pickup: only taken when there is something to heal
       if (d.age > 40) return false;
-      if (this.hp < this.maxHp && dist < 34) {
-        d.x += (dx / dist) * 130 * dt;
-        d.y += (dy / dist) * 130 * dt;
-      }
-      if (this.hp < this.maxHp && dist < 8) {
+      if (this.hp < this.maxHp) this.magnet(d, dx, dy, dist, dt);
+      if (this.hp < this.maxHp && dist < 10) {
         this.hp = Math.min(this.maxHp, this.hp + 1);
         this.floaters.push({ x: p.x, y: p.y - 34, text: `+${hp100(1)}`, color: '#ff5d7a', t: 0 });
         sfx.play('heal');
@@ -1926,11 +2478,8 @@ export class Combat {
     if (SUPPLY_ITEMS[d.id]) {
       // quick-slot supplies go straight to their own slot
       const key = SUPPLY_ITEMS[d.id];
-      if (dist < 30) {
-        d.x += (dx / dist) * 120 * dt;
-        d.y += (dy / dist) * 120 * dt;
-      }
-      if (dist < 7 && this.g.supplies[key] < SUPPLY_CAP) {
+      this.magnet(d, dx, dy, dist, dt);
+      if (dist < 10 && this.g.supplies[key] < SUPPLY_CAP) {
         this.g.supplies[key]++;
         this.floaters.push({ x: p.x, y: p.y - 34, text: `+1 ${ITEMS[d.id].name}`, color: '#6fae6a', t: 0 });
         sfx.play('pickup');
@@ -1938,19 +2487,22 @@ export class Combat {
       }
       return d.age < 120;
     }
-    if (dist < 30 && !d.burst) {
-      d.x += (dx / dist) * 120 * dt;
-      d.y += (dy / dist) * 120 * dt;
-    }
-    if (d.id === 'coin' && dist < (d.burst ? 9 : 7)) {
+    this.magnet(d, dx, dy, dist, dt);
+    if (d.id === 'coin' && dist < 10) {
       this.g.giveCoins(d.qty);
       if (d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
       this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪙`, color: '#e0a83a', t: 0 });
       sfx.play('coin');
       return false;
     }
-    if (dist < (d.burst ? 9 : 7)) {
-      const left = addItem(this.g.inventory, d.id, d.qty);
+    if (d.id === 'wood' && dist < 10) {
+      this.g.giveWood(d.qty);
+      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪵`, color: '#b98650', t: 0 });
+      sfx.play('pickup');
+      return false;
+    }
+    if (dist < 10) {
+      const left = this.g.stow(d.id, d.qty);
       if (left === 0 && d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
       if (left < d.qty) {
         this.g.emitInventory();
@@ -1969,7 +2521,10 @@ export class Combat {
     for (const s of this.skeletons) list.push({ kind: 'skeleton', s, y: s.y });
     for (const w of this.wilds) list.push({ kind: 'monster', m: w, y: w.y });
     for (const p of this.projectiles) list.push({ kind: 'projectile', p, y: p.y + 6 });
-    for (const s of this.wildShots) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'wshot' }, y: s.y + 6 });
+    if (this.thrown) list.push({ kind: 'projectile', p: { id: 'trident', th: this.thrown }, y: this.thrown.y + 6 });
+    for (const s of this.wildShots) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'wshot', arrow: s.arrow, ang: Math.atan2(s.vy, s.vx) }, y: s.y + 6 });
+    for (const s of this.spells) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'spell', s }, y: s.y + 1 });
+    for (const sm of this.smokes) list.push({ kind: 'projectile', p: { x: sm.x, y: sm.y, id: 'smoke', sm }, y: sm.y + 30 });
     for (const b of this.bombs) list.push({ kind: 'projectile', p: { x: b.x, y: b.y, id: 'bomb', b }, y: b.y + 6 });
     for (const bl of this.blasts) list.push({ kind: 'projectile', p: { x: bl.x, y: bl.y, id: 'blast', bl }, y: bl.y + 40 });
     for (const p of this.remoteShots) list.push({ kind: 'projectile', p, y: p.y + 6 });
@@ -2042,38 +2597,118 @@ export class Combat {
       const air = b.fly > 0 && !b.stuck;
       ctx.save();
       ctx.translate(Math.round(air ? b.tx : b.x), Math.round((air ? b.ty : b.y) + 2));
-      ctx.fillStyle = `rgba(255,30,30,${0.12 + flash})`;
+      const tone = b.kind === 'stun' ? '70,150,255' : b.kind === 'smoke' ? '190,196,210' : '255,30,30';
+      ctx.fillStyle = `rgba(${tone},${0.12 + flash})`;
       ctx.beginPath();
       ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = `rgba(255,40,40,${0.3 + 0.3 * f})`;
+      ctx.fillStyle = `rgba(${tone},${0.3 + 0.3 * f})`;
       ctx.beginPath();
       ctx.ellipse(0, 0, b.R * f, b.R * 0.8 * f, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,70,70,0.95)';
+      ctx.strokeStyle = `rgba(${b.kind === 'stun' ? '110,180,255' : b.kind === 'smoke' ? '220,224,235' : '255,70,70'},0.95)`;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
       const lift = air ? Math.sin((1 - b.fly / b.flightMax) * Math.PI) * Math.min(22, b.dist * 0.3) : 0; // an arc through the air
-      this.drawIcon(ctx, 'truffle', b.x, b.y - 4 - lift + (f > 0.7 && Math.sin(t * 40) > 0 ? -1 : 0), air ? t * 12 : 0);
+      this.drawIcon(ctx, b.item || 'truffle', b.x, b.y - 4 - lift + (f > 0.7 && Math.sin(t * 40) > 0 ? -1 : 0), air ? t * 12 : 0);
     } else if (o.kind === 'projectile' && o.p.id === 'blast') {
       const bl = o.p.bl;
       const p = bl.t / 0.45;
       ctx.save();
       ctx.translate(Math.round(bl.x), Math.round(bl.y - 6));
-      ctx.fillStyle = `rgba(255,200,90,${0.75 * (1 - p)})`;
+      ctx.fillStyle = bl.tone === 'stun' ? `rgba(150,200,255,${0.75 * (1 - p)})` : `rgba(255,200,90,${0.75 * (1 - p)})`;
       ctx.beginPath();
       ctx.ellipse(0, 0, bl.R * (0.35 + 0.65 * p), bl.R * 0.8 * (0.35 + 0.65 * p), 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = `rgba(255,255,255,${0.9 * (1 - p)})`;
       ctx.lineWidth = 3;
       ctx.stroke();
-      ctx.fillStyle = `rgba(255,120,40,${0.8 * (1 - p)})`;
+      ctx.fillStyle = bl.tone === 'stun' ? `rgba(255,255,200,${0.85 * (1 - p)})` : `rgba(255,120,40,${0.8 * (1 - p)})`;
       ctx.beginPath();
       ctx.ellipse(0, 0, bl.R * 0.4 * (1 - p * 0.4), bl.R * 0.32 * (1 - p * 0.4), 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.id === 'smoke') {
+      // a cloud of soft grey puffs that thickens, drifts and thins out at the end
+      const sm = o.p.sm;
+      const fade = Math.min(1, sm.t / 0.6) * Math.min(1, (sm.life - sm.t) / 1.5);
+      ctx.save();
+      for (let i = 0; i < 16; i++) {
+        const ang = i * 2.4 + sm.t * 0.25 * (i % 2 ? 1 : -1);
+        const rr = sm.R * (0.25 + 0.6 * ((i * 37) % 10) / 10);
+        const x = sm.x + Math.cos(ang) * rr;
+        const y = sm.y - 6 + Math.sin(ang) * rr * 0.6 - Math.sin(sm.t * 1.5 + i) * 2;
+        ctx.globalAlpha = 0.5 * fade;
+        ctx.fillStyle = i % 3 ? '#dfe3ea' : '#b9bfcb';
+        ctx.beginPath();
+        ctx.arc(Math.round(x), Math.round(y), 9 + (i % 4) * 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.id === 'spell') {
+      const s = o.p.s;
+      if (s.t < 0) {
+        // the warning: a red ring on the ground that fills up
+        const k = 1 + s.t / s.delay;
+        ctx.save();
+        ctx.globalAlpha = s.mine ? 0.15 + 0.3 * k : 1;
+        ctx.fillStyle = s.mine ? s.color : `rgba(255,60,60,${0.1 + 0.25 * k})`;
+        ctx.beginPath();
+        ctx.ellipse(Math.round(s.x), Math.round(s.y), s.radius, s.radius * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = s.mine ? s.color : `rgba(255,90,70,${0.5 + 0.4 * k})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        const f = Math.min(s.frames - 1, Math.floor(s.t * 12));
+        ctx.save();
+        if (s.hue) ctx.filter = `hue-rotate(${s.hue}deg)`;
+        const k = s.mine ? s.radius / 26 : 1;
+        ctx.drawImage(this.img[`tiny/fx_${s.fx}`], f * 100, 0, 100, 100, Math.round(s.x - 50 * k), Math.round(s.y - 57 * k), 100 * k, 100 * k);
+        ctx.restore();
+      }
+    } else if (o.kind === 'projectile' && o.p.id === 'trident') {
+      const th = o.p.th;
+      const icon = this.img[weaponIconFile(weaponById(th.w))];
+      ctx.save();
+      ctx.translate(Math.round(th.x), Math.round(th.y));
+      ctx.rotate(th.rot + Math.PI / 4);
+      ctx.drawImage(icon, -16, -16);
+      ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.spell) {
+      // a bolt of magic: a bright core in a soft glow
+      const x = Math.round(o.p.x);
+      const y = Math.round(o.p.y);
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = o.p.color;
+      ctx.beginPath();
+      ctx.arc(x, y, 6 + Math.sin(t * 20) * 1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x - 1, y - 1, 2, 2);
+      ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.stone) {
+      ctx.fillStyle = 'rgba(40,30,20,0.25)';
+      ctx.fillRect(Math.round(o.p.x) - 2, Math.round(o.p.y) + 4, 4, 1);
+      ctx.fillStyle = '#b9aea0';
+      ctx.fillRect(Math.round(o.p.x) - 1, Math.round(o.p.y) - 2, 3, 3);
+      ctx.fillStyle = '#e6ddd0';
+      ctx.fillRect(Math.round(o.p.x) - 1, Math.round(o.p.y) - 2, 1, 1);
+    } else if (o.kind === 'projectile' && o.p.id === 'wshot' && o.p.arrow) {
+      ctx.save();
+      ctx.translate(Math.round(o.p.x), Math.round(o.p.y));
+      ctx.rotate(o.p.ang);
+      ctx.drawImage(this.img[`tiny/arrow${o.p.arrow}`], -16, -16);
       ctx.restore();
     } else if (o.kind === 'projectile' && o.p.id === 'wshot') {
       // a monster's spit: a small glowing green orb
@@ -2143,7 +2778,43 @@ export class Combat {
       ctx.fillRect(x + 3, y + 5, 1, 1);
       return;
     }
-    this.drawIcon(ctx, d.id, d.x, d.y - 4 - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 1.2));
+    const ly = d.y - 4 - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 1.2);
+    if (d.id !== 'coin' && ITEMS[d.id]) this.drawRarityFrame(ctx, d.id, d.x, ly);
+    this.drawIcon(ctx, d.id, d.x, ly);
+  }
+
+  // a small box around a dropped item, in its rarity's colour (the rarer, the brighter it glows)
+  drawRarityFrame(ctx, id, x, y) {
+    const tier = rarityOf(id);
+    const icon = iconOf(id);
+    const w = Math.max(icon.sw, 8) + 4;
+    const h = Math.max(icon.sh, 8) + 4;
+    const color = RARITIES[tier].color;
+    ctx.save();
+    if (tier === 'epic' || tier === 'legendary') {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = tier === 'legendary' ? 7 : 5;
+    }
+    ctx.fillStyle = `${color}33`;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(Math.round(x - w / 2) + 0.5, Math.round(y - h / 2) + 0.5, w, h, 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // little stars circling a stunned head
+  drawStun(ctx, x, y, color = '#ffe36b') {
+    const t = this.g.t;
+    ctx.save();
+    ctx.fillStyle = color;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 5 + (i * Math.PI * 2) / 3;
+      ctx.fillRect(Math.round(x + Math.cos(a) * 7) - 1, Math.round(y + Math.sin(a) * 2.5) - 1, 3, 3);
+    }
+    ctx.restore();
   }
 
   drawSkeleton(ctx, s) {
@@ -2164,6 +2835,7 @@ export class Combat {
     ctx.drawImage(sheet, frame * FRAME_W, 0, FRAME_W, FRAME_H, -FEET_X, 0, FRAME_W, FRAME_H);
     ctx.restore();
 
+    if (s.state !== 'dead' && s.stunT > 0) this.drawStun(ctx, x, y - 26, s.stunColor);
     if (s.state !== 'dead') {
       ctx.fillStyle = 'rgba(60,40,30,0.7)';
       ctx.fillRect(x - 7, y - 24, 14, 3);
@@ -2269,7 +2941,7 @@ export class Combat {
     const lvl = 1 + Math.min(1, 0.04 * ((sw.lv || this.g.level || 1) - 1));
     const sweep = w ? (w.effect === 'cleave' ? 1.8 : w.id === 'rapier' ? 0.8 : w.effect === 'knock' ? 1.3 : 1.1) : 1.1;
     const width = (w ? (w.effect === 'cleave' ? 4.6 : w.effect === 'knock' ? 4 : w.id === 'rapier' ? 1.9 : 3) : 3) * lvl;
-    const radius = (w ? 14 + 0.16 * w.reach : 19) * lvl;
+    const radius = (w ? 14 + 0.16 * (w.melee ?? w.reach) : 19) * lvl;
     const tint = w ? w.tint : '#ffffff';
     const ang = sw.a - sweep + 2 * sweep * k;
     // trail: a soft coloured glow, a brighter band, and a thin white core
@@ -2302,11 +2974,53 @@ export class Combat {
 
   // Progress bar under the hero while the left button is held. The notch marks where a dash unlocks.
   drawChargeBar(ctx, camX, camY, zoom, t) {
-    if (!this.hold || this.hold.t < 0.12 || this.dash || this.spin || !this.g.activeSkill()) return;
+    const wk = this.weapon()?.kind;
+    if (!this.g.wave && this.hold && this.hold.t >= HOLD_MIN * 0.8 && (wk === 'trident' || wk === 'sling')) {
+      // where the trident would land: a line from the hero to the cursor, cut off at its range
+      const w = this.weapon();
+      const [cx, cy] = this.center();
+      const a = this.aim();
+      const range = this.tridentRange(w, this.hold.t);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,250,240,0.85)';
+      ctx.lineWidth = zoom * 0.9;
+      ctx.setLineDash([zoom * 2.4, zoom * 2]);
+      ctx.beginPath();
+      ctx.moveTo((cx - camX) * zoom, (cy - camY) * zoom);
+      ctx.lineTo((cx + Math.cos(a) * range - camX) * zoom, (cy + Math.sin(a) * range - camY) * zoom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = this.hold.t >= 1.1 ? '#fff0a8' : w.tint;
+      ctx.beginPath();
+      ctx.arc((cx + Math.cos(a) * range - camX) * zoom, (cy + Math.sin(a) * range - camY) * zoom, zoom * 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (wk === 'staff' && this.hold && this.hold.t >= HOLD_MIN * 0.5) {
+      // where the spell would land, and how big it grows the longer you hold
+      const w = this.weapon();
+      const [cx, cy] = this.center();
+      const m = this.g.mouseWorld();
+      const d = Math.hypot(m.x - cx, m.y - cy) || 1;
+      const k = Math.min(1, (w.reach * 1.05) / d);
+      const power = Math.min(1, Math.max(0, (this.hold.t - HOLD_MIN) / CHARGE_TIME));
+      const r = 20 + 16 * power;
+      ctx.save();
+      ctx.strokeStyle = w.spell.color;
+      ctx.lineWidth = zoom * 0.9;
+      ctx.setLineDash([zoom * 2, zoom * 1.6]);
+      ctx.beginPath();
+      ctx.ellipse((cx + (m.x - cx) * k - camX) * zoom, (cy + (m.y - cy) * k + 8 - camY) * zoom, r * zoom, r * 0.55 * zoom, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    const held = this.skillHold || (this.g.wave ? this.hold : null);
+    if (!held || held.t < 0.12 || this.dash || this.spin || !this.g.activeSkill()) return;
     const total = HOLD_MIN + CHARGE_TIME;
-    const frac = Math.min(1, this.hold.t / total);
-    const unlock = HOLD_MIN / total;
-    const ready = this.hold.t >= HOLD_MIN;
+    const frac = Math.min(1, held.t / total);
+    const unlock = this.skillHold ? 0 : HOLD_MIN / total;
+    const ready = this.skillHold ? true : held.t >= HOLD_MIN;
     const full = frac >= 1;
     const p = this.g.player;
     const w = zoom * 26;

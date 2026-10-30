@@ -1,4 +1,5 @@
-import { ITEMS } from '../game/items';
+import { FREE_UPGRADES, MAX_LEVEL } from '../game/upgrades';
+import { ITEMS, rarityOf } from '../game/items';
 import ItemIcon from './ItemIcon';
 
 // Your backpack next to the chest at home.
@@ -12,7 +13,7 @@ export function StorageBody({ inventory, box, game, onAsk }) {
       {slots.map((s, i) => (
         <button
           key={i}
-          className={`inv-slot ${s ? 'filled' : ''}`}
+          className={`inv-slot ${s ? `filled rar rar-${rarityOf(s.id)}` : ''}`}
           draggable={!!s}
           onClick={() => game.storeMove(side, i, true)}
           onContextMenu={(e) => {
@@ -68,7 +69,11 @@ export function StorageBody({ inventory, box, game, onAsk }) {
   );
 }
 
-export default function StoragePanel({ inventory, box, game, onAsk, onClose }) {
+export default function StoragePanel({ inventory, box, game, hud, onAsk, onClose }) {
+  const chest = FREE_UPGRADES.find((u) => u.id === 'chest');
+  const level = hud?.upg?.chest || 0;
+  const maxed = level >= MAX_LEVEL;
+  const cost = maxed ? 0 : chest.cost[level];
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="panel storage">
@@ -76,7 +81,13 @@ export default function StoragePanel({ inventory, box, game, onAsk, onClose }) {
           <h2>📦 Storage chest</h2>
           <button className="btn small-btn" onClick={onClose} aria-label="Close chest">✕</button>
         </header>
-        <p className="hint">Keep things safe at home. <b>Click</b> moves a stack, <b>right-click</b> moves one, <b>drag</b> to choose how many, and drag it <b>off the slots</b> to drop it on the floor. More room: the <b>Chest space</b> upgrade in the shop.</p>
+        <p className="hint">Keep things safe at home. <b>Click</b> moves a stack, <b>right-click</b> moves one, <b>drag</b> to choose how many, and drag it <b>off the slots</b> to drop it on the floor. </p>
+        {hud && (
+          <div className="chest-upgrade">
+            <span>{chest.icon} <b>{chest.name}</b> <small>Lv {level}/{MAX_LEVEL}</small> · now <b>{chest.value(level)}</b>{!maxed && <> → <b>{chest.value(level + 1)}</b></>}</span>
+            <button className="btn go small-btn" disabled={maxed || hud.coins < cost} onClick={() => game.buyShop('upgrade', 'chest')}>{maxed ? 'Maxed' : `⬆ Upgrade 🪙 ${cost}`}</button>
+          </div>
+        )}
         <StorageBody inventory={inventory} box={box} game={game} onAsk={onAsk} />
       </div>
     </div>

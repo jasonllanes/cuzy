@@ -43,6 +43,11 @@ export function attachRoomServer(httpServer) {
     for (const p of room.players.values()) if (p !== except) send(p, msg);
   };
 
+  // computer players (AI) sit in seats like heroes do, but the host's game plays them: they live beside the real players
+  const everyone = (room) => [...room.players.values(), ...room.ais.values()];
+  const findMember = (room, id) => room.players.get(Number(id)) || room.ais.get(String(id));
+  const seatsUsed = (room) => room.players.size + room.ais.size;
+
   const summary = (r) => ({
     code: r.code,
     name: r.name,
@@ -60,15 +65,15 @@ export function attachRoomServer(httpServer) {
     streakMonsters: r.streakMonsters,
     startMoney: r.startMoney || 0,
     teams: r.teams,
-    count: r.players.size,
+    count: seatsUsed(r),
     started: r.started,
     host: r.players.get(r.hostId)?.player.name || '?',
   });
-  const publicPlayer = (ws) => ({ id: ws.id, slot: ws.slot, team: ws.team ?? null, ...ws.player, ...ws.pos });
-  const scoreList = (room) => [...room.players.values()].map((p) => ({ id: p.id, name: p.player.name, kills: p.kills, team: p.team ?? null }));
+  const publicPlayer = (ws) => ({ id: ws.id, slot: ws.slot, team: ws.team ?? null, ...(ws.ai ? { ai: true } : {}), ...ws.player, ...ws.pos });
+  const scoreList = (room) => everyone(room).map((p) => ({ id: p.id, name: p.player.name, kills: p.kills, team: p.team ?? null }));
 
   // ---- teams: a room is free for all (teams = 0) or split into 2-4 teams ----
-  const teamMap = (room) => Object.fromEntries([...room.players.values()].filter((p) => p.team !== null && p.team !== undefined).map((p) => [p.id, p.team]));
+  const teamMap = (room) => Object.fromEntries(everyone(room).filter((p) => p.team !== null && p.team !== undefined).map((p) => [p.id, p.team]));
   const sendTeams = (room) => sendRoom(room, { t: 'teams', teams: teamMap(room) });
   // a newcomer joins the smallest team
   const assignTeam = (room, ws) => {
@@ -77,17 +82,17 @@ export function attachRoomServer(httpServer) {
       return;
     }
     const counts = Array(room.teams).fill(0);
-    for (const p of room.players.values()) if (p !== ws && p.team !== null && p.team !== undefined && p.team < room.teams) counts[p.team]++;
+    for (const p of everyone(room)) if (p !== ws && p.team !== null && p.team !== undefined && p.team < room.teams) counts[p.team]++;
     ws.team = counts.indexOf(Math.min(...counts));
   };
   const reassignAll = (room) => {
     let i = 0;
-    for (const p of room.players.values()) p.team = room.teams ? i++ % room.teams : null;
+    for (const p of everyone(room)) p.team = room.teams ? i++ % room.teams : null;
   };
   // what a win is counted on: your own kills, or your whole team's
   const scoreOf = (room, p) =>
     room.teams && p.team !== null && p.team !== undefined
-      ? [...room.players.values()].filter((q) => q.team === p.team).reduce((n, q) => n + q.kills, 0)
+      ? everyone(room).filter((q) => q.team === p.team).reduce((n, q) => n + q.kills, 0)
       : p.kills;
   const sendScores = (room) => sendRoom(room, { t: 'scores', scores: scoreList(room), target: targetOf(room) });
 
@@ -120,9 +125,9 @@ export function attachRoomServer(httpServer) {
       room.winning = false;
       room.paused = false;
       room.introOpen = false;
-      for (const p of room.players.values()) p.kills = 0;
+      for (const p of everyone(room)) p.kills = 0;
       room.firstDone = false; // nobody has been taken down yet this round
-      sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: [...room.players.values()].map(publicPlayer), scores: scoreList(room) });
+      sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: everyone(room).map(publicPlayer), scores: scoreList(room) });
       pushLobby();
     }, CELEBRATE_MS);
   };
@@ -170,7 +175,7 @@ export function attachRoomServer(httpServer) {
     ws.lobby = false;
     ws.kills = 0;
     // lowest free slot number; clients use it to pick a different home house each
-    const taken = new Set([...room.players.values()].map((p) => p.slot));
+    const taken = new Set(everyone(room).map((p) => p.slot));
     ws.slot = 0;
     while (taken.has(ws.slot)) ws.slot++;
     room.players.set(ws.id, ws);
@@ -185,7 +190,7 @@ export function attachRoomServer(httpServer) {
       host: room.hostId,
       room: summary(room),
       teams: teamMap(room),
-      players: [...room.players.values()].filter((p) => p !== ws).map(publicPlayer),
+      players: everyone(room).filter((p) => p !== ws).map(publicPlayer),
       scores: scoreList(room),
       clock: { hour: hours % 24, day: 1 + Math.floor(hours / 24) },
     });
@@ -195,6 +200,19 @@ export function attachRoomServer(httpServer) {
     sendScores(room);
     pushLobby();
     pushOnline();
+  };
+
+  // a player (or computer player) took down another: everyone hears about it (kill streaks are global); it only scores in a "player kills" room
+  const creditKill = (room, killer, victim) => {
+    if (!room?.pvp || !room.started || room.winning) return;
+    if (!killer || !victim || killer === victim) return;
+    const first = !room.firstDone; // First Blood is announced once per round, even for someone who joined late
+    room.firstDone = true;
+    sendRoom(room, { t: 'kill', killer: killer.player.name, victim: victim.player.name, killerId: killer.id, victimId: victim.id, first });
+    if (room.winBy === 'monsters') return;
+    killer.kills++;
+    if (scoreOf(room, killer) >= targetOf(room)) finishRound(room, killer);
+    sendScores(room);
   };
 
   const handlers = {
@@ -226,7 +244,7 @@ export function attachRoomServer(httpServer) {
       if (!room || room.started) return;
       const n = Math.round(Number(m.slot));
       if (!Number.isInteger(n) || n < 0 || n >= room.max) return;
-      if ([...room.players.values()].some((p) => p !== ws && p.slot === n)) return;
+      if (everyone(room).some((p) => p !== ws && p.slot === n)) return;
       ws.slot = n;
       sendRoom(room, { t: 'slot', id: ws.id, slot: n });
     },
@@ -261,6 +279,8 @@ export function attachRoomServer(httpServer) {
         winning: false,
         t0: Date.now(),
         players: new Map(),
+        ais: new Map(), // computer players: { id: 'ai1', ai: true, player, slot, team, kills, pos }
+        aiSeq: 0,
       };
       room.target = clampTarget(m.target, defaultTarget(room.winBy));
       rooms.set(room.code, room);
@@ -269,7 +289,7 @@ export function attachRoomServer(httpServer) {
     join(ws, m) {
       const room = rooms.get(clean(m.code, 8).toUpperCase());
       if (!room) return send(ws, { t: 'error', msg: "That room code doesn't exist (anymore)." });
-      if (room.players.size >= room.max) return send(ws, { t: 'error', msg: 'That room is full.' });
+      if (seatsUsed(room) >= room.max) return send(ws, { t: 'error', msg: 'That room is full.' });
       if (room.started && !room.allowLate) return send(ws, { t: 'error', msg: 'That round has already started, and the host has turned late joining off.' });
       leaveRoom(ws);
       ws.player = { name: clean(m.player?.name, 14) || 'Friend', hero: clean(m.player?.hero, 32) || 'adam' };
@@ -285,10 +305,10 @@ export function attachRoomServer(httpServer) {
       room.started = true;
       room.winning = false;
       room.paused = false;
-      for (const p of room.players.values()) if (room.teams && (p.team === null || p.team === undefined)) assignTeam(room, p);
+      for (const p of everyone(room)) if (room.teams && (p.team === null || p.team === undefined)) assignTeam(room, p);
       openIntro(room);
       room.t0 = Date.now();
-      for (const p of room.players.values()) p.kills = 0;
+      for (const p of everyone(room)) p.kills = 0;
       room.firstDone = false; // nobody has been taken down yet this round
       const hours = room.startHour;
       for (const p of room.players.values()) {
@@ -297,7 +317,7 @@ export function attachRoomServer(httpServer) {
           room: summary(room),
           teams: teamMap(room),
           host: room.hostId,
-          players: [...room.players.values()].filter((q) => q !== p).map(publicPlayer),
+          players: everyone(room).filter((q) => q !== p).map(publicPlayer),
           scores: scoreList(room),
           clock: { hour: hours % 24, day: 1 + Math.floor(hours / 24) },
         });
@@ -322,26 +342,91 @@ export function attachRoomServer(httpServer) {
     // an attacker's client says it landed a hit; only the victim hears about it
     hit(ws, m) {
       const room = ws.room;
-      const target = room?.players.get(Number(m.target));
+      const target = room ? findMember(room, m.target) : null;
       if (!room?.pvp || !target || target === ws) return;
       if (room.teams && target.team !== null && target.team === ws.team) return; // no friendly fire
       const dmg = Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
-      send(target, { t: 'hit', from: ws.id, dmg, fx: ws.pos.x, fy: ws.pos.y });
+      // a computer player is played by the host's game: it works out the damage itself
+      if (target.ai) send(room.players.get(room.hostId), { t: 'aihurt', ai: target.id, from: ws.id, dmg, fx: ws.pos.x, fy: ws.pos.y });
+      else send(target, { t: 'hit', from: ws.id, dmg, fx: ws.pos.x, fy: ws.pos.y });
     },
     // the victim reports its own defeat so the right player gets the point
     died(ws, m) {
       const room = ws.room;
-      if (!room?.pvp || !room.started || room.winning) return;
-      const killer = room.players.get(Number(m.killer));
-      if (!killer || killer === ws) return;
-      // a player took down a player: everyone hears about it (kill streaks are global); it only scores in a "player kills" room
-      const first = !room.firstDone; // First Blood is announced once per round, even for someone who joined late
-      room.firstDone = true;
-      sendRoom(room, { t: 'kill', killer: killer.player.name, victim: ws.player.name, killerId: killer.id, victimId: ws.id, first });
-      if (room.winBy === 'monsters') return;
-      killer.kills++;
-      if (scoreOf(room, killer) >= targetOf(room)) finishRound(room, killer);
+      if (!room) return;
+      creditKill(room, findMember(room, m.killer), ws);
+    },
+    // ---- computer players: the host adds and removes them in the waiting room, and its game plays them ----
+    addai(ws, m) {
+      const room = ws.room;
+      if (!room || room.hostId !== ws.id || room.started || room.mode !== 'free' || seatsUsed(room) >= room.max) return;
+      let slot = Math.round(Number(m.slot));
+      const taken = new Set(everyone(room).map((p) => p.slot));
+      if (!Number.isInteger(slot) || slot < 0 || slot >= room.max || taken.has(slot)) {
+        slot = 0;
+        while (taken.has(slot)) slot++;
+      }
+      const ai = { id: `ai${++room.aiSeq}`, ai: true, player: { name: clean(m.name, 14) || 'Robo', hero: clean(m.hero, 32) || 'retro:1' }, slot, team: null, kills: 0, pos: { x: 0, y: 0, dir: 'down', moving: false, hp: 6 } };
+      room.ais.set(ai.id, ai);
+      assignTeam(room, ai);
+      sendRoom(room, { t: 'peer_join', player: publicPlayer(ai) });
+      sendTeams(room);
       sendScores(room);
+      pushLobby();
+    },
+    removeai(ws, m) {
+      const room = ws.room;
+      const ai = room?.ais.get(String(m.id));
+      if (!ai || room.hostId !== ws.id || room.started) return;
+      room.ais.delete(ai.id);
+      sendRoom(room, { t: 'peer_leave', id: ai.id, name: ai.player.name, host: room.hostId });
+      sendTeams(room);
+      sendScores(room);
+      pushLobby();
+    },
+    // the host's game reports where its computer players are
+    aistate(ws, m) {
+      const room = ws.room;
+      if (!room || room.hostId !== ws.id || !Array.isArray(m.list)) return;
+      for (const e of m.list.slice(0, 10)) {
+        const ai = room.ais.get(String(e.id));
+        if (!ai) continue;
+        ai.pos = {
+          x: num(e.x),
+          y: num(e.y),
+          dir: ['up', 'down', 'left', 'right'].includes(e.dir) ? e.dir : 'down',
+          moving: !!e.moving,
+          hidden: !!e.hidden,
+          hp: Math.max(0, Math.min(40, Math.round((Number(e.hp) || 0) * 10) / 10)),
+          mhp: 6,
+          lv: 1,
+          mt: '',
+        };
+        sendRoom(room, { t: 'state', id: ai.id, ...ai.pos }, ws);
+      }
+    },
+    // a swing or a thrown rock from one of the computer players, drawn for everyone else
+    aifx(ws, m) {
+      const room = ws.room;
+      if (!room || room.hostId !== ws.id || !room.ais.has(String(m.id))) return;
+      if (m.kind === 'swing') sendRoom(room, { t: 'fx', id: String(m.id), kind: 'swing', a: num(m.a), w: '' }, ws);
+      if (m.kind === 'throw') sendRoom(room, { t: 'fx', id: String(m.id), kind: 'throw', item: 'rock', x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) }, ws);
+    },
+    // a computer player landed a hit on another player (never on the host: its game works that out itself)
+    aiattack(ws, m) {
+      const room = ws.room;
+      const ai = room?.ais.get(String(m.ai));
+      const target = room?.players.get(Number(m.target));
+      if (!ai || !target || room.hostId !== ws.id || target === ws || !room.pvp) return;
+      if (room.teams && target.team !== null && target.team === ai.team) return;
+      send(target, { t: 'hit', from: ai.id, dmg: Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1))), fx: num(m.fx), fy: num(m.fy) });
+    },
+    // a computer player was defeated: the host's game says by whom, and the point goes to them
+    aidied(ws, m) {
+      const room = ws.room;
+      const ai = room?.ais.get(String(m.ai));
+      if (!ai || room.hostId !== ws.id) return;
+      creditKill(room, findMember(room, m.killer), ai);
     },
     // a player went down to something other than a player: their kill streak is over, for everyone
     fell(ws) {
@@ -377,9 +462,9 @@ export function attachRoomServer(httpServer) {
       room.winning = false;
       room.paused = false;
       room.introOpen = false;
-      for (const p of room.players.values()) p.kills = 0;
+      for (const p of everyone(room)) p.kills = 0;
       room.firstDone = false; // nobody has been taken down yet this round
-      sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: [...room.players.values()].map(publicPlayer), scores: scoreList(room) });
+      sendRoom(room, { t: 'lobby', room: summary(room), teams: teamMap(room), host: room.hostId, players: everyone(room).map(publicPlayer), scores: scoreList(room) });
       pushLobby();
     },
     // host-only room settings, changeable from the waiting room
@@ -395,7 +480,7 @@ export function attachRoomServer(httpServer) {
       if (typeof m.streakMonsters === 'boolean') room.streakMonsters = m.streakMonsters;
       if (m.startMoney !== undefined && !room.started) room.startMoney = Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0));
       if (['easy', 'medium', 'hard'].includes(m.difficulty)) room.difficulty = m.difficulty;
-      if (Number.isFinite(Number(m.max))) room.max = Math.min(MAX_PLAYERS, Math.max(2, room.players.size, Math.round(Number(m.max))));
+      if (Number.isFinite(Number(m.max))) room.max = Math.min(MAX_PLAYERS, Math.max(2, seatsUsed(room), Math.round(Number(m.max))));
       if (free && m.target !== undefined) room.target = clampTarget(m.target, room.target);
       // the rest is decided before the round
       if (!room.started) {
@@ -408,6 +493,10 @@ export function attachRoomServer(httpServer) {
           room.winBy = 'duel';
           room.target = defaultTarget('duel');
           room.teams = 0;
+          if (m.mode === 'survival' && room.ais.size) {
+            for (const ai of [...room.ais.values()]) sendRoom(room, { t: 'peer_leave', id: ai.id, name: ai.player.name, host: room.hostId });
+            room.ais.clear(); // computer players only play Free Roam fights
+          }
           reassignAll(room);
         }
         if (room.mode === 'free') {
@@ -431,7 +520,7 @@ export function attachRoomServer(httpServer) {
       const n = Number(m.team);
       if (!room || room.started || !room.teams || !Number.isInteger(n) || n < 0 || n >= room.teams) return;
       const cap = Math.ceil(room.max / room.teams); // a team only has so many places
-      if (ws.team !== n && [...room.players.values()].filter((p) => p.team === n).length >= cap) return;
+      if (ws.team !== n && everyone(room).filter((p) => p.team === n).length >= cap) return;
       ws.team = n;
       sendTeams(room);
     },

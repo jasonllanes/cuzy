@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { RETRO_COUNT, SURVIVOR_COLORS, heroById, isRetro, isSurvivor, retroId, survivorId } from '../game/heroes';
+import { RETRO_COUNT, SURVIVOR_COLORS, V2_CHARS, heroById, isRetro, isSurvivor, isV2Char, retroId, survivorId } from '../game/heroes';
 import { randomName } from '../game/rng';
 import SpritePreview from './SpritePreview';
 import WorldBackdrop from './WorldBackdrop';
 import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
 import MenuHome from './MenuHome';
+import MultiMenu from './MultiMenu';
 import MusicButton from './MusicButton';
 import MapPreview from './MapPreview';
 import { FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, joinSeed, mapNameOf, splitSeed } from '../game/maps';
@@ -33,18 +34,27 @@ function useLobby(net) {
   return state;
 }
 
-export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, onTraining, inviteCode = '' }) {
+export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, onTraining, onTrainingV2, onV2, onExitV2, onSaveName, v2 = false, notice = '', inviteCode = '' }) {
   const invite = inviteCode || invitedCode(); // an invitation from inside the game, or from a link
   // someone tapped an invite link: skip the setup walk and ask only for a name and a hero (until they ask for the full menu)
   const [fullMenu, setFullMenu] = useState(false);
   const inviting = !!invite && !fullMenu;
   const [step, setStep] = useState('name');
-  const [view, setView] = useState('home'); // the main menu, or 'wizard' (the setup pages), 'settings', 'about', 'exit'
+  const [view, setView] = useState(v2 ? 'wizard' : 'home'); // the main menu, or 'wizard' (the setup pages), 'settings', 'about', 'exit'
   const stepIndex = STEPS.findIndex(([id]) => id === step);
   const [name, setName] = useState(initial.name);
+  const [fromMulti, setFromMulti] = useState(false); // the setup walk was opened from Multiplay: the name is already saved, and it is about creating a room
+  // a name you type is kept right away, so it never has to be typed again
+  useEffect(() => {
+    const n = name.trim();
+    if (!n || n === (initial.name || '').trim()) return undefined;
+    const t = setTimeout(() => onSaveName?.(n), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
 
   // two kinds of game: the cozy Free Roam world (which can also host a wave defense), and Survival
-  const [gameType, setGameType] = useState(initial.mode === 'survival' ? 'survival' : 'free');
+  const [gameType, setGameType] = useState(!v2 && initial.mode === 'survival' ? 'survival' : 'free');
   const freeMode = 'free'; // Free Roam is just Roam here: Wave Defense and vs AI are not offered any more
   const [mode, setMode] = useState(invite ? 'together' : 'solo');
   const [aiCount, setAiCount] = useState(initial.bots || 3);
@@ -56,7 +66,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   // Free Roam heroes: the Super Retro World pack
   const [hero, setHero] = useState(() => {
     const id = isSurvivor(initial.hero) ? initial.cozyHero : initial.hero;
-    return isRetro(id) ? heroById(id).id : retroId(1);
+    return isRetro(id) || (v2 && isV2Char(id)) ? heroById(id).id : retroId(1);
   });
   // Survival's survivor, in a jacket colour
   const [survColor, setSurvColor] = useState(() => {
@@ -82,9 +92,11 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const [roll, setRoll] = useState(() => Math.random().toString(36).slice(2, 6));
   const newRoll = () => Math.random().toString(36).slice(2, 6);
   const [pv, setPv] = useState(null); // the map preview: { roll } while it is open (roll null: the map exactly as it is)
-  const rolledSeed = !fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survPick) : `${seed}@${roll}`;
+  // Free Roam V2 is the same world with the Modern Exteriors props on top: its seed ends in ~v2
+  const tag = v2 && gameMode === 'free' ? '~v2' : '';
+  const rolledSeed = (!fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survPick) : `${seed}@${roll}`) + tag;
   // the seed the preview shows: the map as it will be played, or (after "Generate another") a freshly rolled layout of it
-  const previewSeed = pv ? (pv.roll ? (gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${pv.roll}`, survPick) : `${seed}@${pv.roll}`) : seed) : seed;
+  const previewSeed = (pv ? (pv.roll ? (gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${pv.roll}`, survPick) : `${seed}@${pv.roll}`) : seed) : seed) + tag;
   const pickedName = gameMode === 'survival' ? SURVIVAL_MAPS.find((m) => m.id === survPick)?.name : freePick.name;
   const [hovered, setHovered] = useState(null);
   const [code, setCode] = useState(invite);
@@ -236,8 +248,17 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   if (view !== 'wizard') {
     const start = (m) => {
       setMode(m);
+      setFromMulti(false);
       setStep('name');
       setError('');
+      setView('wizard');
+    };
+    // Create a room: the name is saved, so it goes straight to picking the game
+    const createFromMulti = () => {
+      setMode('together');
+      setFromMulti(true);
+      setError('');
+      setStep('game');
       setView('wizard');
     };
     return (
@@ -247,7 +268,31 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
         <div className="cloud c1" />
         <div className="cloud c2" />
         <div className="cloud c3" />
-        <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => start('together')} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} />
+        {view === 'multi' || view === 'rooms' ? (
+          <MultiMenu
+            assets={assets}
+            view={view}
+            setView={(v) => { setError(''); setView(v); }}
+            name={name}
+            setName={setName}
+            hero={hero}
+            setHero={setHero}
+            status={status}
+            online={online}
+            rooms={rooms}
+            problem={problem}
+            error={error}
+            busy={busy}
+            code={code}
+            setCode={setCode}
+            join={join}
+            onCreate={createFromMulti}
+            onBack={() => setView('home')}
+            offlineText={net.offlineText}
+          />
+        ) : (
+          <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => { setMode('together'); setError(''); setView('multi'); }} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} onTrainingV2={onTrainingV2} onV2={onV2} notice={notice} />
+        )}
       </div>
     );
   }
@@ -270,11 +315,11 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
       <form className="panel menu-card" onSubmit={submit}>
         <header className="logo">
           <span className="logo-spark">✿</span>
-          <h1>Cuzy</h1>
+          <h1>{v2 ? 'Cuzy V2' : 'Cuzy'}</h1>
           <span className="logo-spark">✿</span>
         </header>
-        <p className="tagline">a tiny cozy world to explore</p>
-        <button type="button" className="menu-back" onClick={() => setView('home')}>← Main menu</button>
+        <p className="tagline">{v2 ? 'Free Roam V2: the same world, with a modern town built into it' : 'a tiny cozy world to explore'}</p>
+        <button type="button" className="menu-back" onClick={() => (v2 ? onExitV2?.() : setView(fromMulti ? 'multi' : 'home'))}>{fromMulti ? '← Multiplay' : '← Main menu'}</button>
 
         {invite && (
           <div className="invite-banner">
@@ -336,7 +381,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <b>Free Roam</b>
                 <small>The cozy open world: explore, forage, meet farm animals, hold a wave defense, or duel your friends.</small>
               </button>
-              <button
+              {!v2 && <button
                 type="button"
                 role="radio"
                 aria-checked={gameType === 'survival'}
@@ -346,9 +391,14 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <span className="type-emoji">☠️</span>
                 <b>Survival</b>
                 <small>The zombie apocalypse: hold a camper RV through 10 waves with scavenged walls and supplies.</small>
-              </button>
+              </button>}
             </div>
-            {nav('name', 'who')}
+            {fromMulti ? (
+              <div className="nav-row">
+                <button type="button" className="btn ghost" onClick={() => setView('multi')}>← Back</button>
+                <button type="button" className="btn go" onClick={() => go('hero')}>Next ➜</button>
+              </div>
+            ) : nav('name', 'who')}
           </section>
         )}
 
@@ -394,6 +444,24 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
 
             {(
               <>
+                {v2 && (
+                  <>
+                    <span className="sub-label">V2 characters <small>(taller, with a full walk animation)</small></span>
+                    <div className="heroes retro-grid" role="radiogroup" aria-label="V2 characters">
+                      {V2_CHARS.map((c) => {
+                        const h = heroById(c.id);
+                        const on = hero === h.id;
+                        return (
+                          <button type="button" key={h.id} role="radio" aria-checked={on} className={`hero-card ${on ? 'selected' : ''}`} onClick={() => setHero(h.id)} onMouseEnter={() => setHovered(h.id)} onMouseLeave={() => setHovered(null)}>
+                            <SpritePreview img={assets.img} hero={h} active={on || hovered === h.id} />
+                            <span className="hero-name">{h.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="sub-label">V1 heroes</span>
+                  </>
+                )}
                 <div className="heroes retro-grid" role="radiogroup" aria-label="Hero">
                   {Array.from({ length: RETRO_COUNT }, (_, i) => {
                     const h = heroById(retroId(i + 1));
@@ -420,7 +488,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <p className="hero-blurb">Selected: <b>{selected.label}</b>. {survival ? 'Your hero faces the horde in Survival too. ' : ''}Super Retro World pixel heroes (credit: Gif, Noiracide &amp; Romi).</p>
               </>
             )}
-            {nav('who', 'play')}
+            {nav(fromMulti ? 'game' : 'who', 'play')}
           </section>
         )}
 
@@ -458,7 +526,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
               {(gameMode === 'survival' ? SURVIVAL_MAPS : FREE_MAPS).map((m) => {
                 const on = gameMode === 'survival' ? survMap === m.id : freeMap === m.id;
                 return (
-                  <button key={m.id} type="button" role="radio" aria-checked={on} className={`diff-chip map-card ${on ? 'on' : ''}`} onClick={() => (gameMode === 'survival' ? setSurvMap(m.id) : setFreeMap(m.id))}>
+                  <button key={m.id} type="button" role="radio" aria-checked={on} className={`diff-chip map-card ${m.id === 'mixed' ? 'open-world' : ''} ${on ? 'on' : ''}`} onClick={() => (gameMode === 'survival' ? setSurvMap(m.id) : setFreeMap(m.id))}>
                     <b>{m.icon} {m.name}</b>
                     <small>{m.blurb}</small>
                   </button>
@@ -491,8 +559,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 )}
                 {error && <div className="notice error">{error}</div>}
 
-                <div className="sub-label">Open rooms</div>
-                <div className="room-list">
+                {!fromMulti && <div className="sub-label">Open rooms</div>}
+                {!fromMulti && <div className="room-list">
                   {rooms.length === 0 && <div className="room-empty">No rooms yet. Be the first to create one!</div>}
                   {rooms.map((r) => (
                     <div className="room-row" key={r.code}>
@@ -507,10 +575,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                       </button>
                     </div>
                   ))}
-                </div>
+                </div>}
 
-                <div className="sub-label">Join with a code</div>
-                <div className="row">
+                {!fromMulti && <div className="sub-label">Join with a code</div>}
+                {!fromMulti && <div className="row">
                   <input
                     className="code-input"
                     value={code}
@@ -528,9 +596,9 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                   <button type="button" className={`btn ${invite ? 'go' : ''}`} disabled={busy || !online || !code.trim()} onClick={() => join(code.trim())}>
                     Join
                   </button>
-                </div>
+                </div>}
 
-                <div className="sub-label">Or host your own</div>
+                <div className="sub-label">{fromMulti ? 'Your room' : 'Or host your own'}</div>
                 <div className="row">
                   <input value={roomName} maxLength={24} placeholder={`${myName()}'s meadow`} autoComplete="off" onChange={(e) => setRoomName(e.target.value)} />
                   <select value={max} onChange={(e) => setMax(Number(e.target.value))} aria-label="Max players">

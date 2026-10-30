@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import MusicButton from './MusicButton';
-import { heroById } from '../game/heroes';
+import { RETRO_COUNT, heroById, retroId } from '../game/heroes';
+import { BOT_NAMES } from '../game/bots';
 import { TEAMS } from '../game/teams';
 import RoomSettings from './RoomSettings';
 import { inviteLink } from '../game/net';
@@ -47,6 +48,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         } else if (m.t === 'peer_leave') {
           setPeers((p) => p.filter((x) => x.id !== m.id));
           if (m.host != null) setHost(m.host);
+        } else if (m.t === 'ais') {
+          setPeers((p) => [...p.filter((x) => !x.ai), ...(m.list || [])]);
         } else if (m.t === 'slot') {
           setPeers((p) => p.map((x) => (x.id === m.id ? { ...x, slot: m.slot } : x)));
         } else if (m.t === 'settings') {
@@ -68,6 +71,15 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
   };
 
   const imHost = host === you;
+  // back in a room whose round had started before the page was reloaded: the host carries on where it was
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (session.autoStart && imHost && !autoStarted.current) {
+      autoStarted.current = true;
+      net.send({ t: 'start' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imHost]);
   const ordered = [...peers].sort((a, b) => (a.id === host ? -1 : b.id === host ? 1 : (a.slot ?? 0) - (b.slot ?? 0)));
   // every seat of the room, by number: who sits in it (anyone with no seat of their own takes the first free one)
   const seats = Array.from({ length: room.max }, () => null);
@@ -81,6 +93,17 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
     if (free >= 0) seats[free] = p;
   }
   const hostName = ordered.find((p) => p.id === host)?.name || 'the host';
+
+  // a computer player takes a seat: a hero nobody else is using, and a name from the list
+  const addAi = (slot) => {
+    const heroes = Array.from({ length: RETRO_COUNT }, (_, i) => retroId(i + 1));
+    const freeHeroes = heroes.filter((h) => !peers.some((p) => p.hero === h));
+    const pool = freeHeroes.length ? freeHeroes : heroes;
+    const names = BOT_NAMES.filter((n) => !peers.some((p) => p.name === n));
+    net.send({ t: 'addai', slot, name: (names.length ? names : BOT_NAMES)[Math.floor(Math.random() * (names.length || BOT_NAMES.length))], hero: pool[Math.floor(Math.random() * pool.length)] });
+    setSeatMenu(null);
+  };
+  const removeAi = (id) => net.send({ t: 'removeai', id });
 
   return (
     <div className="menu">
@@ -122,7 +145,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
                       return (
                         <div className={`team-slot filled ${p.id === you ? 'me' : ''}`} key={p.id}>
                           <SpritePreview img={assets.img} hero={hero} active />
-                          <b>{p.id === host ? '👑 ' : ''}{p.name}{p.id === you ? ' (you)' : ''}</b>
+                          <b>{p.id === host ? '👑 ' : ''}{p.ai ? '🤖 ' : ''}{p.name}{p.id === you ? ' (you)' : ''}</b>
+                          {p.ai && imHost && <button type="button" className="seat-x" title="Remove this computer player" onClick={() => removeAi(p.id)}>✕</button>}
                         </div>
                       );
                     }
@@ -144,6 +168,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
               return (
                 <div className={`wait-slot ${p.id === you ? 'me' : ''}`} key={p.id} style={room.teams > 0 && TEAMS[teams[p.id]] ? { borderColor: TEAMS[teams[p.id]].color } : undefined}>
                   {p.id === host && <span className="wait-badge">👑 Host</span>}
+                  {p.ai && <span className="wait-badge ai">🤖 Computer</span>}
+                  {p.ai && imHost && <button type="button" className="seat-x" title="Remove this computer player" onClick={() => removeAi(p.id)}>✕</button>}
                   <SpritePreview img={assets.img} hero={hero} active />
                   <b className="wait-name">{p.name}{p.id === you ? ' (you)' : ''}</b>
                   <small>{hero.label}</small>
@@ -168,13 +194,21 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
                 {seatMenu === i && (
                   <div className="seat-menu" role="menu">
                     <button type="button" role="menuitem" className="btn small-btn" onClick={() => { net.moveSlot?.(i); setSeatMenu(null); }}>↪ Move here</button>
-                    {imHost && <button type="button" role="menuitem" className="btn small-btn" disabled title="Computer players in a room are not available yet">🤖 Add AI</button>}
+                    {imHost && (
+                      <button type="button" role="menuitem" className="btn small-btn" disabled={room.mode !== 'free'} title={room.mode === 'free' ? 'A computer player takes this seat and fights for itself' : 'Computer players only join Free Roam fights'} onClick={() => addAi(i)}>
+                        🤖 Add AI
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
         </div>
+        )}
+
+        {imHost && room.teams > 0 && room.mode === 'free' && ordered.length < room.max && (
+          <button type="button" className="btn small-btn add-ai" onClick={() => addAi()}>🤖 Add a computer player</button>
         )}
 
         <RoomSettings room={room} count={ordered.length} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />

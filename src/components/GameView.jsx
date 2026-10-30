@@ -17,6 +17,7 @@ import Hotbar from './Hotbar';
 import SupplyBar from './SupplyBar';
 import ShopPanel from './ShopPanel';
 import StoragePanel from './StoragePanel';
+import UnlockCards from './UnlockCards';
 import QtyPicker from './QtyPicker';
 import RoomSettings, { Switch } from './RoomSettings';
 import TouchControls from './TouchControls';
@@ -34,6 +35,9 @@ import { GUNS, RECALL_CD, SHIELD_CD } from '../game/combat';
 import { setTheme } from '../game/items';
 import RoomPanel from './RoomPanel';
 import UpgradePanel from './UpgradePanel';
+import { isV2Seed, loadV2Images } from '../game/v2world';
+import SupplyMenu from './SupplyMenu';
+import { music, themeForSeed } from '../game/music';
 
 function formatClock(hour) {
   const h = Math.floor(hour) % 24;
@@ -164,6 +168,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   // the opening scene: 'play' (watching), 'wait' (finished or skipped; in a room, waiting for the others), 'out' (fading away), 'done'
   const [intro, setIntro] = useState(() => (training || new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
   const introRef = useRef(intro);
+  // background music: the opening scene, the end of a round or the game over screen, otherwise the tune of the map
+  const endKind = hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') ? hud.wave.phase : hud.celeb ? 'round' : null;
+  const tune = endKind === 'defeat' ? 'gameover' : endKind ? 'ending' : intro === 'play' || intro === 'wait' ? 'intro' : themeForSeed(profile.seed);
+  useEffect(() => {
+    music.play(tune);
+  }, [tune]);
   const [mapOpen, setMapOpen] = useState(false);
   const [roomPause, setRoomPause] = useState(null); // set while the host has the room paused: { by }
   const [hostId, setHostId] = useState(session?.host ?? null);
@@ -198,11 +208,16 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     return () => clearTimeout(t);
   }, [banner]);
   useEffect(() => sfx.on(() => setMuted(sfx.muted)), []);
+  const [musicOn, setMusicOn] = useState(music.on);
+  useEffect(() => music.listen(() => setMusicOn(music.on)), []);
   const [guideOpen, setGuideOpen] = useState(() => new URLSearchParams(window.location.search).has('guide'));
   const guideRef = useRef(false);
   const [upgOpen, setUpgOpen] = useState(false);
+  const [supplyOpen, setSupplyOpen] = useState(null); // 'hp' or 'stam': the list behind that quick slot
   const upgRef = useRef(false);
   const [storeOpen, setStoreOpen] = useState(false); // the chest at home
+  const [unlocks, setUnlocks] = useState([]); // flash cards for skills that just unlocked
+  const [levelFlash, setLevelFlash] = useState(null); // { level, key } for the glow when you level up
   const storeRef = useRef(false);
   const [box, setBox] = useState(() => Array(27).fill(null));
   const [qty, setQty] = useState(null); // asking how many to drop or move: { kind, side, i, max, id }
@@ -233,6 +248,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       if (m.t === 'peer_join') {
         setPeers((p) => [...p.filter((x) => x.id !== m.player.id), m.player]);
         pushToast(`${m.player.name} joined the room!`);
+      } else if (m.t === 'ais') {
+        setPeers((p) => [...p.filter((x) => !x.ai), ...(m.list || [])]);
       } else if (m.t === 'settings' && m.room) {
         setLive((prev) => {
           // tell everybody what the host just changed
@@ -278,7 +295,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   }, [net, session]);
 
   useEffect(() => {
-    const game = new Game({
+    let dead = false;
+    let game = null;
+    const boot = () => {
+    game = new Game({
       canvas: canvasRef.current,
       minimap: miniRef.current,
       world: new World(profile.seed, { waves, theme: survival ? 'apoc' : 'cozy' }),
@@ -298,6 +318,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       onInventory: setInventory,
       onStorage: setBox,
       onOpenStorage: () => setStoreOpen(true),
+      onLevelUp: ({ level, unlocked }) => {
+        const key = Math.random();
+        setLevelFlash({ level, key });
+        setTimeout(() => setLevelFlash((f) => (f && f.key === key ? null : f)), 1800);
+        if (unlocked.length) setUnlocks((u) => [...u, ...unlocked.map((c) => ({ ...c, key: Math.random() }))]);
+      },
       // the wheel hops over empty slots, as long as there is something to land on
       onHotbarScroll: (dir) =>
         setSelected((s) => {
@@ -320,9 +346,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     }
     game.frozen = introRef.current === 'play' || introRef.current === 'wait';
     game.start();
+    };
+    // a V2 world draws sprites from the Modern Exteriors atlases: they are loaded before the game begins
+    if (isV2Seed(profile.seed)) loadV2Images(assets.img).then(() => !dead && boot());
+    else boot();
     return () => {
+      dead = true;
       clearTimeout(toastTimer.current);
-      game.stop();
+      game?.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assets, profile, session]);
@@ -443,13 +474,21 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         setSelected(Number(digit[1]) - 1);
         return;
       }
-      if (e.code === 'KeyE' && !e.repeat && !modal) {
-        gameRef.current?.useItem(selRef.current);
+      if (!waves && e.code === 'KeyE' && !e.repeat && !modal) {
+        gameRef.current?.useSupply('stam'); // Free Roam: E stamina, Q health
         return;
       }
-      if (e.code === 'KeyZ' && !e.repeat && !modal && (!waves || survival)) {
+      if (!waves && e.code === 'KeyQ' && !e.repeat && !modal) {
         gameRef.current?.useSupply('hp');
-      } else if (e.code === 'KeyX' && !e.repeat && !modal && (!waves || survival)) {
+        return;
+      }
+      if (waves && e.code === 'KeyE' && !e.repeat && !modal) {
+        gameRef.current?.eatBest();
+        return;
+      }
+      if (e.code === 'KeyZ' && !e.repeat && !modal && survival) {
+        gameRef.current?.useSupply('hp');
+      } else if (e.code === 'KeyX' && !e.repeat && !modal && survival) {
         gameRef.current?.useSupply('stam');
       } else if (e.code === 'Tab') {
         // Tab switches weapon: the next gun in Survival, the next sword in the Free Roam
@@ -525,7 +564,6 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           peers={peers}
           myId={session.you}
           lan={net.lan}
-          onVisit={(id) => gameRef.current?.teleportToPeer(id)}
         />
       )}
       <div className={`hud chat-log ${chatOpen ? 'open' : ''}`}>
@@ -567,12 +605,15 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       <div className={`hud hud-left-col ${mobile ? `mobile-slide ${statsOpen ? 'open' : ''}` : ''}`}>
         <div className="hud-left panel small">
-          <div className="hud-name">{profile.name}</div>
+          <div className="hud-id">
+            <span className="hud-portrait"><Avatar assets={assets} id={profile.hero} size={52} /></span>
+            <div className="hud-name">{profile.name}</div>
+          </div>
           <div className="hud-line">🗺️ <b>{mapNameOf(profile.seed)}</b></div>
           <div className="hud-line">📍 {hud.tx}, {hud.ty}</div>
           <div className="hud-line">{dayIcon(hud.hour)} Day {hud.day} · {formatClock(hud.hour)}</div>
           <Meter icon="❤️" label="HP" value={hud.hp / hud.maxHp} tone="hp" text={`${Math.max(0, hp100(hud.hp))}/${hp100(hud.maxHp)}`} />
-          <Meter icon="⭐" label={`Level ${hud.level || 1}`} value={(hud.xp || 0) / (hud.xpNeed || 40)} tone="xp" text={`Lv ${hud.level || 1}`} />
+          <Meter icon="⭐" label={`Level ${hud.level || 1}`} value={(hud.xp || 0) / (hud.xpNeed || 40)} tone="xp" text={hud.maxLevel ? `Lv ${hud.level} MAX` : `Lv ${hud.level || 1} · ${hud.xpLeft ?? '?'} to go`} />
           <Meter icon="⚡" label="Stamina" value={hud.stamina} tone="stam" text={`${Math.round(hud.stamina * (hud.stats?.staminaTotal || 100))}/${hud.stats?.staminaTotal || 100}`} />
           {hud.mount && (
             <Meter icon="💗" label={`${hud.mount.type === 'cow' ? 'Cow' : 'Chicken'} HP`} value={hud.mount.hp / hud.mount.maxHp} tone="hp" text={`${Math.max(0, Math.round(hud.mount.hp * 10) / 10)}/${hud.mount.maxHp}`} />
@@ -659,7 +700,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <span>🔍</span>
           <button className="btn small-btn" aria-label="Zoom in" onClick={() => gameRef.current?.zoomBy(1)}>+</button>
         </div>
-        <button type="button" className="coin-chip coin-drop" onClick={() => hud.coins > 0 && setQty({ kind: 'coins', max: hud.coins, id: 'coin' })} title={`${waves ? 'Coins for upgrades and helpers' : 'Coins for the shop'}. Click to drop some on the ground.`}>🪙 {hud.coins}</button>
+        <div className="coin-row">
+          <button type="button" className="coin-chip coin-drop" onClick={() => hud.coins > 0 && setQty({ kind: 'coins', max: hud.coins, id: 'coin' })} title={`${waves ? 'Coins for upgrades and helpers' : 'Coins for the shop'}. Click to drop some on the ground.`}>🪙 {hud.coins}</button>
+          {!waves && <span className="coin-chip wood-chip" title="Wood from the trees you chop: weapons are crafted from it at the shop (B)">🪵 {hud.wood || 0}</span>}
+        </div>
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
         {(!mobile || hudMenuOpen) && (
           <>
@@ -675,8 +719,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <span className="stamina-label">{hud.exhausted ? 'Catching breath…' : 'Stamina'}</span>
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
-      {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} />}
-      {!mobile && <div className="hud hud-help">WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall{waves ? ' · Q/E turn wall' : ''} · 1-9/wheel select · Tab switch weapon· E eat · B buy · M map</div>}
+      {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} onSupply={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
+      {!mobile && <div className="hud hud-help">{waves ? <>WASD move · Shift sprint · Click sword · Hold click dash · F shield · Right-click {survival ? 'shoot' : 'throw'} · Space pick up · H recall · Q/E turn wall · 1-9/wheel select · Tab switch weapon · E eat · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -700,10 +744,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           className={`skill ${hud.shieldT > 0 ? 'active' : ''} ${hud.shieldCd > 0 ? 'cooling' : 'ready'}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => gameRef.current?.combat?.activateShield()}
-          title={!waves && !hud.util ? 'Utility skill: buy the Shield or Invisibility in the shop (B)' : 'Shield: blocks all damage for 3 seconds (10 second cooldown)'}
+          title={!waves && !hud.util ? 'Utility skill: the Shield unlocks at level 10, Invisibility at level 15 (R)' : 'Shield: blocks all damage for 3 seconds (10 second cooldown)'}
         >
           <span className="skill-icon">{!waves && !hud.util ? '🔒' : '🛡️'}</span>
-          <kbd>F</kbd>
+          <kbd>{waves ? 'F' : 'R'}</kbd>
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.shieldCd / SHIELD_CD) * 100)}%` }} />
           {hud.shieldCd > 0 && <span className="skill-num">{Math.ceil(hud.shieldCd)}</span>}
         </button>
@@ -716,7 +760,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             title="Invisibility: enemies cannot see you for 4 seconds (25 second cooldown)"
           >
             <span className="skill-icon">👻</span>
-            <kbd>C</kbd>
+            <kbd>R</kbd>
             <span className="skill-cd" style={{ height: `${Math.min(100, (hud.invisCd / INVIS_CD) * 100)}%` }} />
             {hud.invisCd > 0 && <span className="skill-num">{Math.ceil(hud.invisCd)}</span>}
           </button>
@@ -741,9 +785,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </div>
       <div className="hud skills right">
-        <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? 'Hold left click, then release to use your sword skill' : 'Sword skill: buy the Dash or the Spiral Sword in the shop (B)'}>
+        <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? (waves ? 'Hold left click, then release to use your sword skill' : 'Press Space (hold it to charge) or hold left click, then release, to use your sword skill') : 'Sword skill: Dash unlocks at level 6, Spiral Sword at level 8'}>
           <span className="skill-icon">{hud.activeSkill === 'spiral' ? '🌀' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
-          <small>{hud.activeSkill ? 'hold click' : 'locked'}</small>
+          <small>{hud.activeSkill ? (waves ? 'hold click' : 'Space') : 'locked'}</small>
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'spiral' ? 1.4 : 1.2)) * 100)}%` }} />
         </div>
       </div>
@@ -798,7 +842,25 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {(!waves || survival) && <SupplyBar cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0, shield: 0 }} onUse={(k) => gameRef.current?.useSupply(k)} />}
+      {(!waves || survival) && <SupplyBar keys={waves ? ['Z', 'X'] : ['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
+      {supplyOpen && (!waves || survival) && <SupplyMenu kind={supplyOpen} hud={hud} game={gameRef.current} onClose={() => setSupplyOpen(null)} />}
+      {hud.target && (
+        <div className={`target-card ${hud.target.fading ? 'fading' : ''} ${hud.target.boss ? 'boss' : ''}`} style={{ '--tc': hud.target.color }} role="status">
+          <span className="target-icon"><MonsterIcon type={hud.target.type} size={40} /></span>
+          <div className="target-info">
+            <div className="target-top"><b>{hud.target.name}</b><i style={{ background: hud.target.color }}>Lv {hud.target.lv}</i><small>{hud.target.rarity}</small></div>
+            <div className="target-bar"><b style={{ width: `${Math.max(0, Math.min(100, (hud.target.hp / hud.target.max) * 100))}%` }} /></div>
+          </div>
+        </div>
+      )}
+      {levelFlash && (
+        <div key={levelFlash.key} className="levelup-flash" aria-hidden="true">
+          <span className="levelup-glow" />
+          <b>⭐ LEVEL {levelFlash.level}</b>
+          <small>{levelFlash.level >= 25 ? 'Max level reached!' : 'Max HP up, and you hit a little harder'}</small>
+        </div>
+      )}
+      <UnlockCards cards={unlocks} onGone={(key) => setUnlocks((u) => u.filter((c) => c.key !== key))} />
       {banner && !hud.celeb && (
         <div key={banner.id} className={`kill-banner tier-${banner.tier} ${banner.mine ? 'mine' : ''}`} role="status">
           <b>{banner.title}</b>
@@ -839,9 +901,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         />
       )}
       {upgOpen && (waves
-        ? <UpgradePanel hud={hud} game={gameRef.current} survival={survival} onClose={() => setUpgOpen(false)} />
-        : <ShopPanel hud={hud} game={gameRef.current} onClose={() => setUpgOpen(false)} />)}
-      {storeOpen && <StoragePanel inventory={inventory} box={box} game={gameRef.current} onAsk={setQty} onClose={() => setStoreOpen(false)} />}
+        ? <UpgradePanel hud={hud} game={gameRef.current} survival={survival} inventory={inventory} onClose={() => setUpgOpen(false)} />
+        : <ShopPanel hud={hud} game={gameRef.current} inventory={inventory} onClose={() => setUpgOpen(false)} />)}
+      {storeOpen && <StoragePanel inventory={inventory} box={box} game={gameRef.current} hud={hud} onAsk={setQty} onClose={() => setStoreOpen(false)} />}
       {roomSetOpen && !session && (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setRoomSetOpen(false)}>
           <div className="panel room-settings-card">
@@ -970,11 +1032,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {paused && (
         <div className="overlay" onPointerDown={(e) => e.target === e.currentTarget && setPaused(false)}>
-          <div className="panel pause-card">
+          <div className="panel pause-card pause-wide">
             <h2>Menu</h2>
             <p className="hint">{session ? 'The room keeps going while you are in this menu.' : 'The game is paused. Your progress is saved for this map.'}</p>
             <div className="pm-grid">
-              <button className="btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+              <button className="btn" onClick={() => sfx.setMuted(!sfx.muted)} title="Sound effects on/off">{muted ? '🔇 Effects off' : '🔊 Effects on'}</button>
+              <button className="btn" onClick={() => music.setOn(!music.on)} title="Background music on/off">{musicOn ? '🎵 Music on' : '🎵 Music off'}</button>
               <button className="btn" onClick={() => { setPaused(false); setOnlineOpen(true); }} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
               <button className="btn" onClick={() => { setPaused(false); setGuideOpen(true); }}>📖 Guide <kbd>G</kbd></button>
               <button className="btn" onClick={() => { setPaused(false); setAboutOpen(true); }}>ℹ️ About &amp; credits</button>

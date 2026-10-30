@@ -2,6 +2,7 @@ import { fbm, hash2, hashString, smoothstep } from './rng';
 import { mapInfo, splitSeed } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
+import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
 
 export const T = 16; // tile size in px
 const FROST_TREES = ['tree_pine', 'tree_pine', 'tree_spruce'];
@@ -13,6 +14,7 @@ export const WATER = 0;
 export const SAND = 1;
 export const GRASS = 2;
 
+const EDGE_PROBES = [[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, -3], [3, -3], [-3, 3]];
 const BIOMES = ['tidal', 'emerald', 'crystal', 'marsh', 'lava', 'beach', 'asphalt', 'mountain']; // the Patchwork Lands regions
 const BIOME_LOW = { tidal: 0.1, emerald: 0.1, crystal: 0.04, marsh: 0.05, lava: 0.05, beach: 0.05, asphalt: 0, mountain: 0 }; // how far each sinks the ground
 const SEA = 0.43;
@@ -45,7 +47,8 @@ const FLOWER_COLORS = ['#ff9ec7', '#ffffff', '#c9a7ff', '#ffd94a', '#ffb38a', '#
 
 export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
-    this.seedStr = String(seedStr);
+    this.v2 = theme !== 'apoc' && !waves && isV2Seed(seedStr); // Free Roam V2: the same world with the Modern Exteriors props on top
+    this.seedStr = stripV2(seedStr);
     this.seed = hashString(this.seedStr);
     // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
     // start of the seed, and a Survival map names it
@@ -65,6 +68,7 @@ export class World {
     this.extraRects = []; // movable obstacles (the wave-defense barricades)
     this.chunks = new Map();
     this.felled = new Set(); // trees that have been cut down ("bx,by")
+    this.regrow = new Map(); // felled tree -> seconds until a sapling takes its place again
     this.treeHp = new Map(); // damage taken so far by trees that are still standing
     this.typeCache = new Map();
     this.siteCache = new Map();
@@ -300,6 +304,13 @@ export class World {
     return false;
   }
 
+  // In the Open World, is this spot close to the border between two regions? (4 tiles away in any direction)
+  nearBiomeEdge(x, y) {
+    const b = this.biomeAt(x, y);
+    for (const [dx, dy] of EDGE_PROBES) if (this.biomeAt(x + dx, y + dy) !== b) return true;
+    return false;
+  }
+
   // Trees live on a 2x2 tile grid so their bases never overlap.
   treeAt(bx, by) {
     if (this.tileset === 'wood') return null; // (no trees growing through the floorboards)
@@ -313,7 +324,8 @@ export class World {
     const x = bx * 2;
     const y = by * 2;
     const f = this.forest(x + 1, y + 1);
-    const p = 0.02 + 0.55 * smoothstep(0.5, 0.66, f);
+    let p = 0.02 + 0.55 * smoothstep(0.5, 0.66, f);
+    if (this.mixed && this.nearBiomeEdge(x + 1, y + 1)) p = Math.max(p, 0.72); // a belt of trees hides the seam between two regions
     if (hash2(bx, by, this.seed + 11) < p) {
       let ok = !this.isCleared(x, y);
       for (let j = 0; j < 2 && ok; j++) {
@@ -427,6 +439,7 @@ export class World {
     }
     this.treeHp.delete(o.tkey);
     this.felled.add(o.tkey);
+    this.regrow.set(o.tkey, 100 + Math.random() * 200); // it will be back
     for (const c of this.chunks.values()) {
       if (c.objects.some((x) => x.tkey === o.tkey)) {
         c.objects = c.objects.filter((x) => x.tkey !== o.tkey);
@@ -434,6 +447,56 @@ export class World {
       }
     }
     return 0;
+  }
+
+  // the object (and the solid patch at its trunk) for the tree grown on grid cell bx,by
+  treeObject(tree, bx, by) {
+    const tkey = `${bx},${by}`;
+    if (this.apoc) {
+      const kind = APOC_TREES[tree.kind];
+      const keys = this.frost && tree.kind !== 'sapling' && tree.kind !== 'stump' ? FROST_TREES : kind.keys; // only pines survive the cold
+      let key = keys[Math.floor(hash2(tree.x, tree.y, this.seed + 15) * keys.length)];
+      if (this.mapInfo?.trees && key !== 'stump') key = `${key}__${this.mapInfo.trees}`; // this map's own colours
+      const { w, h } = apocSize(key);
+      return {
+        obj: { kind: 'tree', tkey, tk: tree.kind, sheet: `apoc/${key}`, sx: 0, sy: 0, sw: w, sh: h, x: tree.x, y: tree.y },
+        rect: kind.cw ? { tkey, x: tree.x - kind.cw / 2, y: tree.y - kind.ch - 2, w: kind.cw, h: kind.ch } : null,
+      };
+    }
+    const spr = TREE_SPRITES[tree.kind];
+    return {
+      obj: { kind: 'tree', tkey, tk: tree.kind, sheet: 'trees', sx: spr.sx, sy: spr.sy, sw: spr.sw, sh: spr.sh, x: tree.x, y: tree.y },
+      rect: spr.cw ? { tkey, x: tree.x - spr.cw / 2, y: tree.y - spr.ch - 2, w: spr.cw, h: spr.ch } : null,
+    };
+  }
+
+  // Felled trees grow back after a while, so long as nobody is standing on the spot.
+  growBack(dt, px, py) {
+    for (const [k, left] of this.regrow) {
+      if (left > dt) {
+        this.regrow.set(k, left - dt);
+        continue;
+      }
+      const [bx, by] = k.split(',').map(Number);
+      const tree = this.treeAt(bx, by);
+      if (!tree) {
+        this.regrow.delete(k);
+        this.felled.delete(k);
+        continue;
+      }
+      if (Math.hypot(tree.x - px, tree.y - py) < 34) {
+        this.regrow.set(k, 4); // wait until the player steps away
+        continue;
+      }
+      this.regrow.delete(k);
+      this.felled.delete(k);
+      const chunk = this.chunks.get(`${Math.floor((bx * 2) / CHUNK)},${Math.floor((by * 2) / CHUNK)}`);
+      if (chunk && !chunk.objects.some((o) => o.tkey === k)) {
+        const made = this.treeObject(tree, bx, by);
+        chunk.objects.push(made.obj);
+        if (made.rect) chunk.rects.push(made.rect);
+      }
+    }
   }
 
   getChunk(cx, cy) {
@@ -460,19 +523,9 @@ export class World {
         if (!tree) continue;
         const tkey = `${bx},${by}`;
         if (this.felled.has(tkey)) continue;
-        if (this.apoc) {
-          const kind = APOC_TREES[tree.kind];
-          const keys = this.frost && tree.kind !== 'sapling' && tree.kind !== 'stump' ? FROST_TREES : kind.keys; // only pines survive the cold
-          let key = keys[Math.floor(hash2(tree.x, tree.y, s + 15) * keys.length)];
-          if (this.mapInfo?.trees && key !== 'stump') key = `${key}__${this.mapInfo.trees}`; // this map's own colours
-          const { w, h } = apocSize(key);
-          chunk.objects.push({ kind: 'tree', tkey, tk: tree.kind, sheet: `apoc/${key}`, sx: 0, sy: 0, sw: w, sh: h, x: tree.x, y: tree.y });
-          if (kind.cw) chunk.rects.push({ tkey, x: tree.x - kind.cw / 2, y: tree.y - kind.ch - 2, w: kind.cw, h: kind.ch });
-          continue;
-        }
-        const spr = TREE_SPRITES[tree.kind];
-        chunk.objects.push({ kind: 'tree', tkey, tk: tree.kind, sheet: 'trees', sx: spr.sx, sy: spr.sy, sw: spr.sw, sh: spr.sh, x: tree.x, y: tree.y });
-        if (spr.cw) chunk.rects.push({ tkey, x: tree.x - spr.cw / 2, y: tree.y - spr.ch - 2, w: spr.cw, h: spr.ch });
+        const made = this.treeObject(tree, bx, by);
+        chunk.objects.push(made.obj);
+        if (made.rect) chunk.rects.push(made.rect);
       }
     }
 
@@ -517,6 +570,8 @@ export class World {
         }
       }
     }
+
+    if (this.v2 && !this.apoc && !this.waveMode) addV2Chunk(this, chunk, cx, cy);
 
     // Cottage + its stepping-stone path
     const rx = Math.floor(cx * CHUNK / REGION);

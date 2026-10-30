@@ -21,7 +21,7 @@ export const SURVIVAL_MAPS = [
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Cracked asphalt roads winding through a dark wasteland.', ground: 'bg', trees: null, climate: 'mild', tileset: 'asphalt' },
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain' },
   { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'Survive on an endless wooden floor of pale and dark boards.', ground: 'bg', trees: null, climate: 'mild', tileset: 'wood' },
-  { id: 'mixed', icon: '🧩', name: 'Patchwork Lands', blurb: 'A mix of every other map, side by side: islands, lakes, marsh, lava, beach and roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
+  { id: 'mixed', icon: '🌍', name: 'Open World', blurb: 'Every biome in one endless world: islands, lakes, marsh, lava, beach, roads and mountains, each with its own monsters.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
 ];
 
 // Free Roam (and Wave Defense) maps: each is a hand-picked world with a name. The seed behind it is fixed.
@@ -34,9 +34,9 @@ export const FREE_MAPS = [
   { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea: a beach with open water all around.', seed: 'beach-482' },
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Dark cracked asphalt roads winding through a dark blue wasteland.', seed: 'asphalt-358' },
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads and mountain paths.', seed: 'mountain-206' },
-  { id: 'mixed', icon: '🧩', name: 'Patchwork Lands', blurb: 'A mix of all the other maps: islands, lakes, marsh, lava, beach, roads and paths, side by side.', seed: 'mixed-640' },
   { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'An endless pale and dark wooden floor, with cottages standing on it.', seed: 'wood-119' },
   { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush green islands with flowers, ringed by earthen cliffs and deep teal sea.', seed: 'emerald-615' },
+  { id: 'mixed', icon: '🌍', name: 'Open World', blurb: 'An endless world made of every biome side by side: islands, lakes, marsh, lava, beach, roads and mountains. Each region has its own monsters, and the bosses change with the land.', seed: 'mixed-640' },
 ];
 
 // Survival maps all use this base seed; the map itself is the difference

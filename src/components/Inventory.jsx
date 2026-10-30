@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { ITEMS, breaksOnImpact, consumeVerb, isConsumable, throwDamage } from '../game/items';
+import { ITEMS, breaksOnImpact, consumeVerb, isConsumable, rarityOf, throwDamage } from '../game/items';
 import ItemIcon from './ItemIcon';
 import { hp100 } from '../game/stats';
 
 export function Effects({ def }) {
   return (
     <div className="effects">
-      {def.heal > 0 && <span className="effect heal">❤️ +{hp100(def.heal)} HP</span>}
+      {def.heal > 0 && <span className="effect heal">❤️ +{Math.round(def.heal * 100)}% HP</span>}
       {def.energy > 0 && <span className="effect energy">⚡ +{Math.round(def.energy * 100)}% Stamina</span>}
       <span className="effect throw">🎯 Throw · {throwDamage(def)} dmg{breaksOnImpact(def) ? ' · splats' : ''}</span>
     </div>
@@ -34,7 +34,7 @@ export default function Inventory({ slots, game, onClose }) {
             {slots.map((s, i) => (
               <button
                 key={i}
-                className={`inv-slot ${selected === i ? 'selected' : ''} ${s ? 'filled' : ''}`}
+                className={`inv-slot ${selected === i ? 'selected' : ''} ${s ? `filled rar rar-${rarityOf(s.id)}` : ''}`}
                 draggable={!!s}
                 onClick={() => setSelected(i)}
                 onDragStart={() => setDragFrom(i)}

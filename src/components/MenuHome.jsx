@@ -4,12 +4,15 @@ import { store } from '../game/store';
 import ControlsLayout from './ControlsLayout';
 import ScreenSettings from './ScreenSettings';
 import AboutContent from './AboutContent';
+import AccessForm from './AccessForm';
+import { isUnlocked, lockAgain } from '../game/access';
 
 
 // The main menu: Play, Multiplay, Settings, About and Exit, and the pages behind them.
-export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, name, setName, online }) {
+export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, onTrainingV2, onV2, name, setName, online, notice = '' }) {
   const [gone, setGone] = useState(false);
   const [msg, setMsg] = useState('');
+  const [access, setAccess] = useState(isUnlocked); // the developer tools are locked until the code is typed in Settings
 
   const clearSaves = () => {
     if (!window.confirm('Delete every saved game on this device? Your name and settings stay.')) return;
@@ -39,15 +42,16 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, n
       </header>
       <p className="tagline">a tiny cozy world to explore</p>
 
+      {view === 'home' && notice && <div className="notice">{notice}</div>}
       {view === 'home' && (
         <nav className="home-menu" aria-label="Main menu">
           <button type="button" className="home-btn play" onClick={onPlay}>
-            <b>▶ Play</b>
+            <b>▶ Play Solo</b>
             <small>Explore on your own, against computer rivals, or survive the horde</small>
           </button>
           <button type="button" className="home-btn" onClick={onMulti}>
-            <b>👥 Multiplay</b>
-            <small>{online ? '🟢 Host a room or join friends with a code' : '🟠 Host a room or join friends (connecting…)'}</small>
+            <b>👥 Multiplayer</b>
+            <small>{online ? '🟢 See the open rooms, or create your own' : '🟠 See the open rooms, or create your own (connecting…)'}</small>
           </button>
           <button type="button" className="home-btn" onClick={() => setView('settings')}>
             <b>⚙️ Settings</b>
@@ -57,12 +61,6 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, n
             <b>📖 About</b>
             <small>How to play and who made the art</small>
           </button>
-          {onTraining && (
-            <button type="button" className="home-btn" onClick={onTraining}>
-              <b>🛠 Training ground</b>
-              <small>Developer mode: test the new characters on Clover Vale (also at #/training)</small>
-            </button>
-          )}
           <button type="button" className="home-btn exit" onClick={() => { setGone(false); setView('exit'); }}>
             <b>🚪 Exit</b>
           </button>
@@ -85,6 +83,20 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, n
           <h3 className="shop-h">🧑 Player</h3>
           <label className="sub-label" htmlFor="set-name">Your name</label>
           <input id="set-name" value={name} maxLength={14} autoComplete="off" onChange={(e) => setName(e.target.value)} />
+          <h3 className="shop-h">🔒 Developer access</h3>
+          {!access ? (
+            <>
+              <p className="hint">The training rooms and Free Roam V2 are locked. Type the access code to open them.</p>
+              <AccessForm onUnlocked={() => setAccess(true)} />
+            </>
+          ) : (
+            <div className="dev-tools">
+              {onTraining && <button type="button" className="btn small-btn" onClick={onTraining}>🛠 Training ground</button>}
+              {onTrainingV2 && <button type="button" className="btn small-btn" onClick={onTrainingV2}>🏙 Training room V2</button>}
+              {onV2 && <button type="button" className="btn small-btn" onClick={onV2}>🏙 Free Roam V2</button>}
+              <button type="button" className="btn ghost small-btn" onClick={() => { lockAgain(); setAccess(false); }}>Lock again</button>
+            </div>
+          )}
           <h3 className="shop-h">💾 Saved games</h3>
           <p className="hint">Every map keeps its own progress on this device (and in the cloud, if it is set up).</p>
           <button type="button" className="btn ghost small-btn" onClick={clearSaves}>Delete all saved games</button>

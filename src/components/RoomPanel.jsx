@@ -18,7 +18,7 @@ async function copy(text) {
   }
 }
 
-export default function RoomPanel({ room, peers, myId, lan, onVisit }) {
+export default function RoomPanel({ room, peers, myId, lan }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const link = inviteLink(room.code, lan);
@@ -49,7 +49,6 @@ export default function RoomPanel({ room, peers, myId, lan, onVisit }) {
             {peers.map((p) => (
               <div className="peer-row" key={p.id}>
                 <span className="peer-name">{p.name}{p.id === myId ? ' (you)' : ''}<small>{heroById(p.hero).label}</small></span>
-                {p.id !== myId && <button className="btn small-btn" onClick={() => onVisit(p.id)}>Visit</button>}
               </div>
             ))}
           </div>

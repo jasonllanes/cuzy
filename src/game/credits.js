@@ -4,6 +4,14 @@
 
 export const CREDITS = [
   {
+    pack: 'Modern Exteriors',
+    authors: 'LimeZu',
+    link: 'https://limezu.itch.io/modernexteriors',
+    used: 'Free Roam V2 (the Training Room V2): the town, houses, vehicles, props, street lamps, campfire, and the Scout and Postman characters.',
+    license: 'Free to use and edit in open source projects, credit required; the files may not be resold or redistributed.',
+    checked: 'file',
+  },
+  {
     pack: 'Super Retro World: Character Pack',
     authors: 'Gif (@gif_not_jif), Noiracide (@Noiracide) and Romi (@DessRomaric)',
     link: 'https://gif-superretroworld.itch.io/character-pack',
@@ -65,7 +73,7 @@ export const CREDITS = [
 
 // (added after the packs above)
 CREDITS.push({
-  pack: 'Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads, Mountain Paths and Wooden Halls tilesets (mixed together in the Patchwork Lands)',
+  pack: 'Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads, Mountain Paths and Wooden Halls tilesets (mixed together in the Open World)',
   authors: 'Generated with Pixellab (pixellab.ai) for this project',
   link: 'https://www.pixellab.ai',
   used: 'The water and ground tiles of the Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads, Mountain Paths and Wooden Halls maps.',

@@ -1,4 +1,4 @@
-import { ITEMS, isConsumable, throwDamage, throwRange, throwWeight } from '../game/items';
+import { ITEMS, rarityOf } from '../game/items';
 import ItemIcon from './ItemIcon';
 
 // The first nine backpack slots, selectable with the 1-9 keys.
@@ -11,7 +11,7 @@ export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDro
       {slots.slice(0, 9).map((s, i) => (
         <button
           key={i}
-          className={`hot-slot ${selected === i ? 'selected' : ''}`}
+          className={`hot-slot ${s ? `rar rar-${rarityOf(s.id)}` : ''} ${selected === i ? 'selected' : ''}`}
           onClick={() => (selected === i ? onUse(i) : onSelect(i))}
           onMouseDown={(e) => e.preventDefault()}
           draggable={!!s}
@@ -32,12 +32,11 @@ export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDro
             // nobody took it: it was let go away from the slots (a cancelled drag reports 0,0)
             if (e.dataTransfer.dropEffect === 'none' && (e.clientX || e.clientY)) onDropOut(i);
           }}
-          title={s ? `${ITEMS[s.id].name} (click again or press E to use, drag out to drop)` : 'Empty'}
+          title={s ? `${ITEMS[s.id].name} (click again to use, drag out to drop)` : 'Empty'}
         >
           <span className="hot-key">{i + 1}</span>
           {s && <ItemIcon id={s.id} scale={3} />}
           {s && s.qty > 1 && <span className="qty">{s.qty}</span>}
-          {s && !isConsumable(ITEMS[s.id]) && ITEMS[s.id].throw !== undefined && <span className="hot-dmg" title={`Thrown: ${throwWeight(s.id)}, flies ${(throwRange(s.id) / 16).toFixed(1)} tiles`}>💥{throwDamage(ITEMS[s.id])}</span>}
           {selected === i && current && <span className="hot-name">{ITEMS[current.id].name}</span>}
         </button>
       ))}

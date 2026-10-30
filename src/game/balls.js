@@ -53,6 +53,21 @@ export class Balls {
     this.mine.delete(b.i);
   }
 
+  // something other than a footstep hits a ball (a sword, a thrown item): it flies off the way the hit was going
+  hit(b, dx, dy, power) {
+    const d = Math.hypot(dx, dy) || 1;
+    const wet = this.g.world.type(Math.floor(b.x / T), Math.floor(b.y / T)) === WATER;
+    const k = wet ? Math.min(power, 120) : power;
+    b.vx = (dx / d) * k;
+    b.vy = (dy / d) * k;
+    b.vz = wet ? 0 : 90;
+    b.z = wet ? 0 : Math.max(b.z, 1);
+    this.mine.add(b.i);
+    this.send(b);
+    this.syncT = SYNC_EVERY;
+    sfx.play('pickup', 0.5);
+  }
+
   send(b) {
     this.g.mp?.net.send({ t: 'fx', kind: 'ball', i: b.i, x: b.x, y: b.y, vx: b.vx, vy: b.vy, z: b.z, vz: b.vz });
   }

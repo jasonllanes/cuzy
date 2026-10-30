@@ -7,14 +7,14 @@ import { splatTone } from './combat';
 // aimed at, hit and chased exactly like another player's hero, and fight each other as well as you.
 
 const TARGET_KILLS = 10;
-const NAMES = ['Biscuit', 'Maple', 'Pebble', 'Clover', 'Nutmeg', 'Sprout', 'Waffle', 'Juniper'];
+export const BOT_NAMES = ['Biscuit', 'Maple', 'Pebble', 'Clover', 'Nutmeg', 'Sprout', 'Waffle', 'Juniper'];
 const WATER_SLOWDOWN = 0.4;
 const SIGHT = 170;
 const MELEE_REACH = 24;
 const RESPAWN = 4;
 
 // per difficulty: speed (px/s), seconds between sword swings, seconds between throws, sight multiplier
-const SKILL = {
+export const SKILL = {
   easy: { speed: 40, swing: 1.3, throw: 4.2, sight: 0.7 },
   medium: { speed: 52, swing: 0.9, throw: 3, sight: 1 },
   hard: { speed: 62, swing: 0.6, throw: 1.9, sight: 1.3 },
@@ -45,7 +45,7 @@ export class Bots {
       const bot = {
         id,
         bot: true,
-        name: NAMES[i % NAMES.length],
+        name: BOT_NAMES[i % BOT_NAMES.length],
         hero: heroById(pool[i % pool.length]),
         home,
         x: home.x,
@@ -143,11 +143,14 @@ export class Bots {
       this.g.dropKillLoot(b.x, b.y);
       sfx.play(by === 'me' ? 'kill' : 'monsterDie', 0.7);
       this.credit(by, b.id);
-      if (by === 'me') {
-        c.kills++;
-        this.g.addXp(35);
-      }
+      if (by === 'me') this.award();
     }
+  }
+
+  // the player's reward for taking a rival down
+  award() {
+    this.g.combat.kills++;
+    this.g.addXp(35);
   }
 
   hurtMe(b, dmg, fromX, fromY) {

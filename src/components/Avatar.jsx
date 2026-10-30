@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { drawHero, heroById } from '../game/heroes';
 
 // A tiny picture of a hero, for the scoreboards
-export default function Avatar({ assets, id, size = 22 }) {
+export default function Avatar({ assets, id, size = 34 }) {
   const ref = useRef(null);
   const hero = id ? heroById(id) : null;
   const wide = hero?.kind === 'sunny'; // the villagers are drawn on a much bigger frame

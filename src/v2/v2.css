@@ -1,0 +1,87 @@
+/* The V2 Training Room */
+.v2-room { position: fixed; inset: 0; z-index: 100; display: flex; background: #1f2a22; color: var(--ink); font-family: var(--body); }
+.v2-stage { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.v2-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; image-rendering: pixelated; touch-action: none; }
+.v2-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font: 700 1.2rem var(--pixel); background: rgba(20, 30, 24, 0.85); }
+.v2-hud { position: absolute; top: 8px; left: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; background: rgba(255, 250, 240, 0.92); border: 3px solid var(--wood); border-radius: 14px; font: 700 0.8rem var(--pixel); }
+.v2-hint { position: absolute; left: 8px; bottom: 8px; padding: 4px 10px; font-size: 0.75rem; color: #fff; background: rgba(0, 0, 0, 0.55); border-radius: 999px; pointer-events: none; }
+.v2-placing { position: absolute; top: 56px; left: 8px; max-width: calc(100% - 16px); padding: 6px 12px; font-size: 0.8rem; background: #e6f8ec; border: 3px solid #5fc58a; border-radius: 12px; }
+.v2-info { position: absolute; bottom: 40px; left: 8px; padding: 6px 12px; font-size: 0.8rem; background: #fff3df; border: 3px solid var(--wood); border-radius: 12px; animation: v2fade 3.5s forwards; }
+@keyframes v2fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.v2-side { width: 380px; max-width: 46vw; display: flex; flex-direction: column; background: var(--paper); border-left: 4px solid var(--wood); }
+.v2-tabs { display: flex; gap: 6px; padding: 8px; border-bottom: 3px solid var(--wood-light, #e6cfa8); }
+.v2-pane { flex: 1; overflow-y: auto; padding: 10px; display: grid; gap: 8px; align-content: start; }
+.v2-pane h3 { margin: 6px 0 0; font: 700 0.95rem var(--pixel); }
+.v2-pane h4 { margin: 10px 0 0; font: 700 0.85rem var(--pixel); color: var(--ink-soft); }
+.v2-pane input, .v2-pane select, .v2-pane textarea { flex: none; width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; }
+.v2-pane input[type=checkbox] { width: 18px; height: 18px; padding: 0; }
+.v2-row { display: flex; align-items: center; gap: 8px; }
+.v2-pager { justify-content: space-between; }
+.v2-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.v2-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; max-height: 52vh; overflow-y: auto; padding: 4px; background: #6d8f6a; border-radius: 10px; }
+.v2-cell { all: unset; box-sizing: border-box; height: 64px; display: grid; place-items: center; cursor: pointer; border-radius: 8px; border: 2px solid transparent; background: rgba(255, 255, 255, 0.1); }
+.v2-cell:hover { background: rgba(255, 255, 255, 0.28); }
+.v2-cell.on { border-color: #ffd24a; background: rgba(255, 210, 74, 0.3); }
+.v2-thumb { display: block; background-repeat: no-repeat; image-rendering: pixelated; }
+.v2-sel { display: grid; gap: 6px; padding: 8px; background: #fff; border: 2px solid var(--wood-light, #e6cfa8); border-radius: 10px; }
+.v2-plan p, .v2-plan li, .v2-plan td, .v2-plan th { font-size: 0.82rem; line-height: 1.35; text-align: left; }
+.v2-plan ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.v2-plan table { width: 100%; border-collapse: collapse; }
+.v2-plan th { width: 34%; vertical-align: top; padding: 4px 6px 4px 0; font-weight: 700; }
+.v2-plan td { padding: 4px 0; }
+.v2-plan tr { border-bottom: 1px solid var(--wood-light, #e6cfa8); }
+@media (max-width: 760px) { .v2-room { flex-direction: column; } .v2-side { width: auto; max-width: none; height: 46vh; border-left: 0; border-top: 4px solid var(--wood); } }
+
+.v2-pane { overflow-x: hidden; }
+.v2-sel b { word-break: break-word; }
+
+/* paint tool */
+.v2-kind { all: unset; box-sizing: border-box; padding: 4px 10px; border-radius: 999px; border: 2px solid var(--c); background: #fff; font: 700 0.75rem var(--pixel); cursor: pointer; }
+.v2-kind.on { background: var(--c); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
+.v2-brush { display: grid; gap: 8px; }
+.v2-badge { margin-left: 6px; font: 700 0.65rem var(--pixel); color: #7a5a00; background: #ffe9a8; border-radius: 999px; padding: 1px 6px; }
+
+/* map preview */
+.v2-preview { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: rgba(25, 30, 28, 0.94); color: #fff; }
+.v2-preview header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; }
+.v2-preview header b { font: 700 1.1rem var(--pixel); }
+.v2-preview-btns { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+.v2-preview-body { flex: 1; min-height: 0; display: grid; place-items: center; padding: 8px; overflow: auto; }
+.v2-preview-body canvas { height: 100%; width: auto; max-width: 100%; aspect-ratio: 152 / 128; border: 4px solid var(--wood); border-radius: 8px; image-rendering: auto; }
+
+/* the V2 menu */
+.v2-menu { background: linear-gradient(#9fd3ee, #d8efe4 60%, #b9dcb0); min-height: 100vh; }
+
+/* the game */
+.v2g { position: fixed; inset: 0; background: #20301f; overflow: hidden; font-family: var(--body); color: var(--ink); }
+.v2g canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; cursor: crosshair; }
+.v2g-card { position: absolute; top: 10px; left: 10px; width: 210px; display: grid; gap: 5px; padding: 10px 12px; background: var(--paper); border: 3px solid var(--wood); border-radius: 16px; box-shadow: 0 4px 0 var(--wood-dark); }
+.v2g-card b { font: 700 1.1rem var(--pixel); color: var(--rose, #e87c96); }
+.v2g-card small { color: var(--ink-soft); }
+.v2g-bar { position: relative; height: 16px; border-radius: 999px; background: rgba(91, 70, 54, 0.18); overflow: hidden; }
+.v2g-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 999px; transition: width 0.1s; }
+.v2g-bar span { position: absolute; inset: 0; display: grid; place-items: center; font: 700 0.62rem var(--pixel); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
+.v2g-bar.hp i { background: #e8627a; }
+.v2g-bar.stam i { background: #5fc58a; }
+.v2g-bar.stam.tired i { background: #c9a25a; }
+.v2g-bar.xp i { background: #a98ae8; }
+.v2g-line { display: flex; justify-content: space-between; align-items: center; font: 700 0.85rem var(--pixel); }
+.v2g-clock { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 6px 16px; background: var(--paper); border: 3px solid var(--wood); border-radius: 999px; font: 700 0.9rem var(--pixel); box-shadow: 0 3px 0 var(--wood-dark); }
+.v2g-top { position: absolute; top: 10px; right: 10px; display: flex; gap: 8px; }
+.v2g-toast { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); max-width: 80vw; padding: 7px 16px; background: #fff7e6; border: 3px solid var(--wood); border-radius: 14px; font-size: 0.85rem; }
+.v2g-hotbar { position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; background: rgba(255, 250, 240, 0.94); border: 3px solid var(--wood); border-radius: 18px; box-shadow: 0 4px 0 var(--wood-dark); }
+.v2g-slot { position: relative; width: 52px; height: 52px; display: grid; place-items: center; padding: 0; background: #fff3df; border: 3px solid var(--wood-light, #e6cfa8); border-radius: 12px; cursor: pointer; }
+.v2g-slot.on { border-color: var(--rose, #e87c96); background: #fff0f3; }
+.v2g-slot kbd { position: absolute; top: 1px; left: 4px; font: 700 0.6rem var(--pixel); color: var(--ink-soft); }
+.v2g-slot b { position: absolute; right: 4px; bottom: 1px; font: 700 0.7rem var(--pixel); }
+.v2g-help { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); padding: 2px 12px; font-size: 0.7rem; color: #fff; background: rgba(0, 0, 0, 0.5); border-radius: 999px; white-space: nowrap; max-width: 96vw; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.v2g-dead { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; background: rgba(60, 10, 20, 0.5); color: #fff; }
+.v2g-dead h2 { font: 700 2rem var(--pixel); margin: 0; }
+.v2g-shop { max-height: 86vh; overflow-y: auto; }
+.v2g .supply-bar { left: calc(50% + 300px); }
+.v2g .supply-menu { left: calc(50% + 300px); }
+@media (max-width: 1100px) { .v2g .supply-bar { left: auto; right: 14px; bottom: 100px; } .v2g .supply-menu { left: auto; right: 14px; bottom: 170px; } .v2g-card { width: 170px; } }
+
+/* a V2 character's face on a hero card */
+.v2-face { display: block; margin: 0 auto; background-repeat: no-repeat; image-rendering: pixelated; }
+.v2-chars .hero-card { min-height: 130px; }

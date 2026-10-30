@@ -19,6 +19,15 @@ export const RETRO_NAMES = [
   'Sunny', 'Olive', 'Berry', 'Cedar', 'Pearl', 'Jade', 'Ruby', 'Onyx',
 ];
 
+// ---------- Modern Exteriors characters (Free Roam V2): 16x32 frames, a 6-frame idle and walk loop in 4 directions ----------
+
+export const V2_CHARS = [
+  ...Array.from({ length: 6 }, (_, i) => ({ id: `v2:scout${i + 1}`, sheet: `scout${i + 1}`, label: `Scout ${i + 1}` })),
+  ...Array.from({ length: 3 }, (_, i) => ({ id: `v2:postman${i + 1}`, sheet: `postman${i + 1}`, label: `Postman ${i + 1}` })),
+];
+export const isV2Char = (id) => typeof id === 'string' && id.startsWith('v2:');
+const V2_DIR = { right: 0, up: 1, left: 2, down: 3 };
+
 // ---------- Training ground heroes: 8 characters on one sheet (public/assets/dev/chars.png), 10 poses each ----------
 
 export const DEV_COUNT = 8;
@@ -66,6 +75,8 @@ export const isSunny = (id) => typeof id === 'string' && id.startsWith('sunny:')
 export function heroById(id) {
   const classic = HEROES.find((h) => h.id === id);
   if (classic) return classic;
+  const v2 = V2_CHARS.find((h) => h.id === id);
+  if (v2) return { ...v2, kind: 'v2', title: 'Modern Exteriors', blurb: 'A character from the Modern Exteriors pack.' };
   const dm = /^dev:(\d+)$/.exec(id || '');
   if (dm && Number(dm[1]) >= 1 && Number(dm[1]) <= DEV_COUNT) {
     const n = Number(dm[1]);
@@ -248,6 +259,13 @@ export function drawHero(ctx, img, hero, dir, moving, t, fx, fy) {
     if (flip) ctx.scale(-1, 1);
     ctx.drawImage(img['dev/chars'], col.x0, row.y0, w, h, -Math.round(w / 2), -h, w, h);
     ctx.restore();
+    return;
+  }
+  if (hero.kind === 'v2') {
+    const sheet = img[`v2/chars/${hero.sheet}`];
+    if (!sheet) return;
+    const f = moving ? Math.floor(t * 10) % 6 : Math.floor(t * 4) % 6;
+    ctx.drawImage(sheet, ((V2_DIR[dir] ?? 3) * 6 + f) * 16, moving ? 64 : 32, 16, 32, fx - 8, fy - 30, 16, 32);
     return;
   }
   if (hero.kind === 'retro') {

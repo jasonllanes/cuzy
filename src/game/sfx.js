@@ -24,8 +24,8 @@ try {
 const listeners = new Set();
 const changed = () => listeners.forEach((fn) => fn());
 
-function ready() {
-  if (muted) return false;
+// the audio context, made on first use; the sound effects check the mute switch, the music has its own (see music.js)
+function ensure() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
@@ -40,6 +40,11 @@ function ready() {
   }
   if (ctx.state === 'suspended') ctx.resume();
   return true;
+}
+
+function ready() {
+  if (muted) return false;
+  return ensure();
 }
 
 // a pitched blip: frequency glides f0 -> f1 over `dur` seconds
@@ -220,6 +225,10 @@ export const sfx = {
     } catch {
       /* the voice is a bonus; never break the game over it */
     }
+  },
+  // the shared audio context, for the background music. It is not affected by the sound effects' mute or volume
+  audio() {
+    return ensure() ? { ctx, master } : null;
   },
   get muted() {
     return muted;
