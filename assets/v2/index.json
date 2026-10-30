@@ -1,0 +1,252 @@
+{
+ "credit": "Modern Exteriors by LimeZu (https://limezu.itch.io/modernexteriors)",
+ "tile": 16,
+ "themes": [
+  {
+   "id": "vehicles",
+   "name": "Vehicles",
+   "folder": "10_Vehicles",
+   "count": 273,
+   "w": 1532,
+   "h": 842
+  },
+  {
+   "id": "camping",
+   "name": "Camping",
+   "folder": "11_Camping",
+   "count": 693,
+   "w": 1536,
+   "h": 1203
+  },
+  {
+   "id": "hotel",
+   "name": "Hotel and hospital",
+   "folder": "12_Hotel_and_Hospital",
+   "count": 41,
+   "w": 1523,
+   "h": 691
+  },
+  {
+   "id": "school",
+   "name": "School",
+   "folder": "13_School",
+   "count": 125,
+   "w": 1531,
+   "h": 724
+  },
+  {
+   "id": "pool",
+   "name": "Swimming pool",
+   "folder": "14_Swimming_Pool",
+   "count": 179,
+   "w": 1535,
+   "h": 163
+  },
+  {
+   "id": "police",
+   "name": "Police station",
+   "folder": "15_Police_Station",
+   "count": 37,
+   "w": 1525,
+   "h": 482
+  },
+  {
+   "id": "office",
+   "name": "Office",
+   "folder": "16_Office",
+   "count": 117,
+   "w": 1534,
+   "h": 419
+  },
+  {
+   "id": "garden",
+   "name": "Garden",
+   "folder": "17_Garden",
+   "count": 570,
+   "w": 1534,
+   "h": 987
+  },
+  {
+   "id": "fire",
+   "name": "Fire station",
+   "folder": "18_Fire_Station",
+   "count": 42,
+   "w": 1516,
+   "h": 321
+  },
+  {
+   "id": "graveyard",
+   "name": "Graveyard",
+   "folder": "19_Graveyard",
+   "count": 217,
+   "w": 1536,
+   "h": 243
+  },
+  {
+   "id": "terrain",
+   "name": "Terrains and fences",
+   "folder": "1_Terrains_and_Fences",
+   "count": 462,
+   "w": 1529,
+   "h": 149
+  },
+  {
+   "id": "subway",
+   "name": "Subway and train station",
+   "folder": "20_Subway_and_Train_Station",
+   "count": 582,
+   "w": 1535,
+   "h": 864
+  },
+  {
+   "id": "beach",
+   "name": "Beach",
+   "folder": "21_Beach",
+   "count": 316,
+   "w": 1536,
+   "h": 583
+  },
+  {
+   "id": "post",
+   "name": "Post office",
+   "folder": "22_Post_Office",
+   "count": 44,
+   "w": 1531,
+   "h": 241
+  },
+  {
+   "id": "military",
+   "name": "Military base",
+   "folder": "23_MIlitary_Base",
+   "count": 305,
+   "w": 1535,
+   "h": 1210
+  },
+  {
+   "id": "houses",
+   "name": "Additional houses",
+   "folder": "24_Additional_Houses",
+   "count": 215,
+   "w": 1535,
+   "h": 1672
+  },
+  {
+   "id": "city",
+   "name": "City terrains",
+   "folder": "2_City_Terrains",
+   "count": 351,
+   "w": 1536,
+   "h": 504
+  },
+  {
+   "id": "props",
+   "name": "City props",
+   "folder": "3_City_Props",
+   "count": 715,
+   "w": 1536,
+   "h": 894
+  },
+  {
+   "id": "buildings",
+   "name": "Generic buildings (modular)",
+   "folder": "4_Generic_Building",
+   "count": 180,
+   "w": 1530,
+   "h": 806
+  },
+  {
+   "id": "floors",
+   "name": "Floor modular buildings",
+   "folder": "5_Floor_Modular_Building",
+   "count": 343,
+   "w": 1536,
+   "h": 1006
+  },
+  {
+   "id": "garage",
+   "name": "Garage sales",
+   "folder": "6_Garage_Sales",
+   "count": 95,
+   "w": 1511,
+   "h": 258
+  },
+  {
+   "id": "villas",
+   "name": "Villas",
+   "folder": "7_Villas",
+   "count": 194,
+   "w": 1527,
+   "h": 356
+  },
+  {
+   "id": "worksite",
+   "name": "Worksite",
+   "folder": "8_Worksite",
+   "count": 71,
+   "w": 1531,
+   "h": 193
+  },
+  {
+   "id": "shops",
+   "name": "Shopping centre and markets",
+   "folder": "9_Shopping_Center_and_Markets",
+   "count": 57,
+   "w": 1532,
+   "h": 466
+  }
+ ],
+ "ground": {
+  "grass": [
+   "terrain/Grass_1_22",
+   "terrain/Grass_2_21",
+   "terrain/Grass_3_22",
+   "terrain/Grass_4_21"
+  ],
+  "asphalt": [
+   "city/Asphalt_1_Variation_21",
+   "city/Asphalt_1_Variation_18",
+   "city/Asphalt_1_Variation_19"
+  ],
+  "sidewalk": [
+   "city/Sidewalk_5_9",
+   "city/Sidewalk_4_9",
+   "city/Sidewalk_2_9"
+  ],
+  "water": [
+   "terrain/Deep_Water_1_22",
+   "terrain/Deep_Water_1_9",
+   "terrain/Deep_Water_1_10"
+  ],
+  "dirt": [
+   "terrain/Grass_1_21"
+  ]
+ },
+ "chars": [
+  "scout1.png",
+  "scout2.png",
+  "scout3.png",
+  "scout4.png",
+  "scout5.png",
+  "scout6.png",
+  "postman1.png",
+  "postman2.png",
+  "postman3.png",
+  "skeleton.png",
+  "swimmers.png"
+ ],
+ "anim": {
+  "campfire": {
+   "file": "anim/campfire.png",
+   "frames": 6,
+   "fw": 16,
+   "fh": 32
+  },
+  "streetlamp": {
+   "file": "anim/streetlamp.png",
+   "frames": 4,
+   "fw": 80,
+   "fh": 80
+  }
+ },
+ "sprites": 6224
+}
