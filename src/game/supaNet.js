@@ -10,6 +10,7 @@
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
 import { TEAMS, TEAM_COUNTS } from './teams.js';
+import { seedForMode } from './maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -986,7 +987,18 @@ export class SupaNet {
     if (free && m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
     // the rest is decided before the round
     if (!this.started) {
-      if (free) {
+      // Free Roam <-> Survival: the map, the start of the day and the fighting rules follow the mode
+      if (['free', 'survival'].includes(m.mode) && m.mode !== cfg.mode) {
+        cfg.mode = m.mode;
+        cfg.seed = seedForMode(cfg.seed, m.mode);
+        this.startHour = m.mode === 'survival' ? 17.3 : START_HOUR;
+        cfg.pvp = m.mode === 'free';
+        cfg.winBy = 'duel';
+        cfg.target = defaultTarget('duel');
+        cfg.teams = 0;
+        this.reassignAll();
+      }
+      if (cfg.mode === 'free') {
         if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
           cfg.teams = Number(m.teams);
           this.reassignAll();
@@ -999,7 +1011,7 @@ export class SupaNet {
     }
     this.out({ t: 'settings', room: this.summary() });
     this.sendTeams();
-    this.touchRow(cfgToRow(cfg));
+    this.touchRow({ ...cfgToRow(cfg), start_hour: this.startHour });
   }
 
   // (a player who is still waiting asks again every couple of seconds; once the scene is over they are told to go)

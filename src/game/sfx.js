@@ -100,6 +100,10 @@ const SOUNDS = {
     noise({ dur: 0.45, vol: 0.45, f0: 1100, f1: 70, q: 0.6 });
     tone({ type: 'sawtooth', f0: 130, f1: 38, dur: 0.4, vol: 0.32 });
   },
+  plasma: () => {
+    tone({ type: 'sawtooth', f0: 900, f1: 220, dur: 0.16, vol: 0.2 });
+    tone({ type: 'sine', f0: 1500, f1: 500, dur: 0.12, vol: 0.14, at: 0.01 });
+  },
   thud: () => tone({ type: 'triangle', f0: 150, f1: 55, dur: 0.1, vol: 0.28 }),
   splat: () => {
     noise({ dur: 0.12, vol: 0.28, f0: 600, f1: 200, q: 0.7 });

@@ -22,6 +22,15 @@ export default function RoomSettings({ room, count, editable, onChange }) {
     <section className="settings-panel" aria-label="Room settings">
       <h3>⚙️ Room settings {!editable && <small>set by the host</small>}{editable && room.started && <small>teams, player damage and win rule are fixed during a round</small>}</h3>
       <div className="set-grid">
+        {room.mode !== 'waves' && (
+          <div className="set-row">
+            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : free ? 'Free Roam: a cozy world to explore, fight or win in' : 'Survival: co-op against zombies, with the RV to defend. The map changes to match.'}</small></div>
+            <div className="seg">
+              <button type="button" className={free ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'free' })}>🌻 Free Roam</button>
+              <button type="button" className={room.mode === 'survival' ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'survival' })}>🧟 Survival</button>
+            </div>
+          </div>
+        )}
         <div className="set-row">
           <div className="set-label"><b>Max players</b><small>{count} in the room now</small></div>
           <select value={room.max} disabled={!editable} onChange={(e) => onChange({ max: Number(e.target.value) })}>

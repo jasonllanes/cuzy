@@ -20,6 +20,7 @@ export const SURVIVAL_MAPS = [
   { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea.', ground: 'bg', trees: null, climate: 'dry', tileset: 'beach' },
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Cracked asphalt roads winding through a dark wasteland.', ground: 'bg', trees: null, climate: 'mild', tileset: 'asphalt' },
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain' },
+  { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'Survive on an endless wooden floor of pale and dark boards.', ground: 'bg', trees: null, climate: 'mild', tileset: 'wood' },
   { id: 'mixed', icon: '🧩', name: 'Patchwork Lands', blurb: 'A mix of every other map, side by side: islands, lakes, marsh, lava, beach and roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
 ];
 
@@ -34,6 +35,7 @@ export const FREE_MAPS = [
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Dark cracked asphalt roads winding through a dark blue wasteland.', seed: 'asphalt-358' },
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads and mountain paths.', seed: 'mountain-206' },
   { id: 'mixed', icon: '🧩', name: 'Patchwork Lands', blurb: 'A mix of all the other maps: islands, lakes, marsh, lava, beach, roads and paths, side by side.', seed: 'mixed-640' },
+  { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'An endless pale and dark wooden floor, with cottages standing on it.', seed: 'wood-119' },
   { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush green islands with flowers, ringed by earthen cliffs and deep teal sea.', seed: 'emerald-615' },
 ];
 
@@ -59,3 +61,18 @@ export const splitSeed = (seed) => {
 };
 
 export const joinSeed = (base, map) => (map && map !== 'ruins' ? `${base}~${map}` : base);
+
+// The host switched a room between Free Roam and Survival: the matching map (same name where both have one, otherwise
+// the first of the other mode), keeping a layout roll if there was one
+export function seedForMode(seed, mode) {
+  const { base, map } = splitSeed(seed);
+  const roll = String(seed).split('~')[0].split('@')[1];
+  if (mode === 'survival') {
+    if (base === SURVIVAL_BASE) return seed;
+    const id = FREE_MAPS.find((m) => m.seed === base)?.id;
+    return joinSeed(roll ? `${SURVIVAL_BASE}@${roll}` : SURVIVAL_BASE, SURVIVAL_MAPS.some((m) => m.id === id) ? id : 'ruins');
+  }
+  if (base !== SURVIVAL_BASE) return seed;
+  const free = FREE_MAPS.find((m) => m.id === map) || FREE_MAPS[0];
+  return roll ? `${free.seed}@${roll}` : free.seed;
+}

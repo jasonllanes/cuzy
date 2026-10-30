@@ -2132,7 +2132,10 @@ export class Game {
     } else if (m.t === 'fx' && m.kind === 'grab') {
       this.combat.drops = this.combat.drops.filter((d) => d.net !== m.lid);
     } else if (m.t === 'fx' && m.kind === 'throw') {
-      if (ITEMS[m.item] || m.item === 'bullet') this.combat.remoteShots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, id: m.item, rot: 0, life: m.item === 'bullet' ? 0.55 : throwStats(m.item).life });
+      if (ITEMS[m.item] || m.item === 'bullet' || m.item === 'plasma') {
+        const gunShot = m.item === 'bullet' || m.item === 'plasma';
+        this.combat.remoteShots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, id: gunShot ? 'bullet' : m.item, pl: m.item === 'plasma', rot: 0, life: gunShot ? 0.55 : throwStats(m.item).life });
+      }
     } else if (m.t === 'w') {
       this.wave?.onMessage(m.k, m.d, m.from);
     } else if (m.t === 'chat') {

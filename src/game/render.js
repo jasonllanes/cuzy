@@ -227,7 +227,7 @@ function renderTidalChunk(world, img, chunk) {
   const FLIPPED = ['crystal', 'marsh', 'lava', 'beach'];
   // which of the tileset's two kinds of ground a world tile is: 1 for the "shape" kind, 0 for the one around it
   const bit = (set, x, y) => {
-    if (set === 'asphalt') return world.roadAt(x, y) ? 1 : 0; // the road is the shape
+    if (set === 'asphalt' || set === 'wood') return world.roadAt(x, y) ? 1 : 0; // the road (or the pale boards) is the shape
     if (set === 'mountain') return world.roadAt(x, y) ? 0 : 1; // the grass is the shape
     const water = world.type(x, y) === WATER;
     return FLIPPED.includes(set) ? (water ? 1 : 0) : water ? 0 : 1;
@@ -242,7 +242,7 @@ function renderTidalChunk(world, img, chunk) {
       ctx.drawImage(img[`maps/${set}`], c * T, r * T, T, T, tx * T - T / 2, ty * T - T / 2, T, T);
     }
   }
-  drawDecor(ctx, chunk, img);
+  if (world.tileset !== 'wood') drawDecor(ctx, chunk, img); // (no flowers or tufts on a wooden floor)
   return canvas;
 }
 

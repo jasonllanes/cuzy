@@ -1258,3 +1258,6 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .seat-btn:hover .wait-q { color: var(--rose); }
 .seat-menu { position: absolute; z-index: 5; left: 50%; top: calc(100% - 8px); transform: translateX(-50%); display: grid; gap: 6px; padding: 8px; background: var(--paper); border: 3px solid var(--wood); border-radius: 14px; box-shadow: 0 6px 14px rgba(91, 70, 54, 0.3); min-width: 150px; }
 @media (max-width: 860px) { .wait-layout { grid-template-columns: 1fr; } .wait-side { position: static; } }
+
+.gun-img { image-rendering: pixelated; max-width: 48px; max-height: 26px; object-fit: contain; }
+.gun-img.small { display: inline-block; vertical-align: middle; max-width: 40px; max-height: 20px; }

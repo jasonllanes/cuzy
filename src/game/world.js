@@ -49,9 +49,9 @@ export class World {
     this.seed = hashString(this.seedStr);
     // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
     // start of the seed, and a Survival map names it
-    this.tileset = theme === 'apoc' ? mapInfo(splitSeed(this.seedStr).map).tileset || null : /^tidal-/.test(this.seedStr) ? 'tidal' : /^emerald-/.test(this.seedStr) ? 'emerald' : /^crystal-/.test(this.seedStr) ? 'crystal' : /^marsh-/.test(this.seedStr) ? 'marsh' : /^lava-/.test(this.seedStr) ? 'lava' : /^beach-/.test(this.seedStr) ? 'beach' : /^asphalt-/.test(this.seedStr) ? 'asphalt' : /^mountain-/.test(this.seedStr) ? 'mountain' : /^mixed-/.test(this.seedStr) ? 'mixed' : null;
+    this.tileset = theme === 'apoc' ? mapInfo(splitSeed(this.seedStr).map).tileset || null : /^tidal-/.test(this.seedStr) ? 'tidal' : /^emerald-/.test(this.seedStr) ? 'emerald' : /^crystal-/.test(this.seedStr) ? 'crystal' : /^marsh-/.test(this.seedStr) ? 'marsh' : /^lava-/.test(this.seedStr) ? 'lava' : /^beach-/.test(this.seedStr) ? 'beach' : /^asphalt-/.test(this.seedStr) ? 'asphalt' : /^mountain-/.test(this.seedStr) ? 'mountain' : /^mixed-/.test(this.seedStr) ? 'mixed' : /^wood-/.test(this.seedStr) ? 'wood' : null;
     // asphalt and mountain are not water tilesets: two kinds of walkable ground, laid out as winding roads and paths
-    this.groundSet = this.tileset === 'asphalt' || this.tileset === 'mountain';
+    this.groundSet = this.tileset === 'asphalt' || this.tileset === 'mountain' || this.tileset === 'wood';
     this.mixed = this.tileset === 'mixed'; // the patchwork map: every tileset, in regions side by side
     this.biomeCache = new Map();
     this.tidal = !!this.tileset && !this.groundSet;
@@ -119,6 +119,7 @@ export class World {
 
   // the winding roads (or paths) of the asphalt and mountain maps: ridges of two noise fields, so they cross and branch
   roadAt(x, y) {
+    if (this.tileset === 'wood') return fbm(x / 13, y / 13, this.seed + 3131, 3) > 0.5; // the wooden hall: wide patches of pale and dark boards
     const a = fbm(x / 24, y / 24, this.seed + 4141, 3);
     const b = fbm(x / 30, y / 30, this.seed + 5252, 3);
     return Math.abs(a - 0.5) < 0.034 || Math.abs(b - 0.5) < 0.034;
@@ -301,6 +302,7 @@ export class World {
 
   // Trees live on a 2x2 tile grid so their bases never overlap.
   treeAt(bx, by) {
+    if (this.tileset === 'wood') return null; // (no trees growing through the floorboards)
     const key = `${bx},${by}`;
     if (this.treeCache.has(key)) return this.treeCache.get(key);
     let tree = null;

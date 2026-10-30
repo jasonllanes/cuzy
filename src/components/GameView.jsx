@@ -820,7 +820,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       >
         {survival && hud.gun && (
           <button type="button" className="gun-slot" onClick={() => gameRef.current?.switchWeapon()} title={`${GUNS[hud.gun].name}: click or press Tab to switch`}>
-            <span>{GUNS[hud.gun].icon}</span>
+            <img className="gun-img" src={`${import.meta.env.BASE_URL}assets/guns/${hud.gun}.png`} alt="" />
             <small>{GUNS[hud.gun].name}</small>
             <kbd>Tab</kbd>
           </button>

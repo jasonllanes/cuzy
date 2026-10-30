@@ -105,7 +105,7 @@ export default function UpgradePanel({ hud, game, onClose, survival = false }) {
                 const on = hud.gun === id;
                 return (
                   <div key={id} className="recruit-chip hire">
-                    <span><b>{g.icon} {g.name}</b><small>{g.blurb}</small></span>
+                    <span><b><img className="gun-img small" src={`${import.meta.env.BASE_URL}assets/guns/${id}.png`} alt="" /> {g.name}</b><small>{g.blurb}</small></span>
                     <button className="btn go small-btn" disabled={on || (!have && hud.coins < g.price)} onClick={() => game.buyGun(id)}>
                       {on ? 'Equipped' : have ? 'Equip' : `🪙 ${g.price}`}
                     </button>

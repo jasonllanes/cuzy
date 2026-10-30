@@ -134,6 +134,7 @@ export default function App() {
   // the host pressed Start: everyone gets the fresh roster, scores and clock
   const startRound = (m) => {
     wipeSave(m.room?.seed || session?.room?.seed || profile.seed); // every round starts from nothing again
+    if (m.room?.seed) setProfile((p) => ({ ...p, seed: m.room.seed })); // (the host may have switched the map by changing the game mode)
     setSession((s) => ({ ...s, room: m.room || s.room, teams: m.teams || {}, host: m.host, players: m.players, slot: m.players?.find((p) => p.id === s.you)?.slot ?? s.slot, scores: m.scores, clock: m.clock, clockAt: performance.now() }));
     setLobby(false);
   };

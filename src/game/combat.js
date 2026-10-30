@@ -77,15 +77,16 @@ const BULLET_SPEED = 340;
 const BULLET_LIFE = 0.55; // about 12 tiles
 // the three guns: how much magazine a shot uses, seconds between shots, bullets per shot, spread (radians), damage, range
 export const GUNS = {
-  pistol: { name: 'Pistol', icon: '🔫', mag: 12, reload: 1.2, rate: 0.5, pellets: 1, spread: 0, dmg: 2, life: BULLET_LIFE, price: 0, blurb: 'Steady and accurate. 12 rounds.' },
-  shotgun: { name: 'Shotgun', icon: '💥', mag: 6, reload: 2, rate: 0.85, pellets: 5, spread: 0.36, dmg: 2.5, life: 0.3, price: 60, blurb: 'Five pellets. Point blank they all stack for huge damage, and every pellet one-shots a normal enemy. 6 shells.' },
-  smg: { name: 'Machine gun', icon: '🔥', mag: 100, reload: 2.8, rate: 0.085, pellets: 1, spread: 0.1, dmg: 1, life: 0.5, price: 90, blurb: 'Sprays bullets while you hold. 100 rounds.' },
+  pistol: { name: 'Pistol', icon: '🔫', len: 13, mag: 12, reload: 1.2, rate: 0.5, pellets: 1, spread: 0, dmg: 2, life: BULLET_LIFE, price: 0, blurb: 'Steady and accurate. 12 rounds.' },
+  shotgun: { name: 'Shotgun', icon: '💥', len: 26, mag: 6, reload: 2, rate: 0.85, pellets: 5, spread: 0.36, dmg: 2.5, life: 0.3, price: 60, blurb: 'Five pellets. Point blank they all stack for huge damage, and every pellet one-shots a normal enemy. 6 shells.' },
+  rifle: { name: 'Rifle', icon: '🎯', len: 25, mag: 60, reload: 2.4, rate: 0.11, pellets: 1, spread: 0.05, dmg: 1.4, life: 0.65, price: 90, blurb: 'A fast, accurate assault rifle that holds its aim at range. 60 rounds.' },
+  plasma: { name: 'Plasma gun', icon: '⚡', len: 26, mag: 20, reload: 2.4, rate: 0.42, pellets: 1, spread: 0.02, dmg: 4, life: 0.75, price: 160, plasma: true, blurb: 'Glowing bolts that burn straight through two enemies in a line. 20 charges.' },
 };
 export const POWERS = {
   slowmo: { name: 'Slow-mo', icon: '⏳', color: '#7ea8ff', blurb: 'Monsters crawl and strike slowly for a few seconds.' },
   blast: { name: 'Big Blast', icon: '💣', color: '#ff9a3c', blurb: 'Wipes out every ordinary monster at once.' },
 };
-export const GUN_ORDER =['pistol', 'shotgun', 'smg'];
+export const GUN_ORDER = ['pistol', 'shotgun', 'rifle', 'plasma'];
 export const BOMB_R = 46; // blast radius in pixels
 export const GRENADE_REACH = 190; // how far a grenade can be thrown
 const BOMB_FUSE = 2.8; // seconds from the throw to the bang
@@ -155,7 +156,7 @@ export class Combat {
     this.throwCd = 0;
     this.gun = 'pistol';
     this.owned = { pistol: true }; // the others are bought in the shop
-    this.ammo = { pistol: GUNS.pistol.mag, shotgun: GUNS.shotgun.mag, smg: GUNS.smg.mag };
+    this.ammo = Object.fromEntries(Object.entries(GUNS).map(([k, g]) => [k, g.mag]));
     this.reloadT = 0; // seconds of reloading left
     this.idleT = 0;
     this.slowT = 0; // Slow-mo still running, for the screen tint
@@ -706,14 +707,15 @@ export class Combat {
         x: cx + Math.cos(b) * 12, y: cy + Math.sin(b) * 12,
         vx: Math.cos(b) * BULLET_SPEED, vy: Math.sin(b) * BULLET_SPEED,
         id: 'bullet', dmg: gun.dmg + this.throwBonus(), life: gun.life, rot: 0, free: true,
+        plasma: !!gun.plasma, pierce: gun.plasma ? 1 : 0, // plasma bolts go through one enemy and hit the next
         pellet: gun.pellets > 1, ox: cx + Math.cos(b) * 12, oy: cy + Math.sin(b) * 12, // shotgun pellets remember where they started
       };
       this.projectiles.push(shot);
-      this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
+      this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: gun.plasma ? 'plasma' : 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
     }
     this.muzzleT = this.gun === 'shotgun' ? 0.11 : 0.07;
     this.muzzleA = a;
-    sfx.play('gun', this.gun === 'smg' ? 0.5 : 0.8);
+    sfx.play(gun.plasma ? 'plasma' : 'gun', this.gun === 'rifle' ? 0.5 : 0.8);
     this.throwCd = gun.rate;
     this.faceAim(a);
   }
@@ -733,7 +735,7 @@ export class Combat {
     if (!this.g.wave || !this.g.world.apoc) return;
     const have = GUN_ORDER.filter((id) => this.owned[id]);
     if (have.length < 2) {
-      this.g.onToast?.('Buy the Shotgun or Machine gun in the shop (B) to switch.');
+      this.g.onToast?.('Buy the Shotgun, Rifle or Plasma gun in the shop (B) to switch.');
       return;
     }
     this.equipGun(have[(have.indexOf(this.gun) + 1) % have.length]);
@@ -748,27 +750,29 @@ export class Combat {
     sfx.play('block', 0.5);
   }
 
-  // the pistol in your hand, turned the way you are aiming, and the flash when it fires
+  // the gun in your hand (the sprite of whichever one you carry), turned the way you are aiming, and the flash when it fires
   drawGun(ctx, x, y) {
     if (this.g.dead) return;
+    const gun = GUNS[this.gun] || GUNS.pistol;
+    const sheet = this.img[`guns/${this.gun}`];
     const a = this.aim();
-    const c = Math.cos(a);
-    const s = Math.sin(a);
-    const key = Math.abs(c) >= Math.abs(s) ? (c > 0 ? 'side' : 'left') : s > 0 ? 'down' : 'up';
-    const sheet = this.img[`apoc/gun_${key}`];
-    if (!sheet) return;
-    const fw = key === 'side' || key === 'left' ? 8 : 5;
-    const f = this.g.player.moving ? Math.floor(this.g.animT * 10) % 6 : 0;
-    const ox = key === 'side' ? 1 : key === 'left' ? -9 : -2;
-    const oy = key === 'down' ? -11 : key === 'up' ? -17 : -12;
-    ctx.drawImage(sheet, f * fw, 0, fw, sheet.height, Math.round(x + ox), Math.round(y + oy), fw, sheet.height);
+    const [cx, cy] = this.center();
+    if (sheet) {
+      const w = gun.len;
+      const h = (sheet.height / sheet.width) * w;
+      ctx.save();
+      ctx.translate(Math.round(cx + Math.cos(a) * 3), Math.round(cy + Math.sin(a) * 3 + 1));
+      ctx.rotate(a);
+      if (Math.cos(a) < 0) ctx.scale(1, -1); // turned the other way, the gun is not upside down
+      ctx.drawImage(sheet, -w * 0.28, -h * 0.4, w, h);
+      ctx.restore();
+    }
     if (this.muzzleT > 0) {
-      const [cx, cy] = this.center();
-      const mx = cx + Math.cos(this.muzzleA) * 14;
-      const my = cy + Math.sin(this.muzzleA) * 14;
-      ctx.fillStyle = '#fff6c2';
+      const mx = cx + Math.cos(this.muzzleA) * (gun.len * 0.75 + 3);
+      const my = cy + Math.sin(this.muzzleA) * (gun.len * 0.75 + 3);
+      ctx.fillStyle = gun.plasma ? '#cdefff' : '#fff6c2';
       ctx.fillRect(Math.round(mx) - 2, Math.round(my) - 2, 4, 4);
-      ctx.fillStyle = '#ffb62e';
+      ctx.fillStyle = gun.plasma ? '#4aa8ff' : '#ffb62e';
       ctx.fillRect(Math.round(mx - Math.cos(this.muzzleA) * 2) - 3, Math.round(my - Math.sin(this.muzzleA) * 2) - 1, 6, 2);
     }
   }
@@ -1803,7 +1807,7 @@ export class Combat {
         }
       }
       for (const m of [...(this.g.wave?.monsters || []), ...this.wilds]) {
-        if (m.state === 'dead') continue;
+        if (m.state === 'dead' || p.hit?.has(m.id)) continue;
         const sc = MONSTERS[m.type].scale || 1;
         const ox = (p.x - m.x) / (7 * sc + 3);
         const oy = (p.y - bodyY(m)) / (9 * sc + 3);
@@ -1811,6 +1815,11 @@ export class Combat {
           this.hitColor = splatTone(p.id);
           this.hitMonster(m, this.pelletDmg(p, m.hp, this.isNormalFoe(m)), px, py, 90);
           this.hitColor = null;
+          if (p.pierce > 0) {
+            p.pierce--;
+            (p.hit ||= new Set()).add(m.id);
+            continue; // the plasma bolt flies on
+          }
           this.land(p, px, py);
           return false;
         }
@@ -2003,7 +2012,19 @@ export class Combat {
 
   drawEntity(ctx, o, t) {
     if (o.kind === 'skeleton') this.drawSkeleton(ctx, o.s);
-    else if (o.kind === 'projectile' && o.p.id === 'bullet') {
+    else if (o.kind === 'projectile' && o.p.id === 'bullet' && (o.p.plasma || o.p.pl)) {
+      // a plasma bolt: a glowing blue streak
+      ctx.save();
+      ctx.translate(Math.round(o.p.x), Math.round(o.p.y - 8));
+      ctx.rotate(Math.atan2(o.p.vy, o.p.vx));
+      ctx.fillStyle = 'rgba(80,170,255,0.35)';
+      ctx.fillRect(-12, -3, 16, 6);
+      ctx.fillStyle = '#5fc4ff';
+      ctx.fillRect(-9, -1.5, 11, 3);
+      ctx.fillStyle = '#e6faff';
+      ctx.fillRect(-4, -0.8, 7, 1.6);
+      ctx.restore();
+    } else if (o.kind === 'projectile' && o.p.id === 'bullet') {
       // a bright tracer along the way it is flying
       ctx.save();
       ctx.translate(Math.round(o.p.x), Math.round(o.p.y - 8));

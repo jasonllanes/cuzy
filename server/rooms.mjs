@@ -3,6 +3,7 @@
 import os from 'node:os';
 import { WebSocketServer } from 'ws';
 import { TEAMS, TEAM_COUNTS } from '../src/game/teams.js';
+import { seedForMode } from '../src/game/maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -398,7 +399,18 @@ export function attachRoomServer(httpServer) {
       if (free && m.target !== undefined) room.target = clampTarget(m.target, room.target);
       // the rest is decided before the round
       if (!room.started) {
-        if (free) {
+        // Free Roam <-> Survival: the map, the start of the day and the fighting rules follow the mode
+        if (['free', 'survival'].includes(m.mode) && m.mode !== room.mode) {
+          room.mode = m.mode;
+          room.seed = seedForMode(room.seed, m.mode);
+          room.startHour = m.mode === 'survival' ? 17.3 : START_HOUR;
+          room.pvp = m.mode === 'free';
+          room.winBy = 'duel';
+          room.target = defaultTarget('duel');
+          room.teams = 0;
+          reassignAll(room);
+        }
+        if (room.mode === 'free') {
           if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== room.teams) {
             room.teams = Number(m.teams);
             reassignAll(room);

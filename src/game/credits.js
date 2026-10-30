@@ -65,10 +65,10 @@ export const CREDITS = [
 
 // (added after the packs above)
 CREDITS.push({
-  pack: 'Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads and Mountain Paths tilesets (mixed together in the Patchwork Lands)',
+  pack: 'Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads, Mountain Paths and Wooden Halls tilesets (mixed together in the Patchwork Lands)',
   authors: 'Generated with Pixellab (pixellab.ai) for this project',
   link: 'https://www.pixellab.ai',
-  used: 'The water and ground tiles of the Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads and Mountain Paths maps.',
+  used: 'The water and ground tiles of the Tidal Isles, Emerald Isles, Crystal Lakes, Mossy Marsh, Magma Fields, Sunny Shores, Cracked Roads, Mountain Paths and Wooden Halls maps.',
   license: 'AI-generated pixel art made for Cuzy.',
   checked: 'file',
 });
