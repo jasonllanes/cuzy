@@ -128,6 +128,9 @@ export function rollLoot(r1, r2, table = LOOT) {
   return { item: 'acorn', qty: 1 };
 }
 
+// Survival's guns are backpack items too: select one and right click shoots with it. (Defined after the loop below, they are one to a slot.)
+const gunItem = (id, name, sw, sh, desc) => ({ name, desc, icon: { file: `guns/${id}`, sx: 0, sy: 0, sw, sh, sheetW: sw, sheetH: sh, fit: 34 }, stack: 1, wave: true, gun: id });
+
 // A slot holds up to 99 of anything (a sword just the one). Coins are not backpack items at all: they live in your purse.
 for (const [id, def] of Object.entries(ITEMS)) {
   if (id === 'sword') continue;
@@ -137,6 +140,11 @@ for (const [id, def] of Object.entries(ITEMS)) {
   }
   def.stack = 99;
 }
+
+ITEMS.gun_pistol = gunItem('pistol', 'Pistol', 55, 41, 'Select it, then right-click to shoot. Steady and accurate. 12 rounds, and it reloads by itself.');
+ITEMS.gun_shotgun = gunItem('shotgun', 'Shotgun', 117, 32, 'Select it, then right-click to shoot. Five pellets that stack up at point blank. 6 shells.');
+ITEMS.gun_rifle = gunItem('rifle', 'Rifle', 107, 50, 'Select it, then right-click to shoot. A fast, accurate assault rifle. 60 rounds.');
+ITEMS.gun_plasma = gunItem('plasma', 'Plasma gun', 111, 35, 'Select it, then right-click to shoot. Glowing bolts that burn through two enemies. 20 charges.');
 
 // Rarity: the colour of the frame around an item, in the backpack, the shop and on the ground.
 export const RARITIES = {
@@ -152,6 +160,9 @@ const RARITY_OF = {
   gem: 'epic',
 };
 export const rarityOf = (id) => RARITY_OF[id] || 'common';
+RARITY_OF.gun_shotgun = 'uncommon';
+RARITY_OF.gun_rifle = 'rare';
+RARITY_OF.gun_plasma = 'epic';
 // swords, staffs and the rest: the dearer, the rarer
 export const rarityByCost = (cost) => (cost <= 14 ? 'common' : cost <= 28 ? 'uncommon' : cost <= 40 ? 'rare' : cost <= 52 ? 'epic' : 'legendary');
 

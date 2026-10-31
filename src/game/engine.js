@@ -45,6 +45,25 @@ const SPEED = 62;
 const SPRINT_MULT = 1.75;
 const RESPAWN_TIME = 5; // seconds spent downed
 export const GRENADE_COST = 8;
+const SURVIVAL_HOUR = 23; // Survival never leaves the night...
+const DAWN_LEFT = 10; // ...until the last wave is nearly beaten: with this many enemies left the sun starts to rise
+const DAWN_SECONDS = 40; // and it takes this long to come up
+const SKY_PACE = 0.4; // Survival's weather moves on slower than a Free Roam day, so a storm is a moment, not a mood
+export const GRENADE_COSTS = { truffle: 8, stungrenade: 9, smokegrenade: 7 };
+
+// Which sides of a wall (N 1, E 2, S 4, W 8) touch another one in `list`: the pieces of the fence join up by it
+function wallJoins(a, list) {
+  let m = 0;
+  for (const o of list) {
+    const dx = o.x - a.x;
+    const dy = o.y - a.y;
+    if (Math.abs(dy) <= 6 && Math.abs(dx - 16) <= 4) m |= 2;
+    else if (Math.abs(dy) <= 6 && Math.abs(dx + 16) <= 4) m |= 8;
+    else if (Math.abs(dx) <= 6 && Math.abs(dy - 16) <= 4) m |= 4;
+    else if (Math.abs(dx) <= 6 && Math.abs(dy + 16) <= 4) m |= 1;
+  }
+  return m;
+}
 const CONSUME_CAP = 99; // the most of one kind of food or drink you can carry
 export const HEAL_CD = 6; // seconds between healing items
 export const STAM_CD = 5; // seconds between stamina items
@@ -94,7 +113,7 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onLevelUp }) {
+  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp }) {
     this.canvas = canvas;
     this.onStorage = onStorage;
     this.onOpenStorage = onOpenStorage;
@@ -121,6 +140,7 @@ export class Game {
     this.onAnnounce = onAnnounce;
     this.onInventory = onInventory;
     this.onHotbarScroll = onHotbarScroll;
+    this.onSelectSlot = onSelectSlot;
 
     // Local multiplayer: other heroes in the same room, and a shared day/night clock
     this.mp = !demo && net && session
@@ -134,7 +154,13 @@ export class Game {
     this.remotes = new Map();
     this.myBubble = null;
     this.dead = null; // set while you are downed: { t, dur, by, last }
-    this.weather = { kind: 'clear', k: 1, cloud: 0.3, rain: 0, snow: 0 };
+    this.weather = { kind: 'clear', k: 1, cloud: 0.3, rain: 0, storm: 0, snow: 0 };
+    this.dawn = 0; // 0 night .. 1 morning: Survival's sunrise once the last wave is nearly done
+    this.dawnT = 0;
+    this.houseHit = null; // the shelter being hit: { t, bits: [flying splinters] }
+    this.flash = 0; // the white of a lightning strike, fading
+    this.boltT = 3; // seconds until the next strike
+    this.bolt = null;
     this.weatherForce = null; // set by the -weather cheat
     this.level = 1; // character level
     this.xpOrbs = []; // XP on its way to you after a kill
@@ -217,7 +243,7 @@ export class Game {
     const hourParam = Number(new URLSearchParams(window.location.search).get('hour'));
     this.hour = demo ? 10 : Number.isFinite(saved?.hour) ? saved.hour : 8;
     if (!demo && hourParam > 0) this.hour = hourParam;
-    else if (this.wave && this.theme === 'apoc') this.hour = 17.3; // Survival starts as the light begins to fail
+    else if (this.wave && this.theme === 'apoc') this.hour = SURVIVAL_HOUR; // Survival is always night
     this.day = saved?.day || 1;
     this.inventory = sanitize(saved?.inventory);
     // coins live in a purse, not in the backpack (older saves had them as items: move them over)
@@ -239,6 +265,7 @@ export class Game {
     if (this.wave) {
       addItem(this.inventory, 'sword', 1); // your weapon lives in the first slot, so left-click can do other jobs when something else is selected
       addItem(this.inventory, 'barricade', 4); // a few boxes to get started
+      if (this.world.apoc && !this.inventory.some((s) => s?.id === 'gun_pistol')) addItem(this.inventory, 'gun_pistol', 1); // Survival's guns are items you carry
     }
     const give = new URLSearchParams(window.location.search).get('give');
     if (give && !demo) {
@@ -291,8 +318,8 @@ export class Game {
         this.zoomBy(1);
       } else if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
         this.zoomBy(-1);
-      } else if (e.code === (this.wave ? 'Space' : 'KeyF')) {
-        // pick up, open and enter: Space in the wave modes, F in Free Roam (where Space is the dash)
+      } else if (e.code === 'KeyF') {
+        // pick up, open and enter; Space is the dash in every mode
         e.preventDefault();
         if (!e.repeat) {
           this.spaceDown = true;
@@ -301,26 +328,23 @@ export class Game {
         }
       } else if (e.code === 'Space') {
         e.preventDefault();
-        if (!e.repeat && !this.dead) this.combat?.skillKeyDown();
+        if (!e.repeat && !this.dead) {
+          if (this.wave) this.combat?.activateShield(); // Survival: Space is the shield (holding left click is the dash)
+          else this.combat?.skillKeyDown();
+        }
       } else if (this.dead) {
         // downed heroes just wait for the respawn
-      } else if (e.code === 'KeyF' && !e.repeat) {
-        this.combat?.activateShield();
-      } else if (e.code === 'KeyQ' && !e.repeat && this.wave) {
-        this.rotateWall(-1); // counter-clockwise
-      } else if (e.code === 'KeyE' && !e.repeat && this.wave && this.inventory[this.selectedSlot]?.id === 'barricade') {
-        this.rotateWall(1); // clockwise
       } else if (e.code === 'KeyH' && !e.repeat) {
         this.combat?.startRecall();
       } else if (e.code === 'KeyR' && !e.repeat) {
-        if (this.wave) this.combat?.cycleGun();
+        if (this.wave) this.rotateWall(1); // turn the barricade you are about to place
         else this.combat?.activateUtil(); // Free Roam: your Shield or Invisibility
       }
     };
     this.onKeyUp = (e) => {
       if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault();
       if (CONTROL_KEYS[e.code]) this.keys.delete(CONTROL_KEYS[e.code]);
-      if (e.code === (this.wave ? 'Space' : 'KeyF')) {
+      if (e.code === 'KeyF') {
         this.spaceDown = false;
         this.spaceLock = false;
         this.spaceHold = 0;
@@ -352,18 +376,13 @@ export class Game {
       this.onMouseMove(e);
       this.mouseHeld[e.button] = true;
       if (e.button === 0 && !this.dead) {
-        if (this.wave) {
-          // Wave Defense / Survival: left-click does what the selected slot does
-          const held = this.inventory[this.selectedSlot]?.id;
-          if (held === 'barricade') {
-            // press on a tile and keep holding: drag along a straight line to lay a whole row of walls; let go to build it
-            const { x, y } = this.snapPlacement();
-            this.wallHold = { x, y };
-            return;
-          }
-          if (held !== 'sword') return;
+        if (this.wave && this.inventory[this.selectedSlot]?.id === 'barricade') {
+          // a barricade box in hand: press on a tile and keep holding, drag along a straight line to lay a whole row of walls; let go to build it
+          const { x, y } = this.snapPlacement();
+          this.wallHold = { x, y };
+          return;
         }
-        this.combat.holdStart(); // tap = sword swing, hold + release = dash
+        this.combat.holdStart(); // otherwise left click is your melee weapon: tap = swing, hold + release = dash (a staff, trident or sling in Free Roam: its big move)
       }
     };
     this.onMouseUp = (e) => {
@@ -793,7 +812,7 @@ export class Game {
 
   // the key that picks things up and opens doors: Space in the wave modes, F in Free Roam
   actKey() {
-    return this.wave ? 'Space' : 'F';
+    return 'F';
   }
 
   // the enemy you are hitting, for the card at the top of the screen
@@ -1149,6 +1168,8 @@ export class Game {
       for (const l of ev.loot) {
         c.drops.push({ x: ev.x + (Math.random() - 0.5) * 16, y: ev.y + (Math.random() - 0.5) * 8, id: l.id, qty: l.qty, age: 0 });
       }
+    } else if (ev.type === 'bhit') {
+      this.startHouseHit(ev);
     } else if (ev.type === 'bbreak') {
       c.floaters.push({ x: ev.x, y: ev.y - 20, text: 'crack!', color: '#e0a060', t: 0 });
     } else if (ev.type === 'recruit') {
@@ -1170,7 +1191,7 @@ export class Game {
       this.giveBarricade();
     } else if (d.op === 'recruit' && !d.ok) {
       this.giveCoins(d.cost || 0);
-      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'RV' : 'base'} (B) to make room for more helpers.`);
+      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'shelter' : 'base'} (B) to make room for more helpers.`);
     } else if (d.op === 'repair') {
       this.finishRepair(d.placed | 0, d.asked | 0);
     } else if (d.op === 'upg' && !d.ok) {
@@ -1192,7 +1213,7 @@ export class Game {
     const inv = this.inventory;
     let slot = inv[this.selectedSlot]?.id === 'barricade' ? this.selectedSlot : inv.findIndex((s) => s && s.id === 'barricade');
     if (slot < 0) {
-      this.onToast?.('No barricade boxes left. Buy some in the shop (B), cut down a tree, or pick one up with Space.');
+      this.onToast?.('No barricade boxes left. Buy some in the shop (B), cut down a tree, or pick one up with F.');
       return;
     }
     const { x, y } = this.snapPlacement();
@@ -1587,13 +1608,9 @@ export class Game {
     return hero;
   }
 
-  // Tab: the next gun in Survival, the next sword you own in the Free Roam
+  // Tab: the next melee weapon you own
   switchWeapon() {
     if (this.frozen || this.dead) return;
-    if (this.wave) {
-      this.combat?.cycleGun();
-      return;
-    }
     const have = WEAPONS.filter((w) => this.weapons.owned[w.id]);
     if (have.length < 2) {
       this.onToast?.('Buy another sword in the shop (B) to switch.');
@@ -1660,6 +1677,9 @@ export class Game {
       const g = GUNS[id];
       if (!g || id === 'pistol' || !c.owned[id]) return;
       c.owned[id] = false;
+      const gi = this.inventory.findIndex((s) => s?.id === `gun_${id}`);
+      if (gi >= 0) this.inventory[gi] = null;
+      this.emitInventory();
       if (c.gun === id) c.equipGun('pistol');
       paid(sellPrice(g.price), g.name);
     } else if (kind === 'item') {
@@ -1704,16 +1724,17 @@ export class Game {
     this.emitInventory();
   }
 
-  // Buy a Sticky Grenade
-  buyGrenade() {
+  // Buy a grenade: sticky (default), stun or smoke
+  buyGrenade(item = 'truffle') {
     if (!this.wave || this.dead) return;
-    if (!this.spendCoins(GRENADE_COST)) {
+    const cost = GRENADE_COSTS[item] ?? GRENADE_COST;
+    if (!this.spendCoins(cost)) {
       sfx.play('nope');
-      this.onToast?.(`A Sticky Grenade costs ${GRENADE_COST} coins. You have ${this.coinCount()}.`);
+      this.onToast?.(`A ${ITEMS[item].name} costs ${cost} coins. You have ${this.coinCount()}.`);
       return;
     }
-    const left = addItem(this.inventory, 'truffle', 1);
-    if (left > 0) this.combat.drops.push({ x: this.player.x, y: this.player.y, id: 'truffle', qty: left, age: 0 });
+    const left = addItem(this.inventory, item, 1);
+    if (left > 0) this.combat.drops.push({ x: this.player.x, y: this.player.y, id: item, qty: left, age: 0 });
     this.emitInventory();
     sfx.play('buy');
   }
@@ -1764,6 +1785,13 @@ export class Game {
     if (!this.wave || !info || !c) return;
     if (c.owned[id]) {
       c.equipGun(id);
+      const i = this.inventory.findIndex((s) => s?.id === `gun_${id}`);
+      if (i >= 0 && i < 9) this.selectSlot(i);
+      return;
+    }
+    if (!this.inventory.some((s) => !s)) {
+      sfx.play('nope');
+      this.onToast?.('Your backpack is full. Drop or sell something first, the gun needs a slot.');
       return;
     }
     if (!this.spendCoins(info.price)) {
@@ -1773,8 +1801,27 @@ export class Game {
     }
     c.owned[id] = true;
     c.ammo[id] = info.mag;
+    addItem(this.inventory, `gun_${id}`, 1);
+    this.emitInventory();
     sfx.play('levelup');
     c.equipGun(id);
+    const i = this.inventory.findIndex((s) => s?.id === `gun_${id}`);
+    if (i >= 0 && i < 9) this.selectSlot(i);
+  }
+
+  // pick a hotbar slot (the hotbar lives in the page: it hears about it through onSelectSlot)
+  selectSlot(i) {
+    this.selectedSlot = i;
+    this.onSelectSlot?.(i);
+  }
+
+  // choosing a gun in the hotbar is how you pick the one you shoot with
+  syncSelectedGun() {
+    const id = this.inventory[this.selectedSlot]?.id;
+    if (id === this.lastSelId) return;
+    this.lastSelId = id;
+    const gun = id && ITEMS[id]?.gun;
+    if (gun && this.combat?.owned[gun]) this.combat.equipGun(gun);
   }
 
   buyUpgrade(id) {
@@ -1828,7 +1875,7 @@ export class Game {
     }
     if (this.wave.recruit(kind) === false) {
       this.giveCoins(def.cost);
-      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'RV' : 'base'} (B) to make room for more helpers.`);
+      this.onToast?.(`Your team is full. Upgrade the ${this.world.apoc ? 'shelter' : 'base'} (B) to make room for more helpers.`);
     }
     // a guest's request comes back as an 'ack', which refunds the coins if the host said no
   }
@@ -2227,28 +2274,45 @@ export class Game {
   }
 
   // A tree standing guard; it turns into a stump as it takes a beating
-  // Survival's barricades are wooden planks: flat along the top and bottom, upright down the sides
+  // Survival's barricades are an iron-and-wood fence that joins up with the sections next to it
+  // Which of a wall's four sides (N 1, E 2, S 4, W 8) touch another wall; worked out again only when a wall is added or lost
+  wallMask(b) {
+    const list = this.wave.barricades;
+    let sig = list.length;
+    for (const o of list) sig += o.id;
+    if (this.wallSig !== sig) {
+      this.wallSig = sig;
+      this.wallMasks = new Map();
+      for (const a of list) this.wallMasks.set(a.id, wallJoins(a, list));
+    }
+    return this.wallMasks.get(b.id) || 0;
+  }
+
+  // one piece of the fence sheet (see scripts/build-survival-v2.py): the column is how it joins its neighbours
+  drawWallPiece(ctx, x, y, mask, sturdy) {
+    ctx.fillStyle = 'rgba(30,20,30,0.25)';
+    ctx.fillRect(x - 8, y - 1, 16, 3);
+    ctx.drawImage(this.img['apoc/barbwire'], mask * 16, sturdy ? 32 : 0, 16, 32, x - 8, y - 30, 16, 32);
+  }
+
   drawWall(ctx, b) {
     const x = Math.round(b.x);
     const y = Math.round(b.y);
     const ratio = b.hp / b.max;
-    const im = this.img[`apoc/${b.r ? 'rwall' : 'wall'}_${b.v ? 'v' : 'h'}`];
-    const top = y - im.height + 2;
-    ctx.fillStyle = 'rgba(30,20,30,0.25)';
-    ctx.fillRect(x - Math.floor(im.width / 2), y, im.width, 2);
+    const top = y - 30;
     ctx.save();
     if (ratio < 0.34) ctx.globalAlpha = 0.72;
-    ctx.drawImage(im, x - Math.round(im.width / 2), top);
+    this.drawWallPiece(ctx, x, y, this.wallMask(b) || (b.v ? 16 : 0), !!b.r); // alone: a flat piece or an upright one
     if (ratio < 0.67) {
-      // splintered planks
+      // snapped rails
       ctx.fillStyle = 'rgba(20,12,12,0.5)';
-      ctx.fillRect(x - 3, top + 3, 1, 4);
-      ctx.fillRect(x + 2, top + 6, 1, 5);
-      if (ratio < 0.34) ctx.fillRect(x - 1, top + 8, 3, 1);
+      ctx.fillRect(x - 5, y - 9, 1, 5);
+      ctx.fillRect(x + 3, y - 12, 1, 6);
+      if (ratio < 0.34) ctx.fillRect(x - 1, y - 8, 3, 1);
     }
     ctx.restore();
     if (ratio < 1) {
-      const by = top - 4;
+      const by = y - 25;
       ctx.fillStyle = 'rgba(40,20,30,0.8)';
       ctx.fillRect(x - 8, by - 1, 16, 4);
       ctx.fillStyle = ratio > 0.5 ? '#7fd48f' : ratio > 0.25 ? '#f2b05e' : '#ee5d7d';
@@ -2316,6 +2380,62 @@ export class Game {
   }
 
   // A hired helper: a hero-style character with a coloured ring and rank pips
+  // a helper's bullet (k 1) or plasma bolt (k 2)
+  drawAshot(ctx, s) {
+    const ang = s.ang ?? Math.atan2(s.vy, s.vx);
+    ctx.save();
+    ctx.translate(Math.round(s.x), Math.round(s.y));
+    ctx.rotate(ang);
+    if (s.k === 2) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = 'rgba(74,168,255,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(-3, 0, 10, 3.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#4aa8ff';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 6, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#e8f8ff';
+      ctx.beginPath();
+      ctx.ellipse(1, 0, 3, 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = 'rgba(255,210,120,0.5)';
+      ctx.fillRect(-7, -0.5, 7, 1);
+      ctx.fillStyle = '#fff2b8';
+      ctx.fillRect(-1, -1, 4, 2);
+    }
+    ctx.restore();
+  }
+
+  // the gun a survivor carries (the player's own gun art), turned towards whatever it is shooting, with a flash when it fires
+  drawAllyGun(ctx, a, def, x, y) {
+    const gun = GUNS[def.gun];
+    const sheet = this.img[`guns/${def.gun}`];
+    const aim = a.aim ?? [Math.PI / 2, -Math.PI / 2, 0, Math.PI][a.dir || 0];
+    const cx = x;
+    const cy = y - 10;
+    if (sheet) {
+      const w = gun.len;
+      const h = (sheet.height / sheet.width) * w;
+      ctx.save();
+      ctx.translate(Math.round(cx + Math.cos(aim) * 3), Math.round(cy + Math.sin(aim) * 3 + 1));
+      ctx.rotate(aim);
+      if (Math.cos(aim) < 0) ctx.scale(1, -1);
+      ctx.drawImage(sheet, -w * 0.28, -h * 0.4, w, h);
+      ctx.restore();
+    }
+    if (a.atk > 0.12) {
+      const mx = cx + Math.cos(aim) * (gun.len * 0.75 + 3);
+      const my = cy + Math.sin(aim) * (gun.len * 0.75 + 3);
+      ctx.fillStyle = gun.plasma ? '#cdefff' : '#fff6c2';
+      ctx.fillRect(Math.round(mx) - 2, Math.round(my) - 2, 4, 4);
+      ctx.fillStyle = gun.plasma ? '#4aa8ff' : '#ffb62e';
+      ctx.fillRect(Math.round(mx - Math.cos(aim) * 2) - 3, Math.round(my - Math.sin(aim) * 2) - 1, 6, 2);
+    }
+  }
+
   drawAlly(ctx, a) {
     const def = ALLIES[a.kind];
     const hero = this.world.apoc ? SURVIVOR : heroById(def.hero);
@@ -2329,19 +2449,20 @@ export class Game {
     ctx.fill();
     ctx.globalAlpha = 1;
     this.drawHeroAt(ctx, hero, dir, a.moving, a.anim, a.x, a.y);
+    if (def.gun) this.drawAllyGun(ctx, a, def, x, y);
     if (def.ai === 'melee' && a.atk > 0) {
-      // the guard's slash: a bright crescent swept across the way they face
+      // the guard's slash: a grey crescent swept across the way they face
       const p = 1 - a.atk / 0.25;
       const face = [Math.PI / 2, -Math.PI / 2, 0, Math.PI][a.dir || 0];
       const sweep = face - 1 + p * 2;
       ctx.save();
       ctx.lineCap = 'round';
-      ctx.strokeStyle = `rgba(255,236,170,${0.95 - p * 0.6})`;
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = `rgba(150,156,168,${0.95 - p * 0.6})`;
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(x, y - 9, 13, sweep - 0.7, sweep + 0.1);
+      ctx.arc(x, y - 9, 13, sweep - 0.8, sweep + 0.1);
       ctx.stroke();
-      ctx.strokeStyle = `rgba(255,255,255,${0.9 - p * 0.7})`;
+      ctx.strokeStyle = `rgba(226,230,238,${0.9 - p * 0.7})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(x, y - 9, 13, sweep - 0.6, sweep);
@@ -2367,10 +2488,9 @@ export class Game {
     }
     // where barricades were destroyed: a faint red ghost, so you know what a repair would plant back
     for (const r of w.wrecks) {
-      const im = this.world.apoc ? this.img[`apoc/wall_${r.v ? 'v' : 'h'}`] : null;
       ctx.save();
       ctx.globalAlpha = 0.3 + 0.1 * Math.sin(this.t * 3);
-      if (im) ctx.drawImage(im, Math.round(r.x - im.width / 2), Math.round(r.y - im.height + 2));
+      if (this.world.apoc) this.drawWallPiece(ctx, r.x, r.y, wallJoins(r, [...w.barricades, ...w.wrecks]) || (r.v ? 16 : 0), false);
       const rect = BARRICADE_RECT(r);
       ctx.globalAlpha = 0.7;
       ctx.strokeStyle = '#ff5a5a';
@@ -2386,15 +2506,15 @@ export class Game {
     ctx.fillStyle = st.baseHp / st.baseMax > 0.4 ? '#7fd48f' : '#ee5d7d';
     ctx.fillRect(bx, by, Math.max(1, Math.round(bw * (st.baseHp / st.baseMax))), 4);
     if (this.world.apoc) {
-      // the RV's upgrade level, over its health bar
+      // the shelter's upgrade level, over its health bar
       ctx.save();
       ctx.font = 'bold 7px sans-serif';
       ctx.textAlign = 'center';
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(30,20,30,0.9)';
       ctx.fillStyle = '#ffe08a';
-      ctx.strokeText(`🚐 RV Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
-      ctx.fillText(`🚐 RV Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
+      ctx.strokeText(`🏚️ Shelter Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
+      ctx.fillText(`🏚️ Shelter Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
       ctx.restore();
     }
 
@@ -2408,8 +2528,7 @@ export class Game {
         if (why && !this.ghostWhy) this.ghostWhy = { x, y, why };
         ctx.globalAlpha = 0.55;
         if (this.world.apoc) {
-          const im = this.img[`apoc/wall_${plan.v ? 'v' : 'h'}`];
-          ctx.drawImage(im, x - Math.round(im.width / 2), y - im.height + 2);
+          this.drawWallPiece(ctx, x, y, wallJoins(c, [...w.barricades, ...plan.cells]) || (plan.v ? 16 : 0), false);
         } else {
           ctx.drawImage(this.img.trees, 71, 14, 20, 33, x - 10, y - 31, 20, 33);
         }
@@ -2638,7 +2757,8 @@ export class Game {
     if (this.world.depot) return 0.5;
     if (this.dungeon) return 0.55;
     const g = skyTint(this.hour)[1];
-    return Math.min(1, Math.max(0, (255 - g) / 150));
+    const d = Math.min(1, Math.max(0, (255 - g) / 150));
+    return this.world.hw ? Math.max(d, 0.4) : d; // Halloween never gets brighter than dusk
   }
 
   loop(now) {
@@ -2742,6 +2862,8 @@ export class Game {
     const p = this.player;
     this.updateFade(dt);
     this.updateWeather(dt);
+    this.updateLightning(dt);
+    this.updateHouseHit(dt);
     if (this.levelFx && (this.levelFx.t += dt) > 1.8) this.levelFx = null;
     if (this.xpOrbs.length || this.xpGain) this.updateXpOrbs(dt);
     if (!this.demo && !this.dungeon) this.world.growBack(dt, p.x, p.y);
@@ -2854,6 +2976,7 @@ export class Game {
         else this.updateInteraction();
       }
       this.updateDeath(dt);
+      this.syncSelectedGun();
       if (this.mouseHeld[2] && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot); // right click always throws what is selected in the backpack
       // still holding left click when the last throw, shot or cast is over: the charge bar starts again by itself
       if (this.mouseHeld[0] && !this.dead && !this.celeb && !this.wave && !this.combat.hold && !this.combat.dash && !this.combat.spin && !this.combat.thrown && !this.paused && this.rules?.melee !== false && this.combat.canFight()) this.combat.holdStart();
@@ -2872,14 +2995,20 @@ export class Game {
         // everyone in the room reads the same clock
         const total = this.mp.clockHour + ((performance.now() - this.mp.clockAt) / 1000) * HOURS_PER_SECOND;
         this.hour = total % 24;
+        this.skyTotal = this.wave && this.world.apoc ? total * SKY_PACE : total;
         this.day = this.mp.clockDay + Math.floor(total / 24) - Math.floor(this.mp.clockHour / 24);
         this.updateMultiplayer(dt);
       } else {
+        this.skyTotal = (this.skyTotal ?? (this.day - 1) * 24 + this.hour) + dt * HOURS_PER_SECOND * (this.wave && this.world.apoc ? SKY_PACE : 1);
         this.hour += dt * HOURS_PER_SECOND;
         if (this.hour >= 24) {
           this.hour -= 24;
           this.day++;
         }
+      }
+      if (this.wave && this.world.apoc) {
+        this.updateDawn(dt);
+        this.hour = (SURVIVAL_HOUR + this.dawn * 10.5) % 24; // Survival is always night, until the dawn: 11 PM slowly turns into 9:30 AM
       }
       this.hudTimer -= dt;
       if (this.hudTimer <= 0) {
@@ -3067,9 +3196,112 @@ export class Game {
     this.weatherT -= dt;
     if (this.weatherT > 0) return;
     this.weatherT = 0.5;
-    this.weather = weatherAt(this.world.seed, this.day, this.hour, this.demo || this.dungeon ? 'none' : this.climate());
+    // Survival's clock stands still at night, so its weather runs on a clock of its own
+    const sky = this.wave && this.world.apoc && this.skyTotal != null;
+    this.weather = weatherAt(this.world.seed, sky ? 1 : this.day, sky ? this.skyTotal : this.hour, this.demo || this.dungeon ? 'none' : this.climate());
     const f = this.weatherForce;
-    if (f && !this.weather.indoors) this.weather = { kind: f, k: 1, cloud: WEATHER[f].cloud, rain: f === 'rain' ? 1 : 0, snow: f === 'snow' ? 1 : 0 };
+    if (f && !this.weather.indoors) this.weather = { kind: f, k: 1, cloud: WEATHER[f].cloud, rain: f === 'rain' || f === 'storm' ? 1 : 0, storm: f === 'storm' ? 1 : 0, snow: f === 'snow' ? 1 : 0 };
+    if (this.dawn > 0 && !this.weather.indoors) {
+      // the sunrise burns the weather off: the rain thins, the thunder stops and the sky clears
+      const w = this.weather;
+      const left = 1 - this.dawn;
+      this.weather = { ...w, kind: this.dawn > 0.6 ? 'clear' : w.kind, rain: w.rain * left, storm: (w.storm || 0) * left, snow: w.snow * left, cloud: w.cloud * left + 0.3 * this.dawn };
+    }
+  }
+
+  // Survival: when the last wave is nearly done (10 enemies left, or all of them dead) the sun starts to come up, slowly.
+  // Once it has started it carries on, even if more enemies turn up.
+  updateDawn(dt) {
+    const w = this.wave;
+    if (!w || this.dawn >= 1) return;
+    if (this.dawn === 0) {
+      this.dawnT -= dt;
+      if (this.dawnT > 0) return; // (looked at four times a second)
+      this.dawnT = 0.25;
+      const h = w.hudState();
+      if (!(h.wave >= h.total && (h.phase === 'victory' || (h.phase === 'fight' && h.left <= DAWN_LEFT)))) return;
+      this.onToast?.('🌅 The night is breaking... the end is in sight!');
+      this.dawn = 0.001;
+      return;
+    }
+    this.dawn = Math.min(1, this.dawn + dt / DAWN_SECONDS);
+    this.weatherT = Math.min(this.weatherT, 0); // the weather follows the sky
+    if (this.dawn >= 1) this.onToast?.('☀️ The sun is up!');
+  }
+
+  // the shelter was hit: it flashes and shakes, splinters and sparks fly off the spot that was struck, and the damage floats up
+  startHouseHit(ev) {
+    const h = this.wave?.house;
+    if (!h) return;
+    const x = Math.min(h.x + h.w, Math.max(h.x, ev.x));
+    const y = Math.min(h.y + h.h, Math.max(h.y, ev.y - 8));
+    const bits = [];
+    for (let i = 0; i < 9; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.6;
+      const sp = 30 + Math.random() * 60;
+      bits.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 20, spark: i % 3 === 0, w: 1 + Math.floor(Math.random() * 3) });
+    }
+    const prev = this.houseHit && this.houseHit.t < 0.3 ? this.houseHit.bits : [];
+    this.houseHit = { t: 0, x, y, bits: [...prev, ...bits].slice(-24), big: Math.min(1, 0.4 + (ev.n || 1) / 8) };
+    sfx.play('thud', 0.9);
+    this.combat?.floaters.push({ x, y: y - 14, text: `-${Math.max(1, Math.round(ev.n || 1))}`, color: '#ff7a7a', t: 0 });
+  }
+
+  updateHouseHit(dt) {
+    const hh = this.houseHit;
+    if (!hh) return;
+    hh.t += dt;
+    for (const b of hh.bits) {
+      b.vy += 170 * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    }
+    if (hh.t > 0.8) this.houseHit = null;
+  }
+
+  drawHouseHit(ctx) {
+    const hh = this.houseHit;
+    const s = this.wave?.sprite;
+    if (!hh || !s) return;
+    const p = hh.t / 0.4;
+    if (p < 1) {
+      const a = (1 - p) * hh.big;
+      const dx = Math.round(Math.sin(hh.t * 80) * 2 * (1 - p));
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter'; // the whole shelter flares up for a moment...
+      ctx.globalAlpha = 0.7 * a;
+      ctx.drawImage(this.img['apoc/bus'], s.x + dx, s.y);
+      const g = ctx.createRadialGradient(hh.x, hh.y, 0, hh.x, hh.y, 26); // ...and the spot that was struck glows red
+      g.addColorStop(0, `rgba(255,90,60,${0.9 * a})`);
+      g.addColorStop(1, 'rgba(255,60,40,0)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = g;
+      ctx.fillRect(hh.x - 26, hh.y - 26, 52, 52);
+      ctx.restore();
+    }
+    for (const b of hh.bits) {
+      const life = 1 - hh.t / 0.8;
+      ctx.fillStyle = b.spark ? `rgba(255,214,120,${life})` : `rgba(120,78,44,${life})`;
+      ctx.fillRect(Math.round(b.x), Math.round(b.y), b.spark ? 1 : b.w + 1, b.spark ? 1 : 1);
+    }
+  }
+
+  // thunderstorms: every few seconds a strike flashes the whole sky (twice, usually) and the thunder rolls in after it
+  updateLightning(dt) {
+    this.flash = Math.max(0, this.flash - dt * 2.4);
+    if (this.bolt && (this.bolt.t += dt) > 0.4) this.bolt = null;
+    if (this.reflash > 0 && (this.reflash -= dt) <= 0) this.flash = Math.max(this.flash, 0.75);
+    if (this.thunderIn > 0 && (this.thunderIn -= dt) <= 0) sfx.play('thunder', this.thunderVol);
+    if (this.demo || this.inside || this.dungeon || (this.weather.storm || 0) < 0.5) return;
+    this.boltT -= dt;
+    if (this.boltT > 0) return;
+    this.boltT = 5 + Math.random() * 10;
+    this.flash = 1;
+    this.reflash = 0.16;
+    this.bolt = { t: 0, x: 0.12 + Math.random() * 0.76, s: Math.random() * 1000 };
+    const far = 0.3 + Math.random() * 1.8; // seconds between the flash and the thunder: the farther the strike, the longer
+    this.thunderIn = far;
+    this.thunderVol = Math.max(0.35, 1 - far / 2.6);
   }
 
   // Soft shadows of clouds sliding over the ground by day. They are painted small and stretched, which blurs the edges.
@@ -3137,16 +3369,52 @@ export class Game {
       ctx.strokeStyle = `rgba(215,232,255,${0.8 * rain})`;
       ctx.lineWidth = Math.max(1, Math.round(zoom * 0.55));
       ctx.beginPath();
-      const n = Math.round(190 * rain);
+      const storm = this.weather.storm || 0;
+      const n = Math.round(190 * rain * (1 + 0.9 * storm));
       for (let i = 0; i < n; i++) {
         const a = hash2(i, 5, 41);
         const b = hash2(i, 6, 41);
-        const y = (b * h + this.t * (300 + a * 160) * zoom * 0.5) % h;
-        const x = (((a * w - this.t * 40 * zoom - y * 0.2) % w) + w) % w;
+        const y = (b * h + this.t * (300 + a * 160 + 140 * storm) * zoom * 0.5) % h;
+        const x = (((a * w - this.t * (40 + 60 * storm) * zoom - y * (0.2 + 0.25 * storm)) % w) + w) % w;
         ctx.moveTo(Math.round(x), Math.round(y));
-        ctx.lineTo(Math.round(x - zoom * 1.4), Math.round(y + zoom * 5.5));
+        ctx.lineTo(Math.round(x - zoom * (1.4 + 1.2 * storm)), Math.round(y + zoom * 5.5));
       }
       ctx.stroke();
+      if (storm > 0.02) {
+        ctx.fillStyle = `rgba(20,28,60,${0.16 * storm})`; // a storm is gloomier than plain rain
+        ctx.fillRect(0, 0, w, h);
+      }
+    }
+    if (this.flash > 0.02) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(205,222,255,${0.5 * this.flash})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+    if (this.bolt) {
+      // the strike itself: a jagged line from the clouds down to the ground, with a glow round it
+      const b = this.bolt;
+      const fade = Math.max(0, 1 - b.t / 0.4);
+      let x = b.x * w;
+      let y = 0;
+      const end = h * (0.45 + 0.3 * hash2(1, 2, b.s));
+      ctx.save();
+      ctx.lineJoin = 'round';
+      const path = [[x, y]];
+      for (let i = 1; y < end; i++) {
+        x += (hash2(i, 9, b.s) - 0.5) * zoom * 22;
+        y += zoom * (6 + hash2(i, 11, b.s) * 10);
+        path.push([x, y]);
+      }
+      for (const [lw, col] of [[zoom * 4.5, `rgba(150,180,255,${0.25 * fade})`], [zoom * 1.6, `rgba(235,242,255,${0.95 * fade})`]]) {
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        path.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     if (snow > 0.02) {
       ctx.fillStyle = `rgba(235,245,255,${0.06 * snow})`;
@@ -3572,6 +3840,10 @@ export class Game {
       this.onToast?.('You need your weapon!');
       return;
     }
+    if (ITEMS[slot.id]?.gun) {
+      this.onToast?.('Sell the gun in the shop (B) if you do not want it.');
+      return;
+    }
     const n = Math.max(1, Math.min(slot.qty, Math.floor(Number(qty)) || 1));
     removeFromSlot(arr, i, n);
     const p = this.player;
@@ -3788,6 +4060,10 @@ export class Game {
       this.onToast?.('You need your weapon!');
       return;
     }
+    if (ITEMS[slot.id]?.gun) {
+      this.onToast?.('Sell the gun in the shop (B) if you do not want it.');
+      return;
+    }
     removeFromSlot(this.inventory, i, all ? slot.qty : 1);
     this.emitInventory();
     this.save();
@@ -3945,7 +4221,8 @@ export class Game {
 
   draw() {
     const { ctx, canvas, zoom, img } = this;
-    const camX = Math.round(this.cam.x - this.viewW / 2);
+    const rumble = this.houseHit && this.houseHit.t < 0.25 ? Math.round(Math.sin(this.houseHit.t * 90) * 1.5 * (1 - this.houseHit.t / 0.25) * this.houseHit.big) : 0; // the ground shudders when the shelter is hit
+    const camX = Math.round(this.cam.x - this.viewW / 2) + rumble;
     const camY = Math.round(this.cam.y - this.viewH / 2);
     this.camX = camX;
     this.camY = camY;
@@ -4020,8 +4297,9 @@ export class Game {
       for (const m of this.wave.monsters) drawList.push({ kind: 'monster', m, y: m.y });
       for (const b of this.wave.barricades) drawList.push({ kind: 'barricade', b, y: b.y });
       // Survival shooters stand on the bus roof, so they are drawn in front of the bus
-      for (const a of this.wave.allies) drawList.push({ kind: 'ally', a, y: a.y + (this.world.apoc && ALLIES[a.kind].ai === 'ranged' ? 34 : 0) });
-      for (const s of this.wave.ashots) drawList.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'rock', rot: this.t * 14 }, y: s.y + 6 });
+      for (const a of this.wave.allies) drawList.push({ kind: 'ally', a, y: a.y + (this.world.apoc && ALLIES[a.kind].ai === 'ranged' ? 90 : 0) });
+      for (const s of this.wave.ashots) drawList.push({ kind: 'ashot', s, y: s.y + 6 });
+      if (this.houseHit && this.world.apoc) drawList.push({ kind: 'househit', y: this.wave.sprite.y + this.wave.sprite.h + 3 });
     }
     drawList.sort((a, b) => a.y - b.y);
 
@@ -4117,7 +4395,13 @@ export class Game {
         case 'ally':
           this.drawAlly(ctx, o.a);
           break;
+        case 'househit':
+          this.drawHouseHit(ctx);
+          break;
         case 'skeleton':
+        case 'ashot':
+          this.drawAshot(ctx, o.s);
+          break;
         case 'projectile':
         case 'drop':
         case 'swing':
@@ -4164,12 +4448,110 @@ export class Game {
     if (Math.floor(this.t) % 3 === 0) this.trimChunkCache();
   }
 
+  // Survival is always night: a dark layer with holes cut out of it wherever there is light, so a light really lights the ground.
+  // The shelter's lamps are the Shelter light upgrade: none to begin with, then more lamps that reach further with every level.
+  shelterLamps() {
+    const w = this.wave;
+    const lvl = this.upgrades.light || 0;
+    if (!w || !lvl) return [];
+    const { x, y, w: sw, h } = w.sprite;
+    // always symmetrical round the middle of the shelter: one lamp above the door, then one at each end, then all three
+    const mid = { x: x + sw / 2, y: y + h * 0.55 };
+    const left = { x: x + 6, y: y + h * 0.5 };
+    const right = { x: x + sw - 6, y: y + h * 0.5 };
+    const lamps = lvl >= 4 ? [left, right, mid] : lvl >= 2 ? [left, right] : [mid];
+    const r = 58 + 26 * lvl;
+    return lamps.map((l) => ({ ...l, r }));
+  }
+
+  drawNight(camX, camY) {
+    const { ctx, canvas, zoom } = this;
+    const cw = canvas.width;
+    const ch = canvas.height;
+    if (!this.nightCv) this.nightCv = document.createElement('canvas');
+    const cv = this.nightCv;
+    if (cv.width !== cw || cv.height !== ch) {
+      cv.width = cw;
+      cv.height = ch;
+    }
+    const c = cv.getContext('2d');
+    c.globalCompositeOperation = 'source-over';
+    c.clearRect(0, 0, cw, ch);
+    const lit = (1 - 0.75 * Math.min(1, this.flash)) * (1 - this.dawn); // a lightning strike lights the whole night up for a moment; the dawn takes it away
+    c.fillStyle = this.world.hw ? `rgba(24,8,46,${0.82 * lit})` : `rgba(7,11,40,${0.8 * lit})`;
+    c.fillRect(0, 0, cw, ch);
+    const flick = 1 + 0.03 * Math.sin(this.t * 7) + 0.02 * Math.sin(this.t * 13.7);
+    const lamps = this.shelterLamps();
+    const lvl = this.upgrades.light || 0;
+    const sp = this.wave?.sprite;
+    const lights = [];
+    if (!this.demo) lights.push([this.player.x, this.player.y - 10, 36, 0.8]); // a little glow round you wherever you are
+    for (const [x, y, rad] of this.glows) lights.push([x, y, rad * 1.1, 0.8]);
+    if (sp) lights.push([sp.x + sp.w / 2, sp.y + sp.h * 0.7, 46, 0.55]); // the shelter's own dim windows, before any lamp
+    for (const l of lamps) lights.push([l.x, l.y, l.r * flick, 0.88]);
+    c.globalCompositeOperation = 'destination-out';
+    for (const [x, y, radius, strength] of lights) {
+      const sx = (x - camX) * zoom;
+      const sy = (y - camY) * zoom;
+      const rad = radius * zoom;
+      if (sx < -rad || sy < -rad || sx > cw + rad || sy > ch + rad) continue;
+      const g = c.createRadialGradient(sx, sy, rad * 0.12, sx, sy, rad);
+      g.addColorStop(0, `rgba(0,0,0,${strength})`);
+      g.addColorStop(0.5, `rgba(0,0,0,${strength * 0.78})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      c.fillRect(sx - rad, sy - rad, rad * 2, rad * 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(cv, 0, 0);
+    if (this.dawn > 0) {
+      // first light: a rose-gold wash that is strongest halfway through the sunrise
+      ctx.fillStyle = `rgba(255,150,90,${0.2 * Math.sin(Math.PI * this.dawn)})`;
+      ctx.fillRect(0, 0, cw, ch);
+    }
+    // the warm glow of the lamps on top, and the lanterns themselves
+    ctx.globalCompositeOperation = 'lighter';
+    for (const l of lamps) {
+      const sx = (l.x - camX) * zoom;
+      const sy = (l.y - camY) * zoom;
+      const rad = l.r * 0.7 * zoom * flick;
+      if (sx < -rad || sy < -rad || sx > cw + rad || sy > ch + rad) continue;
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, rad);
+      g.addColorStop(0, `rgba(255,200,115,${(0.07 + 0.015 * lvl) * (1 - this.dawn)})`);
+      g.addColorStop(1, 'rgba(255,190,100,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - rad, sy - rad, rad * 2, rad * 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    for (const l of lamps) {
+      const sx = Math.round((l.x - camX) * zoom);
+      const sy = Math.round((l.y - camY) * zoom);
+      const u = Math.max(2, zoom);
+      ctx.fillStyle = '#2c2420';
+      ctx.fillRect(sx - u, sy - 2 * u, 2 * u, u); // the bracket
+      ctx.fillRect(sx - u, sy + 1 * u, 2 * u, u);
+      ctx.fillStyle = '#ffe9a8';
+      ctx.fillRect(sx - u, sy - u, 2 * u, 2 * u); // the bulb
+      ctx.fillStyle = '#fffbe8';
+      ctx.fillRect(sx - u / 2, sy - u / 2, u, u);
+    }
+  }
+
   drawDaylight(camX, camY) {
+    if (this.wave && this.world.apoc && !this.dungeon && !this.inside && this.dawn < 1) {
+      this.drawNight(camX, camY);
+      return;
+    }
     const { ctx, canvas, zoom } = this;
     const [r, g, b] = this.dungeon ? [150, 156, 192] : this.world.depot ? [200, 205, 226] : skyTint(this.hour); // indoors it is always dim
     if (r < 255 || g < 255 || b < 255) {
       ctx.globalCompositeOperation = 'multiply';
       ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    if (this.world.hw) {
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = 'rgb(208,164,220)'; // a purple dusk
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     const n = this.darkness();

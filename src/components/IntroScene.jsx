@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import '../intro.css';
+import Avatar from './Avatar';
+import V2Sprite from './V2Sprite';
 
-// The opening scene: you arrive by plane (Free Roam, Wave Defense) or by car (Survival) while a little bot
+// The opening scene: you arrive by helicopter (Free Roam, Wave Defense) or by car (Survival) while a little bot
 // narrates. It plays on its own, with no buttons to press; Skip (or Esc) ends it early.
 
 const CHAR_TIME = 0.03; // seconds per typed letter
@@ -14,16 +16,16 @@ function script(kind, name, fight) {
       bot: '🚗 Driver Rusty-Bot',
       lines: [
         `Wake up, ${name}. Driver Rusty-Bot here. The radio went quiet an hour ago.`,
-        'See that camper RV up ahead? That is home base now.',
+        'See that container shelter up ahead? That is home base now.',
         'Ten waves of the dead are coming, with something big at the very end.',
-        'Scavenge walls, hire survivors and keep that RV standing.',
+        'Scavenge walls, hire survivors and keep that shelter standing.',
         'Hold on tight, we are pulling in!',
       ],
     };
   }
   if (kind === 'waves') {
     return {
-      bot: '✈️ Captain Biscuit-Bot',
+      bot: '🚁 Captain Biscuit-Bot',
       lines: [
         `Good morning, ${name}! Captain Biscuit-Bot here, flying you in.`,
         'Monsters have been spotted around the old house in the meadow.',
@@ -33,7 +35,7 @@ function script(kind, name, fight) {
     };
   }
   return {
-    bot: '✈️ Captain Biscuit-Bot',
+    bot: '🚁 Captain Biscuit-Bot',
     lines: [
       `Good morning, ${name}! Captain Biscuit-Bot here, flying you in.`,
       'Below us is a cozy meadow, grown from a single little seed.',
@@ -79,7 +81,7 @@ function Car() {
   );
 }
 
-export default function IntroScene({ kind, name, fight, onDone }) {
+export default function IntroScene({ kind, name, fight, hero, assets, onDone }) {
   const { bot, lines } = useRef(script(kind, name, fight)).current;
   // when each line starts, and the whole thing's length
   const plan = useRef(null);
@@ -139,8 +141,8 @@ export default function IntroScene({ kind, name, fight, onDone }) {
           <div className="intro-trees far" />
           <div className="intro-trees near" />
           <div className="intro-road"><i /></div>
-          <div className="intro-bus" />
-          <div className="intro-vehicle"><Car /><span className="intro-beam" /></div>
+          <div className="intro-bus v2" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/apoc/bus.png)` }} />
+          <div className="intro-vehicle v2"><V2Sprite theme="vehicles" name="Car_Right_1" scale={3} /><span className="intro-beam" /></div>
         </>
       ) : (
         <>
@@ -148,14 +150,23 @@ export default function IntroScene({ kind, name, fight, onDone }) {
           <div className="intro-cloud b" />
           <div className="intro-cloud c" />
           <div className="intro-cloud d" />
-          <div className="intro-vehicle"><Plane /></div>
-          <div className="intro-ground" />
+          <div className="intro-vehicle v2"><V2Sprite theme="vehicles" name="Helicopter_1" scale={2} flip /></div>
+          <div className="intro-ground">
+            <div className="intro-town">
+              {[['villas', 'Villa_1', 3, 1], ['camping', 'Tree_157', 17, 1.2], ['shops', 'Market_Big_1', 29, 1], ['camping', 'Tree_159', 45, 1.2], ['villas', 'Villa_3', 56, 1], ['camping', 'Tree_161', 72, 1.2], ['shops', 'Market_Big_3', 82, 1]].map(([th, n, x, sc]) => (
+                <span key={n + x} className="intro-prop" style={{ left: `${x}%` }}><V2Sprite theme={th} name={n} scale={sc} /></span>
+              ))}
+            </div>
+          </div>
         </>
       )}
 
       <div className="intro-talk panel">
-        <div className="intro-bot">{bot}</div>
-        <p>{lines[idx].slice(0, typed)}<span className="intro-caret">▍</span></p>
+        {hero && assets && <span className="intro-hero"><Avatar assets={assets} id={hero} size={56} /></span>}
+        <div className="intro-say">
+          <div className="intro-bot">{bot}</div>
+          <p>{lines[idx].slice(0, typed)}<span className="intro-caret">▍</span></p>
+        </div>
       </div>
       <button type="button" className="intro-skip btn small-btn" onClick={finish}>Skip ⏭</button>
     </div>

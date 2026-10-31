@@ -579,7 +579,6 @@ export class Combat {
 
   // Left click let go. Free Roam: a tap swings (or bashes, or fires a bolt); holding first does the weapon's big move:
   // a staff drops a spell at the cursor, a trident is hurled and a slingshot fires, as far as you held. Dash and Spiral are on Space.
-  // The wave modes keep the old hold-to-dash.
   holdEnd() {
     if (!this.hold) return;
     const t = this.hold.t;
@@ -591,6 +590,7 @@ export class Combat {
       return;
     }
     if (this.g.wave) {
+      // Survival and the wave modes: tap to swing, hold and let go to dash
       const skill = this.g.activeSkill();
       if (t < HOLD_MIN || !skill) this.attack();
       else if (skill === 'spiral') this.startSpin(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
@@ -807,7 +807,7 @@ export class Combat {
   // Wave Defense throw: a free pebble by default, or the selected throwable item. Costs throw energy.
   throwWave(slot) {
     if (this.throwCd > 0) return;
-    if (this.g.inventory[slot]?.id === 'truffle') {
+    if (GRENADES[this.g.inventory[slot]?.id]) {
       this.throwGrenade(slot);
       return;
     }
@@ -1026,14 +1026,18 @@ export class Combat {
     if (!this.g.wave || !this.g.world.apoc) return;
     const have = GUN_ORDER.filter((id) => this.owned[id]);
     if (have.length < 2) {
-      this.g.onToast?.('Buy the Shotgun, Rifle or Plasma gun in the shop (B) to switch.');
+      this.g.onToast?.('Buy the Shotgun, Rifle or Plasma gun in the shop (B), then pick it in the hotbar.');
       return;
     }
-    this.equipGun(have[(have.indexOf(this.gun) + 1) % have.length]);
+    const next = have[(have.indexOf(this.gun) + 1) % have.length];
+    this.equipGun(next);
+    const slot = this.g.inventory.findIndex((s) => s?.id === `gun_${next}`);
+    if (slot >= 0 && slot < 9) this.g.selectSlot(slot); // its slot lights up in the hotbar
   }
 
   equipGun(id) {
     if (!this.owned[id]) return;
+    if (this.gun === id) return;
     this.gun = id;
     this.reloadT = this.ammo[id] <= 0 ? GUNS[id].reload : 0;
     this.throwCd = Math.max(this.throwCd, 0.15);
@@ -1171,11 +1175,13 @@ export class Combat {
     this.updateDots(dt);
     this.bolts = this.bolts.filter((b) => (b.t += dt) < 0.22);
 
-    if (!this.g.wave && !this.g.inside && !this.g.dungeon) {
+    if (!this.g.wave && !this.g.inside) {
       // skeletons roam the free world only (and never come into your house, or follow you underground)
-      this.updateSpawns(dt);
-      this.updateCamps(dt);
-      this.updateWilds(dt);
+      if (!this.g.dungeon) {
+        this.updateSpawns(dt);
+        this.updateCamps(dt);
+      }
+      this.updateWilds(dt); // (underground it only moves the monsters that wait in the rooms: nothing new turns up)
     }
     this.skeletons = this.skeletons.filter((s) => this.updateSkeleton(s, dt));
     this.projectiles = this.projectiles.filter((p) => this.updateProjectile(p, dt));
@@ -1305,7 +1311,7 @@ export class Combat {
       this.wildT = 3 + Math.random() * 3;
       const night = this.g.darkness();
       const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 2;
-      if (this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
+      if (!this.g.dungeon && this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
       if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
     }
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));

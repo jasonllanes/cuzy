@@ -24,7 +24,7 @@ export default function RoomSettings({ room, count, editable, onChange }) {
       <div className="set-grid">
         {room.mode !== 'waves' && (
           <div className="set-row">
-            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : free ? 'Free Roam: a cozy world to explore, fight or win in' : 'Survival: co-op against zombies, with the RV to defend. The map changes to match.'}</small></div>
+            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : free ? 'Free Roam: a cozy world to explore, fight or win in' : 'Survival: co-op against zombies, with the shelter to defend. The map changes to match.'}</small></div>
             <div className="seg">
               <button type="button" className={free ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'free' })}>🌻 Free Roam</button>
               <button type="button" className={room.mode === 'survival' ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'survival' })}>🧟 Survival</button>

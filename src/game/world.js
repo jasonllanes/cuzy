@@ -47,8 +47,11 @@ const FLOWER_COLORS = ['#ff9ec7', '#ffffff', '#c9a7ff', '#ffd94a', '#ffb38a', '#
 
 export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
-    this.v2 = theme !== 'apoc' && !waves && isV2Seed(seedStr); // Free Roam V2: the same world with the Modern Exteriors props on top
+    this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
     this.seedStr = stripV2(seedStr);
+    // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
+    this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
+    this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw); // Free Roam V2: the same world with the Modern Exteriors props on top
     this.seed = hashString(this.seedStr);
     // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
     // start of the seed, and a Survival map names it
@@ -544,7 +547,10 @@ export class World {
       }
     }
 
-    if (this.apoc) this.addApocProps(chunk, x0, y0);
+    if (this.apoc) {
+      if (this.sv2 && !this.depot) addV2Chunk(this, chunk, cx, cy);
+      else this.addApocProps(chunk, x0, y0);
+    }
 
     for (let y = y0; y < y0 + CHUNK; y++) {
       for (let x = x0; x < x0 + CHUNK; x++) {

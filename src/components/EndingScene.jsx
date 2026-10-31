@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import '../ending.css';
+import Avatar from './Avatar';
+import V2Sprite from './V2Sprite';
 
 // The ending scene, for every way a round can finish: a defended base (victory), a base that fell (defeat) and the winner
 // of a Free Roam round. A little narrator speaks over a painted sky, the numbers count up, and then a button takes you
@@ -9,7 +11,7 @@ const CHAR_TIME = 0.032;
 const HOLD = 1.3;
 
 function script({ kind, survival, name, winner, mine }) {
-  const bot = survival ? '🚗 Rusty-Bot' : '✈️ Captain Biscuit-Bot';
+  const bot = survival ? '🚗 Rusty-Bot' : '🚁 Captain Biscuit-Bot';
   if (kind === 'round') {
     return {
       bot,
@@ -22,17 +24,17 @@ function script({ kind, survival, name, winner, mine }) {
   if (kind === 'victory') {
     return {
       bot,
-      title: survival ? '🌅 Dawn. The RV held!' : '🌅 The base held!',
+      title: survival ? '🌅 Dawn. The shelter held!' : '🌅 The base held!',
       lines: survival
-        ? [`Sun is coming up, ${name}. Look at that: the RV is still standing.`, 'Ten waves of the dead, and the Colossus too. Nobody got through.', 'Rest up. The road ahead is quiet, for now.']
+        ? [`Sun is coming up, ${name}. Look at that: the shelter is still standing.`, 'Ten waves of the dead, and the Colossus too. Nobody got through.', 'Rest up. The road ahead is quiet, for now.']
         : [`The monsters are gone, ${name}, and the house is still standing!`, 'All ten waves defeated, and the big one too. Well defended.', 'The meadow is quiet again. Time for a well-earned rest.'],
     };
   }
   return {
     bot,
-    title: survival ? '🌑 The RV fell…' : '🌑 The base fell…',
+    title: survival ? '🌑 The shelter fell…' : '🌑 The base fell…',
     lines: survival
-      ? [`It is over, ${name}. The RV could not take any more.`, 'They were too many this time. But you made it further than most.', 'Dust yourself off. Next time, build the walls higher.']
+      ? [`It is over, ${name}. The shelter could not take any more.`, 'They were too many this time. But you made it further than most.', 'Dust yourself off. Next time, build the walls higher.']
       : [`The house gave way, ${name}. The monsters were too many this time.`, 'But you held out longer than anyone would have guessed.', 'Rebuild, rethink and try again. The meadow is waiting.'],
   };
 }
@@ -54,7 +56,7 @@ function Count({ to, delay, text = (n) => String(n) }) {
   return <b>{text(n)}</b>;
 }
 
-export default function EndingScene({ kind, survival, name, winner = '', mine = false, stats = [], board = [], boardTitle = '', continueLabel = '', onContinue, auto = false }) {
+export default function EndingScene({ kind, survival, name, winner = '', mine = false, hero, assets, stats = [], board = [], boardTitle = '', continueLabel = '', onContinue, auto = false }) {
   const { bot, title, lines } = useRef(script({ kind, survival, name, winner, mine })).current;
   const plan = useRef(null);
   if (!plan.current) {
@@ -114,8 +116,25 @@ export default function EndingScene({ kind, survival, name, winner = '', mine = 
       <div className="ending-hills near" />
       {kind !== 'round' && (
         <div className={`ending-base ${happy ? '' : 'wrecked'}`}>
-          {survival ? <img src={`${import.meta.env.BASE_URL}assets/apoc/bus.png`} alt="" /> : <span aria-hidden="true">🏡</span>}
+          {survival ? <img src={`${import.meta.env.BASE_URL}assets/apoc/bus.png`} alt="" /> : <V2Sprite theme="villas" name="Villa_2" scale={1} />}
           {!happy && <i className="ending-smoke" />}
+        </div>
+      )}
+      {kind !== 'round' && (
+        <div className={`ending-crew ${happy ? '' : 'wrecked'}`} aria-hidden="true">
+          {survival ? (
+            <>
+              <V2Sprite className="crew-l" theme="terrain" name="Fence_2_2" scale={3} />
+              <V2Sprite className="crew-r" theme="terrain" name="Fence_2_6" scale={3} />
+              <V2Sprite className="crew-r2" theme="props" name="Cone_9" scale={2} />
+            </>
+          ) : (
+            <>
+              <V2Sprite className="crew-l" theme="camping" name="Tree_157" scale={1.5} />
+              <V2Sprite className="crew-r" theme="camping" name="Tree_159" scale={1.5} />
+            </>
+          )}
+          {hero && assets && <span className={`crew-hero ${happy ? 'cheer' : ''}`}><Avatar assets={assets} id={hero} size={happy ? 72 : 60} /></span>}
         </div>
       )}
       {kind === 'round' && <div className="ending-trophy" aria-hidden="true">🏆</div>}

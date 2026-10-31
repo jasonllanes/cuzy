@@ -43,3 +43,20 @@
 .ending-row.me { background: #fff0f3; border: 2px solid var(--rose); }
 .ending-btn { justify-self: center; min-width: 220px; }
 @media (max-width: 640px) { .ending-base { font-size: 56px; } .ending-base img { width: 120px; } .ending-trophy { font-size: 70px; } .ending-title { top: 5vh; } }
+
+/* Modern Exteriors art in the ending: the crew around the base */
+.ending-base .v2s { display: block; }
+.ending-crew { position: absolute; left: 50%; bottom: 14%; width: min(560px, 90vw); height: 0; transform: translateX(-50%); }
+.ending-crew .v2s { position: absolute; bottom: 0; filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.3)); }
+.ending-crew .crew-l { left: 0; }
+.ending-crew .crew-r { right: 0; }
+.ending-crew .crew-r2 { right: 76px; }
+.ending-crew .crew-hero { position: absolute; bottom: -4px; left: calc(50% + 120px); width: 84px; height: 84px; display: grid; place-items: end center; }
+.ending-crew .crew-hero.cheer { animation: crew-cheer 0.7s ease-in-out infinite alternate; }
+.ending-crew.wrecked { filter: grayscale(0.5) brightness(0.7); }
+@keyframes crew-cheer { to { transform: translateY(-10px); } }
+@media (max-width: 640px) { .ending-crew .crew-hero { left: calc(50% + 70px); } }
+
+/* keep the base and its crew above the talk box */
+.ending-base { bottom: 27%; }
+.ending-crew { bottom: 24%; }

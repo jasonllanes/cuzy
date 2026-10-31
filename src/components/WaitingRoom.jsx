@@ -8,6 +8,7 @@ import { inviteLink } from '../game/net';
 import SpritePreview from './SpritePreview';
 import OnlinePlayers from './OnlinePlayers';
 import WorldBackdrop from './WorldBackdrop';
+import V2Sprite from './V2Sprite';
 
 const MODE_LABEL = { free: '🌻 Free Roam', waves: '🛡️ Wave Defense', survival: '🧟 Survival' };
 
@@ -113,9 +114,9 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
       <div className="cloud c2" />
       <div className="panel menu-card waiting-card">
         <header className="logo">
-          <span className="logo-spark">✿</span>
+          <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_1" scale={3} /></span>
           <h1>{room.name}</h1>
-          <span className="logo-spark">✿</span>
+          <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_2" scale={3} /></span>
         </header>
         <p className="tagline">
           {MODE_LABEL[room.mode] || MODE_LABEL.free}
@@ -127,6 +128,11 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <button type="button" className="btn small-btn" onClick={() => doCopy('code', room.code)}>{copied === 'code' ? 'Copied!' : 'Copy code'}</button>
           <button type="button" className="btn small-btn" onClick={() => doCopy('link', inviteLink(room.code, lan))}>{copied === 'link' ? 'Link copied!' : '✉️ Invite link'}</button>
         </div>
+
+        <p className="hint wait-tip">
+          {imHost && ordered.length < 2 ? '🌱 Playing alone? Check the settings below (cheats can be switched off here), then press Start. ' : ''}
+          Want company? Share the code or the invite link and friends join this same world, or use <b>Online now</b> to invite someone who has the game open.
+        </p>
 
         <div className="wait-layout">
           <div className="wait-main">

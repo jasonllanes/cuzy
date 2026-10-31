@@ -7,7 +7,7 @@ export const UPGRADES = [
   { id: 'stamina', icon: '⚡', name: 'Endurance', desc: 'Sprinting and dashing cost less, and stamina refills faster.', cost: [4, 6, 9, 13, 18] },
   { id: 'melee', icon: '🗡️', name: 'Melee damage', desc: '+1 damage on every swing (and a little more on dashes).', cost: [5, 8, 12, 18, 26] },
   { id: 'throw', icon: '🎯', name: 'Throw damage', desc: '+1 damage on every throw.', cost: [4, 6, 9, 13, 18], survIcon: '🔫', survName: 'Gun damage', survDesc: '+1 damage on every bullet from your pistol.' },
-  { id: 'light', icon: '🔦', name: 'Lantern', desc: 'A bigger, brighter glow around you, so the night is easier to see through.', cost: [3, 5, 8, 12, 16] },
+  { id: 'light', icon: '🔦', name: 'Lantern', desc: 'A bigger, brighter glow around you, so the night is easier to see through.', cost: [3, 5, 8, 12, 16], survIcon: '💡', survName: 'Shelter light', survDesc: 'Hang a lamp on the shelter. Every level reaches further and brings more lamps (2 at level 2, 3 at level 4), lighting up the ground so you can see the zombies coming.' },
 ];
 
 export const emptyUpgrades = () => ({ armor: 0, chest: 0, atkspd: 0, house: 0, stamina: 0, melee: 0, throw: 0, light: 0, dash: 0, dashdmg: 0, spinrad: 0, spindmg: 0, rapid: 0, health: 0 });

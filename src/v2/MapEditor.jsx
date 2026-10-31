@@ -5,6 +5,9 @@ import { V2_HEROES, drawChar, isV2Hero, v2HeroOf } from './chars';
 import { cloneMap } from './custom';
 import { Ground } from './ground';
 import Palette from './Palette';
+import { CharactersPane, MobsPane } from './Roster';
+import { drawMob, mobSize } from './mobs';
+import { MONSTERS } from '../game/monsters';
 import { PACK_SCAN, V2_PLAN } from './plan';
 import { CONTAINER, KIND, KIND_COLORS, KIND_NAMES, TILE, footprint, isFlat } from './world';
 import './v2.css';
@@ -22,6 +25,7 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
     g.current = {
       map: work, ground: new Ground(work, index), uid: Math.max(0, ...work.props.map((p) => p.uid || 0)) + 1, cam: { x: work.spawn.x - 200, y: work.spawn.y - 140 }, zoom: 2,
       keys: new Set(), mouse: { x: 0, y: 0, wx: 0, wy: 0, in: false }, placing: null, selected: null, hover: null, drag: null, painting: false, undo: [], t: 0,
+      mobs: [], mobSeq: 1, chase: true,
       show: { solids: false, grid: false, snap: true, night: false }, tool: 'select', brush: { kind: KIND.plaza, size: 1 }, walk: { on: false, x: work.spawn.x, y: work.spawn.y, dir: 'down', moving: false }, hero, sheets: {},
     };
   }
@@ -34,6 +38,8 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
   const [show, setShow] = useState(G.show);
   const [walk, setWalk] = useState(false);
   const [heroId, setHeroId] = useState(hero);
+  const [mobCount, setMobCount] = useState(0);
+  const [chase, setChase] = useState(true);
   const [count, setCount] = useState(G.map.props.length);
   const [info, setInfo] = useState('');
   const [importText, setImportText] = useState('');
@@ -202,6 +208,19 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
         G.cam.x = Math.min(Math.max(G.cam.x + vx * sp, -40), m.cols * TILE - vw + 40);
         G.cam.y = Math.min(Math.max(G.cam.y + vy * sp, -40), m.rows * TILE - vh + 40);
       }
+      for (const mob of G.mobs) {
+        mob.moving = false;
+        if (!G.walk.on || !G.chase) continue;
+        const dx = G.walk.x - mob.x;
+        const dy = G.walk.y - mob.y;
+        const d = Math.hypot(dx, dy);
+        mob.face = dx >= 0 ? 1 : -1;
+        if (d < 14 || d > 260) continue;
+        const sp = (MONSTERS[mob.type]?.speed || 20) * 0.9 * dt;
+        mob.moving = true;
+        if (!blocked(mob.x + (dx / d) * sp, mob.y)) mob.x += (dx / d) * sp;
+        if (!blocked(mob.x, mob.y + (dy / d) * sp)) mob.y += (dy / d) * sp;
+      }
       G.mouse.wx = G.cam.x + G.mouse.x / G.zoom;
       G.mouse.wy = G.cam.y + G.mouse.y / G.zoom;
       G.hover = G.mouse.in && !G.placing && G.tool === 'select' && !G.drag ? propAt(G.mouse.wx, G.mouse.wy) : null;
@@ -253,9 +272,11 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
         else items.push({ y: p.y, p });
       }
       if (G.walk.on) items.push({ y: G.walk.y, hero: true });
+      for (const mob of G.mobs) items.push({ y: mob.y, mob });
       items.sort((a, b) => a.y - b.y);
       for (const it of items) {
-        if (it.hero) {
+        if (it.mob) drawMob(ctx, assets, it.mob.type, G.t + it.mob.id, it.mob.x, it.mob.y, it.mob.face, it.mob.moving);
+        else if (it.hero) {
           const w = G.walk;
           ctx.fillStyle = 'rgba(30,30,20,0.28)';
           ctx.beginPath();
@@ -387,6 +408,15 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
     canvasRef.current.setPointerCapture?.(e.pointerId);
     if (e.button === 2) {
       if (G.placing) return setPlacing(null);
+      const mob = [...G.mobs].reverse().find((o) => {
+        const s = mobSize(o.type);
+        return Math.abs(G.mouse.wx - o.x) <= s.w / 2 + 2 && G.mouse.wy <= o.y + 2 && G.mouse.wy >= o.y - s.h;
+      });
+      if (mob) {
+        G.mobs = G.mobs.filter((o) => o !== mob);
+        setMobCount(G.mobs.length);
+        return undefined;
+      }
       const p = propAt(G.mouse.wx, G.mouse.wy);
       if (p) remove(p.uid);
       return undefined;
@@ -475,6 +505,16 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
       setInfo(`That did not work: ${err.message}`);
     }
   };
+  const spawnMob = (type) => {
+    const vw = (canvasRef.current?.width || 600) / G.zoom;
+    const vh = (canvasRef.current?.height || 400) / G.zoom;
+    const cx = G.walk.on ? G.walk.x : G.cam.x + vw / 2;
+    const cy = G.walk.on ? G.walk.y : G.cam.y + vh / 2;
+    const a = Math.random() * Math.PI * 2;
+    const r = G.walk.on ? 50 + Math.random() * 30 : 20 + Math.random() * 40;
+    G.mobs.push({ id: G.mobSeq++, type, x: Math.round(cx + Math.cos(a) * r), y: Math.round(cy + Math.sin(a) * r * 0.6), face: -1, moving: false });
+    setMobCount(G.mobs.length);
+  };
   const clearAll = () => {
     snapshot();
     G.map.props = [];
@@ -516,12 +556,15 @@ export default function MapEditor({ assets, index, map, hero = 'retro:1', onDone
 
       <aside className="v2-side">
         <div className="v2-tabs" role="tablist">
-          {[['palette', '🧱 Palette'], ['tools', '🛠 Tools'], ...(training ? [['plan', '🗺 V2 plan']] : [])].map(([id, label]) => (
+          {[['palette', '🧱 Palette'], ...(training ? [['chars', '🧍 Characters'], ['mobs', '👹 Mobs']] : []), ['tools', '🛠 Tools'], ...(training ? [['plan', '🗺 V2 plan']] : [])].map(([id, label]) => (
             <button key={id} type="button" role="tab" aria-selected={tab === id} className={`shop-tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>{label}</button>
           ))}
         </div>
 
         {tab === 'palette' && <Palette index={index} picked={placing} onPick={(s) => { setPlacing(s); if (s) setTool('select'); }} />}
+
+        {tab === 'chars' && <CharactersPane assets={assets} current={heroId} onPick={(id) => { setHeroId(id); setWalk(true); }} />}
+        {tab === 'mobs' && <MobsPane count={mobCount} chase={chase} onChase={(v) => { setChase(v); G.chase = v; }} onSpawn={spawnMob} onClear={() => { G.mobs = []; setMobCount(0); }} />}
 
         {tab === 'tools' && (
           <section className="v2-pane">

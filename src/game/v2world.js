@@ -10,11 +10,17 @@ import { CONTAINER, footprint, isFlat } from '../v2/world';
 export const isV2Seed = (s) => /~v2$/.test(String(s));
 export const stripV2 = (s) => String(s).replace(/~v2$/, '');
 
+// Halloween: the Graveyard pack dresses the world (Free Roam's "haunted-" seeds and Survival's Halloween Graveyard map)
+export const isHalloweenSeed = (s) => /^haunted-/.test(String(s));
+export const HALLOWEEN_THEMES = ['graveyard', 'camping'];
+
 const THEMES = ['props', 'vehicles', 'houses', 'villas', 'shops', 'garden', 'camping', 'graveyard', 'police', 'fire', 'hotel', 'school', 'garage', 'military', 'worksite'];
 
 // the atlases become images the engine can draw as `v2/<theme>`
-export async function loadV2Images(img) {
-  await Promise.all(THEMES.map(async (id) => {
+export const SURVIVAL_THEMES = ['props', 'vehicles', 'military', 'garage', 'camping', 'worksite', 'police', 'houses', 'shops', 'graveyard', 'fire'];
+
+export async function loadV2Images(img, themes = THEMES) {
+  await Promise.all(themes.map(async (id) => {
     const t = await loadTheme(id);
     img[`v2/${id}`] = t.img;
   }));
@@ -41,7 +47,16 @@ const KINDS = [
   { id: 'junk', weight: 14, min: [22, 18], pick: (r) => { const l = list('props', /^Dumpster/); return l[Math.floor(r(1) * l.length)]; } },
   { id: 'graves', weight: 9, min: [20, 20], pick: (r) => { const l = list('graveyard', /^Medium_Gate(_\d+)?$/); return l[Math.floor(r(1) * l.length)]; } },
 ];
+// Halloween: graveyards and gates, a chapel, pumpkin patches and dead groves
+const pickFrom = (l, r) => l[Math.floor(r(1) * l.length)];
+const KINDS_HW = [
+  { id: 'hwgraves', weight: 30, min: [20, 20], pick: (r) => pickFrom(list('graveyard', /^(Medium|Big|High|Small)_Gate(_Red_Orb)?$/), r) },
+  { id: 'chapel', weight: 9, pick: () => list('graveyard', /^Grace_Chapel_With_Gate$/)[0] },
+  { id: 'patch', weight: 22, min: [22, 20], pick: (r) => pickFrom(list('graveyard', /^Big_(Yellow_Lights_)?Pumpkin_\d$/), r) },
+  { id: 'grove', weight: 16, min: [22, 18], pick: (r) => pickFrom(list('graveyard', /^Big_Tree_(Pumpkins_)?$/), r) },
+];
 const TOTAL = KINDS.reduce((n, k) => n + k.weight, 0);
+const TOTAL_HW = KINDS_HW.reduce((n, k) => n + k.weight, 0);
 const CELL = 30; // a place is rolled per 30x30 tiles
 
 export const BUILDING_NAMES = { house: ['Cosy House', 'Family Home', 'Little House', 'Old Villa'], shop: ['General Store', 'Corner Market', 'Fruit Stand', 'Trading Post'], civic: ['Town Hall', 'Clinic', 'Station', 'Old School'] };
@@ -58,9 +73,10 @@ function place(world, ci, cj) {
   const seed = world.seed;
   const r = (k) => hash2(ci * 31 + k, cj * 17 + k * 3, seed + 9200 + k * 7);
   let out = null;
-  if (r(0) < 0.8) {
-    let pick = r(2) * TOTAL;
-    const kind = KINDS.find((k) => (pick -= k.weight) <= 0) || KINDS[0];
+  if (r(0) < (world.hw ? 0.85 : world.sv2 ? 0.5 : 0.8)) {
+    const kinds = world.hw ? KINDS_HW : KINDS;
+    let pick = r(2) * (world.hw ? TOTAL_HW : TOTAL);
+    const kind = kinds.find((k) => (pick -= k.weight) <= 0) || kinds[0];
     const s = kind.pick(r);
     if (s) {
       const sw = Math.ceil(s.w / 16);
@@ -109,6 +125,11 @@ function spotOk(world, ox, oy, W, H) {
   }
   return true;
 }
+
+const GRAVES = /^(Small_(Black|Brown|Grey)_Tombstone|(Black|Brown|Grey)_Cross|Marble_(Brown|Grey)_Tombstone|Long_Tombstone|Wood_Cross|Wood_Large_Cross)/;
+const DEAD_TREE = /^Tree_Dead_\d+$/;
+const PUMPKIN = /^(Medium|Big|Long)_(Blood_|Yellow_Lights_)?Pumpkin/;
+const CANDLE = /^(Consumed_Candle|Big_Brown_Candle|Big_Red_Candle|Small_Red_Candle)/;
 
 // the sprites of one place, as [sprite, tileX, tileY (bottom centre), extra]
 function fill(P) {
@@ -202,6 +223,57 @@ function fill(P) {
       dec('camping', /^Tree_Dead_\d+$/, 14, cx - 9, top + 5);
       break;
     }
+    case 'hwgraves': {
+      add(s, cx, top + 4);
+      const graves = list('graveyard', GRAVES);
+      for (let j = 0; j < 4; j++) for (let i = 0; i < 5; i++) if (r(20 + j * 5 + i) > 0.25) add(graves[Math.floor(r(50 + j * 5 + i) * graves.length)], cx - 8 + i * 4, top + 9 + j * 3.5);
+      dec('graveyard', /^Marble_(Brown|Grey)_Coffin|^Silver_Coffin|^Red_Coffin|^Yellow_Coffin/, 13, cx + 8, top + 6);
+      dec('graveyard', /^Dirt_Ditch_2/, 14, cx - 8, top + 7);
+      dec('camping', DEAD_TREE, 15, cx - 10, top + 5);
+      dec('camping', DEAD_TREE, 16, cx + 10, top + 6);
+      dec('graveyard', CANDLE, 17, cx - 2, top + 8);
+      dec('graveyard', PUMPKIN, 18, cx + 3, top + 7);
+      dec('graveyard', /^Crow_(Front|Back)/, 19, cx - 5, top + 6);
+      break;
+    }
+    case 'chapel': {
+      add(s, cx, feet);
+      const graves = list('graveyard', GRAVES);
+      for (let i = 0; i < 5; i++) {
+        add(graves[Math.floor(r(20 + i) * graves.length)], cx - sw / 2 - 3, feet - 8 + i * 3);
+        add(graves[Math.floor(r(30 + i) * graves.length)], cx + sw / 2 + 3, feet - 8 + i * 3);
+      }
+      dec('graveyard', /^Candle_Holder_On$/, 6, cx - 3, feet + 2);
+      dec('graveyard', /^Candle_Holder_On$/, 7, cx + 3, feet + 2);
+      dec('graveyard', PUMPKIN, 8, cx - 6, feet + 4);
+      dec('graveyard', PUMPKIN, 9, cx + 6, feet + 4);
+      dec('camping', DEAD_TREE, 10, cx - sw / 2 - 6, feet - 1);
+      dec('camping', DEAD_TREE, 11, cx + sw / 2 + 6, feet);
+      break;
+    }
+    case 'patch': {
+      add(s, cx, top + 6);
+      const pumpkins = list('graveyard', /Pumpkin/, (x) => x.w <= 32 && !/Tree|Brunch/.test(x.name));
+      for (let i = 0; i < 14; i++) {
+        const a = r(20 + i) * Math.PI * 2;
+        const d = 3 + r(40 + i) * 7;
+        add(pumpkins[Math.floor(r(60 + i) * pumpkins.length)], cx + Math.cos(a) * d * 1.3, top + 7 + Math.sin(a) * d * 0.8);
+      }
+      dec('graveyard', /^Pumpikin_Brunch/, 6, cx - 6, top + 11);
+      dec('graveyard', /^Pumpikin_Brunch/, 7, cx + 6, top + 11);
+      dec('graveyard', /^Shovel/, 8, cx + 8, top + 5);
+      dec('graveyard', /^Tree_Trunk_Pumpkin$/, 9, cx - 9, top + 6);
+      dec('camping', DEAD_TREE, 10, cx + 10, top + 4);
+      break;
+    }
+    case 'grove': {
+      add(s, cx, top + 7);
+      for (let i = 0; i < 6; i++) dec('camping', DEAD_TREE, 20 + i, cx - 9 + r(30 + i) * 18, top + 3 + r(40 + i) * 12);
+      for (let i = 0; i < 5; i++) dec('graveyard', /^Brown_\d_Mushrooms|^Red_Mushrooms|^Skull$|^Ribcage_1$|^Stone_\d/, 50 + i, cx - 8 + r(60 + i) * 16, top + 8 + r(70 + i) * 6);
+      dec('graveyard', /^Skeleton$/, 12, cx + 2, top + 12);
+      dec('graveyard', /^Crow_(Left|Right)/, 13, cx - 3, top + 10);
+      break;
+    }
     default:
   }
   return out;
@@ -234,7 +306,7 @@ export function addV2Chunk(world, chunk, cx, cy) {
         if (world.v2removed?.has(id)) continue;
         // the little things around a place are skipped where a tree or the water is
         if (n > 1 && (world.treeAt(x >> 5, y >> 5) || world.type(x >> 4, y >> 4) !== 2 || world.isCleared(x >> 4, y >> 4))) continue;
-        addProp(world, chunk, s, x, y, id, extra);
+        addProp(world, chunk, s, x, y, id, world.sv2 ? null : extra); // (in Survival the buildings are ruins: nothing to open or enter)
       }
     }
   }
@@ -268,6 +340,18 @@ const SCATTER = [
   ['vehicles', /^Car_(Left|Right|Up|Down)_\d+$/, 3],
 ];
 const SCATTER_TOTAL = SCATTER.reduce((n, e) => n + e[2], 0);
+// on a Halloween map the meadows hold tombstones, pumpkins, candles and dead trees instead
+const SCATTER_HW = [
+  ['graveyard', GRAVES, 14],
+  ['graveyard', /^(Medium|Big|Long|Little|Tiny)_(Blood_|Yellow_Lights_)?Pumpkin/, 12],
+  ['graveyard', /^(Consumed_Candle|Big_Brown_Candle|Big_Red_Candle|Medium_Red_Candle|Candle_Holder_On)/, 5],
+  ['graveyard', /^(Skull|Bones|Ribcage_1|Skeleton|Shovel|Crow_Front|Crow_Back)/, 4],
+  ['graveyard', /^(Brown_\d_Mushrooms|Red_Mushrooms|Stone_\d|Grass_Tufts)/, 6],
+  ['graveyard', /^Marble_(Brown|Grey)_Coffin|^Squared_(Closed|Open)_Coffin/, 3],
+  ['camping', DEAD_TREE, 10],
+  ['camping', /^Tree_Dead_Stick_\d+$/, 6],
+];
+const SCATTER_HW_TOTAL = SCATTER_HW.reduce((n, e) => n + e[2], 0);
 
 function scatter(world, chunk, cx, cy) {
   const s = world.seed;
@@ -277,11 +361,12 @@ function scatter(world, chunk, cx, cy) {
       const y = by * 2;
       // more along the edge of a cottage's yard, a little over open meadow
       const near = world.isCleared(x - 5, y) || world.isCleared(x + 5, y) || world.isCleared(x, y - 5) || world.isCleared(x, y + 5);
-      if (hash2(bx, by, s + 9300) >= (near ? 0.085 : 0.03)) continue;
+      if (hash2(bx, by, s + 9300) >= (world.hw ? (near ? 0.11 : 0.06) : near ? 0.085 : 0.03)) continue;
       if (Math.hypot(x, y) < 10) continue; // the starting spot stays clear
       if (world.treeAt(bx, by) || world.isCleared(x, y) || world.type(x, y) !== 2 || world.type(x + 1, y + 1) !== 2 || world.elevation(x, y) < 0.46) continue;
-      let pick = hash2(bx, by, s + 9301) * SCATTER_TOTAL;
-      const entry = SCATTER.find((e) => (pick -= e[2]) <= 0) || SCATTER[0];
+      const table = world.hw ? SCATTER_HW : SCATTER;
+      let pick = hash2(bx, by, s + 9301) * (world.hw ? SCATTER_HW_TOTAL : SCATTER_TOTAL);
+      const entry = table.find((e) => (pick -= e[2]) <= 0) || table[0];
       const l = list(entry[0], entry[1]);
       if (!l.length) continue;
       const sp = l[Math.floor(hash2(bx, by, s + 9302) * l.length)];
@@ -309,7 +394,7 @@ export function addProp(world, chunk, s, x, y, id, extra) {
     if (rect) chunk.rects.push({ vid: id, ...rect });
     return;
   }
-  if (CONTAINER.test(s.name)) {
+  if (CONTAINER.test(s.name) && !world.sv2) {
     chunk.objects.push({ kind: 'chest', inter: 'chest', id: `v2c${id}`, vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, lootKind: lootKind(s.name), x, y });
     if (rect) chunk.rects.push({ vid: id, ...rect });
     return;

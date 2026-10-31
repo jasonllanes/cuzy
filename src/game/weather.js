@@ -7,6 +7,7 @@ export const WEATHER = {
   clear: { name: 'Clear', icon: '☀️', night: '🌙', cloud: 0.3 },
   cloudy: { name: 'Cloudy', icon: '☁️', night: '☁️', cloud: 0.9 },
   rain: { name: 'Rain', icon: '🌧️', night: '🌧️', cloud: 1 },
+  storm: { name: 'Thunderstorm', icon: '⛈️', night: '⛈️', cloud: 1 }, // rain with lightning and thunder
   snow: { name: 'Snow', icon: '❄️', night: '❄️', cloud: 0.85 },
 };
 
@@ -14,10 +15,10 @@ const BLOCK = 3; // hours
 
 // [kind, share] by kind of world
 const ODDS = {
-  meadow: [['clear', 0.42], ['cloudy', 0.2], ['rain', 0.24], ['snow', 0.14]],
-  mild: [['clear', 0.36], ['cloudy', 0.3], ['rain', 0.34]], // Survival: no snow
-  wet: [['clear', 0.15], ['cloudy', 0.3], ['rain', 0.55]], // the swamp
-  dry: [['clear', 0.6], ['cloudy', 0.3], ['rain', 0.1]],
+  meadow: [['clear', 0.38], ['cloudy', 0.2], ['rain', 0.2], ['storm', 0.1], ['snow', 0.12]],
+  mild: [['clear', 0.38], ['cloudy', 0.28], ['rain', 0.24], ['storm', 0.1]], // Survival: no snow, and a storm is a rare treat
+  wet: [['clear', 0.14], ['cloudy', 0.28], ['rain', 0.46], ['storm', 0.12]], // the swamp
+  dry: [['clear', 0.6], ['cloudy', 0.3], ['rain', 0.08], ['storm', 0.02]],
   frost: [['snow', 0.8], ['cloudy', 0.2]],
 };
 
@@ -32,7 +33,7 @@ const pick = (table, r) => {
 
 // `climate` is one of the keys of ODDS, or 'none' for indoor maps
 export function weatherAt(seed, day, hour, climate = 'meadow') {
-  if (climate === 'none') return { kind: 'clear', k: 1, cloud: 0.3, rain: 0, snow: 0, indoors: true };
+  if (climate === 'none') return { kind: 'clear', k: 1, cloud: 0.3, rain: 0, storm: 0, snow: 0, indoors: true };
   const total = (day - 1) * 24 + hour;
   const block = Math.floor(total / BLOCK);
   const frac = (total - block * BLOCK) / BLOCK;
@@ -45,7 +46,8 @@ export function weatherAt(seed, day, hour, climate = 'meadow') {
     kind: k >= 0.5 || prev === kind ? kind : prev,
     k,
     cloud: WEATHER[prev].cloud + (WEATHER[kind].cloud - WEATHER[prev].cloud) * k,
-    rain: amount('rain'),
+    rain: amount('rain') + amount('storm'), // a thunderstorm is rain too
+    storm: amount('storm'),
     snow: amount('snow'),
   };
 }

@@ -6,10 +6,12 @@ import ScreenSettings from './ScreenSettings';
 import AboutContent from './AboutContent';
 import AccessForm from './AccessForm';
 import { isUnlocked, lockAgain } from '../game/access';
+import Avatar from './Avatar';
+import V2Sprite from './V2Sprite';
 
 
 // The main menu: Play, Multiplay, Settings, About and Exit, and the pages behind them.
-export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, onTrainingV2, onV2, name, setName, online, notice = '' }) {
+export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, onTrainingV2, onV2, name, setName, online, notice = '', assets }) {
   const [gone, setGone] = useState(false);
   const [msg, setMsg] = useState('');
   const [access, setAccess] = useState(isUnlocked); // the developer tools are locked until the code is typed in Settings
@@ -36,9 +38,9 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, o
   return (
     <div className="panel menu-card home-card">
       <header className="logo">
-        <span className="logo-spark">✿</span>
+        <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_1" scale={3} /></span>
         <h1>Cuzy</h1>
-        <span className="logo-spark">✿</span>
+        <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_2" scale={3} /></span>
       </header>
       <p className="tagline">a tiny cozy world to explore</p>
 
@@ -46,23 +48,23 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, o
       {view === 'home' && (
         <nav className="home-menu" aria-label="Main menu">
           <button type="button" className="home-btn play" onClick={onPlay}>
-            <b>▶ Play Solo</b>
+            <b><span className="home-ico">{assets ? <Avatar assets={assets} id="v2:scout3" size={56} /> : null}</span>Play Solo</b>
             <small>Explore on your own, against computer rivals, or survive the horde</small>
           </button>
           <button type="button" className="home-btn" onClick={onMulti}>
-            <b>👥 Multiplayer</b>
-            <small>{online ? '🟢 See the open rooms, or create your own' : '🟠 See the open rooms, or create your own (connecting…)'}</small>
+            <b><span className="home-ico">{assets ? <><Avatar assets={assets} id="v2:scout1" size={50} /><Avatar assets={assets} id="v2:postman2" size={50} /></> : null}</span>Multiplayer</b>
+            <small><i className={`status-dot ${online ? 'on' : ''}`} />{online ? 'See the open rooms, or create your own' : 'See the open rooms, or create your own (connecting…)'}</small>
           </button>
           <button type="button" className="home-btn" onClick={() => setView('settings')}>
-            <b>⚙️ Settings</b>
+            <b><span className="home-ico"><V2Sprite theme="worksite" name="Tool_Box_1" scale={1.25} /></span>Settings</b>
             <small>Sound, your name and saved games</small>
           </button>
           <button type="button" className="home-btn" onClick={() => setView('about')}>
-            <b>📖 About</b>
+            <b><span className="home-ico"><img src={`${import.meta.env.BASE_URL}assets/items/book_01.png`} alt="" width="28" height="32" /></span>About</b>
             <small>How to play and who made the art</small>
           </button>
           <button type="button" className="home-btn exit" onClick={() => { setGone(false); setView('exit'); }}>
-            <b>🚪 Exit</b>
+            <b><span className="home-ico"><V2Sprite theme="worksite" name="Door_1_1" scale={0.8} /></span>Exit</b>
           </button>
         </nav>
       )}

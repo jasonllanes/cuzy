@@ -4,8 +4,9 @@ import { DIFFICULTY } from '../game/monsters';
 import { mapNameOf } from '../game/maps';
 import { randomName } from '../game/rng';
 import SpritePreview from './SpritePreview';
+import V2Sprite from './V2Sprite';
 
-// Multiplay, straight from the main menu: your name and hero are already saved, so it is only "Show all rooms" or "Create a room".
+// Multiplay, straight from the main menu: your name and hero are already saved, so it is only "Show all rooms", "Join through a code" or "Create a room".
 // (The name and hero can still be changed from the strip at the top.)
 export default function MultiMenu({ assets, view, setView, name, setName, hero, setHero, status, online, rooms, problem, error, busy, code, setCode, join, onCreate, onBack, offlineText }) {
   const named = !!name.trim();
@@ -58,11 +59,11 @@ export default function MultiMenu({ assets, view, setView, name, setName, hero, 
   return (
     <div className="panel menu-card home-card">
       <header className="logo">
-        <span className="logo-spark">✿</span>
+        <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_1" scale={3} /></span>
         <h1>Cuzy</h1>
-        <span className="logo-spark">✿</span>
+        <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_2" scale={3} /></span>
       </header>
-      <p className="tagline">{view === 'rooms' ? 'open rooms' : 'play together'}</p>
+      <p className="tagline">{view === 'rooms' ? 'open rooms' : view === 'code' ? 'join with a code' : 'play together'}</p>
 
       {view === 'multi' && (
         <section className="page">
@@ -73,7 +74,11 @@ export default function MultiMenu({ assets, view, setView, name, setName, hero, 
           <nav className="home-menu" aria-label="Multiplay">
             <button type="button" className="home-btn play" disabled={!named || editing} onClick={() => setView('rooms')}>
               <b>🔎 Show all rooms</b>
-              <small>{!online ? '🟠 Connecting…' : rooms.length ? `🟢 ${rooms.length} open room${rooms.length > 1 ? 's' : ''} right now` : '🟢 Nobody is hosting yet, or join with a code'}</small>
+              <small>{!online ? '🟠 Connecting…' : rooms.length ? `🟢 ${rooms.length} open room${rooms.length > 1 ? 's' : ''} right now` : '🟢 Nobody is hosting yet. Create a room or join with a code'}</small>
+            </button>
+            <button type="button" className="home-btn" disabled={!named || editing} onClick={() => setView('code')}>
+              <b>🔑 Join through a code</b>
+              <small>A friend gave you a room code or an invite? Type it in</small>
             </button>
             <button type="button" className="home-btn" disabled={!named || editing} onClick={onCreate}>
               <b>➕ Create a room</b>
@@ -87,6 +92,42 @@ export default function MultiMenu({ assets, view, setView, name, setName, hero, 
         </section>
       )}
 
+      {view === 'code' && (
+        <section className="page">
+          <h2 className="page-title">🔑 Join through a code</h2>
+          {profile}
+          {editor}
+          {notices}
+          <label className="sub-label" htmlFor="room-code">Room code</label>
+          <div className="row">
+            <input
+              id="room-code"
+              className="code-input"
+              value={code}
+              maxLength={8}
+              placeholder="ABCD"
+              autoComplete="off"
+              autoFocus
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (code.trim() && online && named && !busy) join(code.trim());
+                }
+              }}
+            />
+            <button type="button" className="btn go" disabled={busy || !online || !named || !code.trim()} onClick={() => join(code.trim())}>
+              {busy ? 'Joining…' : 'Join'}
+            </button>
+          </div>
+          <p className="hint">The host shares a short code (like ABCD) from the room screen, or an invite link that opens the game with the code filled in.</p>
+          <div className="nav-row">
+            <button type="button" className="btn ghost" onClick={() => setView('multi')}>← Back</button>
+            <button type="button" className="btn" onClick={() => setView('rooms')}>🔎 Show all rooms</button>
+          </div>
+        </section>
+      )}
+
       {view === 'rooms' && (
         <section className="page">
           <h2 className="page-title">🔎 All rooms</h2>
@@ -94,7 +135,7 @@ export default function MultiMenu({ assets, view, setView, name, setName, hero, 
           {editor}
           {notices}
           <div className="room-list">
-            {rooms.length === 0 && <div className="room-empty">No rooms yet. Create one, or join a friend with their code below.</div>}
+            {rooms.length === 0 && <div className="room-empty">No rooms yet. Create one, or join a friend through a code.</div>}
             {rooms.map((r) => (
               <div className="room-row" key={r.code}>
                 <div className="room-info">

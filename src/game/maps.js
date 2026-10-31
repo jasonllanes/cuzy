@@ -22,6 +22,8 @@ export const SURVIVAL_MAPS = [
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain' },
   { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'Survive on an endless wooden floor of pale and dark boards.', ground: 'bg', trees: null, climate: 'mild', tileset: 'wood' },
   { id: 'mixed', icon: '🌍', name: 'Open World', blurb: 'Every biome in one endless world: islands, lakes, marsh, lava, beach, roads and mountains, each with its own monsters.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
+  // Halloween: graveyards, pumpkin patches and dead trees from the Graveyard pack, under a purple dusk
+  { id: 'haunted', icon: '🎃', name: 'Halloween Graveyard', blurb: 'Graveyards, pumpkin patches and dead groves under a purple dusk. Happy Halloween!', ground: 'bg_dark', trees: 'dark', climate: 'wet', halloween: true },
 ];
 
 // Free Roam (and Wave Defense) maps: each is a hand-picked world with a name. The seed behind it is fixed.
@@ -36,6 +38,7 @@ export const FREE_MAPS = [
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads and mountain paths.', seed: 'mountain-206' },
   { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'An endless pale and dark wooden floor, with cottages standing on it.', seed: 'wood-119' },
   { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush green islands with flowers, ringed by earthen cliffs and deep teal sea.', seed: 'emerald-615' },
+  { id: 'haunted', icon: '🎃', name: 'Halloween Graveyard', blurb: 'Graveyards behind iron gates, a chapel, pumpkin patches and dead groves, all under a purple dusk.', seed: 'haunted-666' },
   { id: 'mixed', icon: '🌍', name: 'Open World', blurb: 'An endless world made of every biome side by side: islands, lakes, marsh, lava, beach, roads and mountains. Each region has its own monsters, and the bosses change with the land.', seed: 'mixed-640' },
 ];
 

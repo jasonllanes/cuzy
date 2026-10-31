@@ -40,9 +40,9 @@ function layout(base, theme) {
       bar: { x: left, y: floor - bh - 9, w: bw },
       ring: { x0: left - 34, x1: left + bw + 33, y0: floor - bh - 39, y1: floor + 40, gate: [left + 8, left + bw - 7] },
       pads: [
-        { kind: 'thrower', x: left - 18, y: floor + 20 },
+        { kind: 'pistol', x: left - 18, y: floor + 20 },
         { kind: 'guard', x: left - 2, y: floor + 20 },
-        { kind: 'sniper', x: left + bw + 9, y: floor + 20 },
+        { kind: 'rifle', x: left + bw + 9, y: floor + 20 },
       ],
     };
   }
@@ -55,9 +55,9 @@ function layout(base, theme) {
     bar: { x: left + 6, y: floor - 96, w: 60 },
     ring: { x0: left - 18, x1: left + 94, y0: floor - 104, y1: floor + 40, gate: [left + 22, left + 70] },
     pads: [
-      { kind: 'thrower', x: left + 2, y: floor + 20 },
+      { kind: 'pistol', x: left + 2, y: floor + 20 },
       { kind: 'guard', x: left + 18, y: floor + 20 },
-      { kind: 'sniper', x: left + 80, y: floor + 20 },
+      { kind: 'rifle', x: left + 80, y: floor + 20 },
     ],
   };
 }
@@ -102,7 +102,7 @@ export class WaveSim {
   buildRing() {
     const { x0, x1, y0, y1, gate: [g0, g1] } = this.ring;
     const gate = (x) => x > g0 && x < g1;
-    // Survival's ring is made of sturdier reinforced planks, laid flat on top and bottom, upright on the sides
+    // Survival's ring is made of sturdier fence sections, flat along the top and bottom, upright on the sides
     const hp = this.theme === 'apoc' ? Math.round(this.diff.barricadeHp * 1.4) : this.diff.barricadeHp;
     const post = (x, y, v) => this.barricades.push({ id: this.nextId++, x, y, hp, max: hp, v, r: this.theme === 'apoc' });
     for (let x = x0; x <= x1; x += 16) {
@@ -309,6 +309,11 @@ export class WaveSim {
     m.anim += dt;
     m.t += dt;
     if (m.state === 'dead') return;
+    if (m.stunT > 0) {
+      // stunned by a grenade: it stands still
+      m.stunT -= dt;
+      return;
+    }
     const slow = this.slowT > 0 ? POWER_SLOW : 1;
     m.cd -= dt * slow;
     m.atk = Math.max(0, m.atk - dt);
@@ -513,7 +518,13 @@ export class WaveSim {
     if (m.cd > 0) return;
     m.cd = 1.1;
     m.atk = 0.3;
-    this.baseHp -= def.sd * this.diff.dmg * HOUSE_SOFTNESS;
+    this.hitHouse(def.sd * this.diff.dmg * HOUSE_SOFTNESS, m.x, m.y);
+  }
+
+  // the shelter takes a hit: everyone sees it shake and splinter (the event carries where it landed)
+  hitHouse(amount, x, y) {
+    this.baseHp -= amount;
+    this.emit({ type: 'bhit', n: Math.round(amount * 10) / 10, x: Math.round(x), y: Math.round(y) });
   }
 
   strikeBarricade(m, def, b) {
@@ -553,7 +564,7 @@ export class WaveSim {
         }
       }
       if (s.x > this.house.x && s.x < this.house.x + this.house.w && s.y > this.house.y && s.y < this.house.y + this.house.h) {
-        this.baseHp -= s.sd * HOUSE_SOFTNESS;
+        this.hitHouse(s.sd * HOUSE_SOFTNESS, s.x, s.y);
         return false;
       }
       return s.life > 0;
@@ -647,7 +658,7 @@ export class WaveSim {
 
   recruit(kind) {
     const def = ALLIES[kind];
-    const pad = this.pads.find((p) => p.kind === kind);
+    const pad = this.pads.find((p) => p.kind === kind) || this.pads.find((p) => p.kind === def?.pad);
     if (!def || !pad || this.allies.length >= teamCap(this.baseLevel)) return false;
     const n = this.allies.length;
     let ax = pad.x + ((n % 3) - 1) * 12;
@@ -660,7 +671,7 @@ export class WaveSim {
       ax = px = this.sprite.x + Math.round(([30, 18, 42, 10, 50, 24, 36, 6][k % 8] * this.sprite.w) / 61);
       ay = py = this.sprite.y + Math.round(this.sprite.h * 0.35);
     }
-    this.allies.push({ id: this.nextId++, kind, x: px, y: py, ax, ay, dir: 0, cd: 0.8, anim: Math.random() * 3, moving: false, atk: 0 });
+    this.allies.push({ id: this.nextId++, kind, x: px, y: py, ax, ay, dir: 0, aim: Math.PI / 2, cd: 0.8, anim: Math.random() * 3, moving: false, atk: 0 });
     this.emit({ type: 'recruit', kind, x: px, y: py });
     return true;
   }
@@ -687,9 +698,12 @@ export class WaveSim {
         const dy = target.y - a.y;
         a.dir = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 2 : 3) : dy >= 0 ? 0 : 1;
         if (def.ai === 'ranged') {
+          // it turns to face its target, then fires the gun it carries along that line
+          const cy = a.y - 10;
+          a.aim = Math.atan2(target.y - 8 - cy, dx);
           if (a.cd <= 0) {
-            const len = Math.hypot(dx, dy) || 1;
-            this.ashots.push({ x: a.x, y: a.y - 10, vx: (dx / len) * 150, vy: ((dy - 4) / len) * 150, dmg: def.dmg, life: 1.1 });
+            const sp = def.shotSpeed;
+            this.ashots.push({ x: a.x + Math.cos(a.aim) * 10, y: cy + Math.sin(a.aim) * 10, vx: Math.cos(a.aim) * sp, vy: Math.sin(a.aim) * sp, dmg: def.dmg, life: def.range / sp + 0.1, k: def.gun === 'plasma' ? 2 : 1, pierce: def.pierce || 0, hit: [] });
             a.cd = def.rate;
             a.atk = 0.25;
           }
@@ -731,7 +745,13 @@ export class WaveSim {
         const ox = (s.x - m.x) / (7 * sc + 2);
         const oy = (s.y - (m.y - 8 * sc)) / (9 * sc + 2);
         if (ox * ox + oy * oy < 1) {
+          if (s.hit?.includes(m.id)) continue; // a plasma bolt that went through this one already
           this.hitMonster(m.id, s.dmg, s.x - s.vx, s.y - s.vy, 60, true, 'ally');
+          if (s.pierce > 0) {
+            s.pierce--;
+            s.hit.push(m.id);
+            continue;
+          }
           return false;
         }
       }
@@ -776,7 +796,7 @@ export class WaveSim {
       b: this.barricades.map((b) => [b.id, b.x, b.y, Math.round(b.hp * 10) / 10, b.max, b.v ? 1 : 0, b.r ? 1 : 0]),
       s: this.shots.map((s) => [Math.round(s.x), Math.round(s.y), s.spit ? 1 : 0]),
       a: this.allies.map((a) => [a.id, ALLY_KINDS.indexOf(a.kind), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, a.dir, a.moving ? 1 : 0, a.atk > 0 ? 1 : 0]),
-      as: this.ashots.map((s) => [Math.round(s.x), Math.round(s.y)]),
+      as: this.ashots.map((s) => [Math.round(s.x), Math.round(s.y), s.k || 0, Math.round(Math.atan2(s.vy, s.vx) * 100)]),
       bl: this.baseLevel,
       k: Object.entries(this.kills),
       wk: this.wrecks.map((r) => [r.x, r.y, r.v ? 1 : 0]),
@@ -887,7 +907,7 @@ export class WaveMirror {
       Object.assign(a, { kind: ALLY_KINDS[ki], tx: x, ty: y, dir, moving: !!moving, atk: atk ? 0.25 : a.atk || 0 });
       return a;
     });
-    this.ashots = (s.as || []).map(([x, y]) => ({ x, y }));
+    this.ashots = (s.as || []).map(([x, y, k, ang]) => ({ x, y, k: k || 0, ang: (ang || 0) / 100 }));
     this.baseLevel = s.bl || 0;
     this.kills = Object.fromEntries(s.k || []);
     this.wrecks = (s.wk || []).map(([x, y, v]) => ({ x, y, v: !!v }));

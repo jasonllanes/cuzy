@@ -85,3 +85,18 @@
 /* a V2 character's face on a hero card */
 .v2-face { display: block; margin: 0 auto; background-repeat: no-repeat; image-rendering: pixelated; }
 .v2-chars .hero-card { min-height: 130px; }
+
+/* the Training Room's character and monster lists */
+.v2-roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; }
+.v2-char { all: unset; box-sizing: border-box; display: grid; justify-items: center; gap: 2px; padding: 6px 2px; cursor: pointer; border: 2px solid var(--wood-light, #e6cfa8); border-radius: 10px; background: #fff7ea; text-align: center; }
+.v2-char:hover { background: #fff0d6; }
+.v2-char.on { border-color: var(--rose, #e87c96); background: #fff0f3; }
+.v2-char small { font-size: 0.66rem; line-height: 1.1; }
+.v2-mobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.v2-mob { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 48px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 6px; cursor: pointer; border: 2px solid var(--wood-light, #e6cfa8); border-radius: 10px; background: #fff7ea; }
+.v2-mob:hover { background: #fff0d6; border-color: var(--rose, #e87c96); }
+.v2-mob-ico { grid-row: 1 / 3; display: grid; place-items: center; width: 48px; height: 48px; overflow: hidden; background: #6d8f6a; border-radius: 8px; }
+.v2-mob b { font: 700 0.78rem var(--pixel); line-height: 1.15; align-self: end; }
+.v2-mob small { font-size: 0.68rem; color: var(--ink-soft); align-self: start; }
+.v2-tabs { flex-wrap: wrap; }
+.v2-tabs .shop-tab { flex: 1 1 auto; padding: 6px 10px; font-size: 0.85rem; }

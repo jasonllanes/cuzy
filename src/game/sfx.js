@@ -105,6 +105,12 @@ const SOUNDS = {
     noise({ dur: 0.45, vol: 0.45, f0: 1100, f1: 70, q: 0.6 });
     tone({ type: 'sawtooth', f0: 130, f1: 38, dur: 0.4, vol: 0.32 });
   },
+  // thunder: a sharp crack, then a long low rumble
+  thunder: () => {
+    noise({ dur: 0.14, vol: 0.34, f0: 5200, f1: 900, q: 0.8 });
+    noise({ dur: 1.8, vol: 0.55, f0: 420, f1: 55, q: 0.6, at: 0.04 });
+    tone({ type: 'sawtooth', f0: 72, f1: 26, dur: 1.6, vol: 0.3, at: 0.06 });
+  },
   plasma: () => {
     tone({ type: 'sawtooth', f0: 900, f1: 220, dur: 0.16, vol: 0.2 });
     tone({ type: 'sine', f0: 1500, f1: 500, dur: 0.12, vol: 0.14, at: 0.01 });

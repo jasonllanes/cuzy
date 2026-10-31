@@ -19,7 +19,7 @@ export const COMMANDS = [
   { name: 'give', usage: '-give gem 5', desc: 'Put items in your backpack (-give list)' },
   { name: 'sword', usage: '-sword ember', desc: 'Unlock and equip a sword (-sword all)' },
   { name: 'time', usage: '-time 12', desc: 'Set the hour of the day (0-24)' },
-  { name: 'weather', usage: '-weather rain', desc: 'clear, cloudy, rain, snow or auto' },
+  { name: 'weather', usage: '-weather rain', desc: 'clear, cloudy, rain, storm, snow or auto' },
   { name: 'dimension', usage: '-dimension ember', desc: 'Step into a realm now: ember, frost, void (or crypt, cave, ruin)' },
   { name: 'tp', usage: '-tp 40 -20', desc: 'Teleport to a tile' },
   { name: 'clear', usage: '-clear', desc: 'Clear the chat' },
@@ -113,7 +113,7 @@ export function runCommand(game, text) {
     }
     case 'weather': {
       const k = (args[0] || '').toLowerCase();
-      if (k !== 'auto' && !WEATHER[k]) return 'Usage: -weather clear | cloudy | rain | snow | auto';
+      if (k !== 'auto' && !WEATHER[k]) return 'Usage: -weather clear | cloudy | rain | storm | snow | auto';
       game.weatherForce = k === 'auto' ? null : k;
       game.weatherT = 0;
       return k === 'auto' ? '🌦 The weather is back to normal.' : `🌦 ${WEATHER[k].name} (just for you).`;

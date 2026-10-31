@@ -59,8 +59,8 @@ const THEMES = {
   depot: { bpm: 100, root: 48, scale: MINOR, prog: [[0, MIN], [0, MIN], [8, MAJ], [7, MIN]], lead: { type: 'square', vol: 0.12, density: 0.2 }, arp: { type: 'square', vol: 0.08 }, bass: { type: 'sawtooth', vol: 0.3, drive: true }, pad: { type: 'sawtooth', vol: 0.05 }, drum: 0.8, echo: 0.2 },
 };
 
-const FREE_THEME = { clover: 'meadow', tidal: 'island', emerald: 'island', crystal: 'crystal', marsh: 'marsh', lava: 'lava', beach: 'shore', asphalt: 'wasteland', mountain: 'mountain', mixed: 'meadow', wood: 'halls' };
-const SURVIVAL_THEME = { ruins: 'ruins', frost: 'frost', autumn: 'dust', dust: 'dust', swamp: 'marsh', depot: 'depot', tidal: 'island', emerald: 'island', crystal: 'crystal', marsh: 'marsh', lava: 'lava', beach: 'shore', asphalt: 'wasteland', mountain: 'mountain', wood: 'halls', mixed: 'ruins' };
+const FREE_THEME = { clover: 'meadow', tidal: 'island', emerald: 'island', crystal: 'crystal', marsh: 'marsh', lava: 'lava', beach: 'shore', asphalt: 'wasteland', mountain: 'mountain', mixed: 'meadow', wood: 'halls', haunted: 'marsh' };
+const SURVIVAL_THEME = { ruins: 'ruins', frost: 'frost', autumn: 'dust', dust: 'dust', swamp: 'marsh', depot: 'depot', tidal: 'island', emerald: 'island', crystal: 'crystal', marsh: 'marsh', lava: 'lava', beach: 'shore', asphalt: 'wasteland', mountain: 'mountain', wood: 'halls', mixed: 'ruins', haunted: 'marsh' };
 
 // which tune a world's seed gets
 export function themeForSeed(seed) {

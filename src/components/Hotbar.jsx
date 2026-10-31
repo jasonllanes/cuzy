@@ -3,11 +3,11 @@ import ItemIcon from './ItemIcon';
 
 // The first nine backpack slots, selectable with the 1-9 keys.
 // Drag a stack onto another slot to rearrange; let go anywhere else to drop it on the ground.
-export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDropOut, children }) {
+export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDropOut, sword = null, title = '🎯 Items & throwables · right-click to throw · drag out to drop', children }) {
   const current = slots[selected];
   return (
     <div className="hotbar" role="toolbar" aria-label="Hotbar">
-      <span className="hot-title">🎯 Items &amp; throwables · right-click to throw · drag out to drop</span>
+      <span className="hot-title">{title}</span>
       {slots.slice(0, 9).map((s, i) => (
         <button
           key={i}
@@ -32,12 +32,12 @@ export default function Hotbar({ slots, selected, onSelect, onUse, onMove, onDro
             // nobody took it: it was let go away from the slots (a cancelled drag reports 0,0)
             if (e.dataTransfer.dropEffect === 'none' && (e.clientX || e.clientY)) onDropOut(i);
           }}
-          title={s ? `${ITEMS[s.id].name} (click again to use, drag out to drop)` : 'Empty'}
+          title={s ? `${s.id === 'sword' && sword ? sword.name : ITEMS[s.id].name} (click again to use, drag out to drop)` : 'Empty'}
         >
           <span className="hot-key">{i + 1}</span>
-          {s && <ItemIcon id={s.id} scale={3} />}
+          {s && (s.id === 'sword' && sword ? <span className="item-icon" style={{ width: sword.w, height: sword.h, backgroundImage: `url(${sword.url})`, backgroundSize: `${sword.w}px ${sword.h}px` }} /> : <ItemIcon id={s.id} scale={3} />)}
           {s && s.qty > 1 && <span className="qty">{s.qty}</span>}
-          {selected === i && current && <span className="hot-name">{ITEMS[current.id].name}</span>}
+          {selected === i && current && <span className="hot-name">{current.id === 'sword' && sword ? sword.name : ITEMS[current.id].name}</span>}
         </button>
       ))}
       {children}

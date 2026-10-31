@@ -54,3 +54,16 @@
 .intro-wait > * { animation: intro-in 0.4s 0.8s backwards; }
 .intro-fade { position: absolute; inset: 0; z-index: 60; background: #000; pointer-events: none; animation: fade-out 0.7s ease-out forwards; }
 @keyframes fade-out { to { opacity: 0; } }
+
+/* the scenes in Modern Exteriors art */
+.intro-vehicle.v2 { width: auto; line-height: 0; }
+.intro-vehicle.v2 .v2s { display: block; }
+.intro.sky.arriving .intro-vehicle.v2 { animation: bob 1.6s ease-in-out infinite alternate, descend-v2 3.2s ease-in forwards; }
+@keyframes descend-v2 { to { top: 46%; } }
+.intro.night .intro-vehicle.v2 { width: auto; }
+.intro-bus.v2 { width: 160px; height: 160px; background-color: transparent; background-repeat: no-repeat; background-position: center bottom; background-size: contain; border: 0; box-shadow: none; border-radius: 0; image-rendering: pixelated; bottom: 24%; }
+.intro-town { position: absolute; left: 0; right: 0; top: 3px; height: 0; }
+.intro-prop { position: absolute; bottom: 0; line-height: 0; }
+.intro-talk { display: flex; align-items: center; gap: 14px; }
+.intro-say { flex: 1; min-width: 0; }
+.intro-hero { flex: none; display: grid; place-items: center; width: 68px; height: 68px; background: #fff3df; border: 3px solid var(--wood); border-radius: 14px; overflow: hidden; }
