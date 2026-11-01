@@ -510,14 +510,11 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             {gameMode === 'survival' && (
               <div className="wave-setup">
                 <p className="hint">
-                  Survive <b>10 waves</b> of zombies around a container shelter, with a monster boss at the end.
-                  {mode === 'together' ? ' Everyone in the room defends the same base.' : ''}
-                  {' '}The host can change the difficulty at any time in the room settings.
+                  Survive <b>10 waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. 👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5, {DIFFICULTY[difficulty].boss10} on wave 10. The difficulty can be changed in the room settings.
                 </p>
-                <p className="hint">👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5 and {DIFFICULTY[difficulty].boss10} on wave 10.</p>
-                <div className="diff-row" role="radiogroup" aria-label="Difficulty">
+              <div className="diff-row" role="radiogroup" aria-label="Difficulty">
                   {DIFFICULTY_IDS.map((id) => (
-                    <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} onClick={() => setDifficulty(id)}>
+                    <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} title={DIFFICULTY[id].blurb} onClick={() => setDifficulty(id)}>
                       <b>{DIFFICULTY[id].name}</b>
                       <small>{DIFFICULTY[id].blurb}</small>
                     </button>
@@ -528,14 +525,13 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
 
             <div className="layout-box">
               <div className="layout-row">
-                <button type="button" className="btn" onClick={() => { setFresh(true); setRoll(newRoll()); }}>🎲 Generate a new layout</button>
+                <button type="button" className="btn" title="Press again for another one: same tiles, but the land, trees and objects are placed anew" onClick={() => { setFresh(true); setRoll(newRoll()); }}>🎲 Generate a new layout</button>
                 <span className="layout-tag">{fresh ? `New layout #${roll}` : 'Original layout'}</span>
                 {fresh && <button type="button" className="btn ghost small-btn" onClick={() => setFresh(false)}>↺ Original</button>}
               </div>
-              <small>Press it again and again for a different map made of the same tiles: the land, trees, houses and objects are all placed anew. The background shows it.</small>
             </div>
             <div className="preview-row">
-              <button type="button" className="btn" onClick={() => setPv({ roll: fresh ? roll : null })}>👁 Preview the map</button>
+              <button type="button" className="btn" title="See the whole map full screen and walk around it. You can generate another one there before you decide." onClick={() => setPv({ roll: fresh ? roll : null })}>👁 Preview the map</button>
               <small>See the whole map full screen and walk around it. You can generate another one there before you decide.</small>
             </div>
 
@@ -555,22 +551,21 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                   <select value={max} onChange={(e) => setMax(Number(e.target.value))} aria-label="Max players">
                     {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n} players</option>)}
                   </select>
-                  <button type="button" className="btn go" disabled={busy || !online} onClick={create}>Create room</button>
                 </div>
                 <label className="check-row">
                   <input type="checkbox" checked={lateJoin} onChange={(e) => setLateJoin(e.target.checked)} /> Allow late join <small>(people can join after the round has started)</small>
                 </label>
                 {gameMode !== 'free' ? (
-                  <p className="hint">{gameMode === 'survival' ? '☠️ Survival' : '🌊 Wave defense'} is co-op: everyone is on the same side, so there is no hero-vs-hero fighting.</p>
+                  <p className="hint">{gameMode === 'survival' ? '☠️ Survival' : '🌊 Wave defense'} is co-op: everyone is on the same side.</p>
                 ) : (
                   <p className="hint">⚔️ Free Roam rooms are fight mode: swords and throws hurt other players. {winBy === 'monsters' ? 'First to 15 monster kills wins.' : 'First to 10 kills wins.'}</p>
                 )}
-                <p className="hint">You'll get a room code and an invite link to share with friends. Got a code from a friend instead? Use <b>Join through a code</b> in the Multiplay menu.</p>
               </div>
             )}
 
             <div className="nav-row">
               <button type="button" className="btn ghost" onClick={() => go('hero')}>← Back</button>
+              {mode === 'together' && <button type="button" className="btn go" disabled={busy || !online} onClick={create}>{busy ? 'Creating…' : 'Create room ➜'}</button>}
               {mode === 'solo' && <button type="submit" className="btn go" disabled={busy}>{busy ? 'Opening…' : soloRoom ? 'Open the room ➜' : 'Begin adventure ➜'}</button>}
             </div>
             </div>
