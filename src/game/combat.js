@@ -170,6 +170,9 @@ export class Combat {
     this.spells = []; // spells that are about to land (or just did) on the ground
     this.treeBars = []; // the health bar of a tree you have just hit
     this.wildT = 8;
+    this.zones = new Map(); // boss zone id -> { w: the boss that is out, until: when it is back after being beaten }
+    this.zoneClock = 0;
+    this.zoneT = 0;
     this.camps = new Map(); // chunk key -> { on, killed, until }
     this.campT = 0;
     this.campScan = 0;
@@ -1314,6 +1317,7 @@ export class Combat {
       if (!this.g.dungeon && this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
       if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
     }
+    if (!this.g.dungeon) this.updateBossZones(dt);
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
     if (this.wildQ?.length) this.wilds.push(...this.wildQ.splice(0));
     this.updateWildShots(dt);
@@ -1334,7 +1338,7 @@ export class Combat {
     });
   }
 
-  // every so often: a bulk spawn of one kind (five bats and so on), and at night a boss that burns up at dawn
+  // every so often: a bulk spawn of one kind (five bats and so on), and at night a pack of zombies
   updateEvents(night) {
     this.bulkT = (this.bulkT ?? 40 + Math.random() * 40) - 3.5;
     if (this.bulkT <= 0) {
@@ -1347,18 +1351,6 @@ export class Combat {
       this.spawnPack('z_small', 5, '🧟 Zombies are shambling out of the dark!');
     } else if (night < 0.1) {
       this.zombieNight = false;
-    }
-    this.miniT = (this.miniT ?? 55 + Math.random() * 50) - 3.5;
-    if (this.miniT <= 0) {
-      this.miniT = 25;
-      if (!this.wilds.some((w) => w.miniBoss && w.state !== 'dead') && this.spawnMiniBoss()) this.miniT = 140 + Math.random() * 110;
-    }
-    const boss = this.wilds.some((w) => w.nightBoss && w.state !== 'dead');
-    if (night > 0.6 && !boss && !this.nightBossDone) {
-      this.nightBossDone = true;
-      this.spawnNightBoss();
-    } else if (night < 0.1 && !boss) {
-      this.nightBossDone = false; // a new night, a new boss
     }
   }
 
@@ -1390,46 +1382,75 @@ export class Combat {
     }
   }
 
-  spawnNightBoss() {
-    const { world, player: p, home } = this.g;
-    const type = pickOf(foesAt(world, p.x, p.y).boss); // always one of the animated characters
-    for (let i = 0; i < 10; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const x = p.x + Math.cos(ang) * (190 + Math.random() * 40);
-      const y = p.y + Math.sin(ang) * (190 + Math.random() * 40);
-      if (Math.hypot(x - home.x, y - home.y) < 160) continue;
-      if (world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER || world.isBlocked(x - 6, y - 6, 12, 6)) continue;
-      const w = this.makeWild(type, x, y, 8);
-      w.hp = w.max = Math.round(w.max * 2.2);
-      w.nightBoss = true;
-      if (MONSTERS[type].tiny) w.scale = 2;
-      this.wilds.push(w);
-      this.g.announceBoss('🌑 THE NIGHT BOSS HAS BEEN SUMMONED', `${MONSTERS[type].name} · follow the red arrow · it burns at sunrise`);
-      return;
-    }
-    this.nightBossDone = false; // nowhere to put it; try again
+  // ---------- boss zones ----------
+  // Bosses live in zones (see World.bossSite): a circle on the map with one asleep in the middle. It wakes when you walk into
+  // the circle (or come close to it), stays inside it, and is back after a long while once it is beaten.
+
+  // 'asleep' (waiting for you), 'awake' (it is out there) or 'cleared' (beaten; it is back later): for the map
+  zoneState(z) {
+    const st = this.zones.get(z.id);
+    if (!st) return 'asleep';
+    if (st.w && st.w.state !== 'dead' && this.wilds.includes(st.w)) return 'awake';
+    return st.until > this.zoneClock ? 'cleared' : 'asleep';
   }
 
-  // A small but tough boss from the region you are in: it never burns away, and it pays well
-  spawnMiniBoss() {
+  updateBossZones(dt) {
+    this.zoneClock += dt;
+    this.zoneT -= dt;
+    if (this.zoneT > 0) return;
+    this.zoneT = 0.5;
     const { world, player: p, home } = this.g;
-    const type = pickOf(foesAt(world, p.x, p.y).mini);
-    for (let i = 0; i < 10; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const x = p.x + Math.cos(ang) * (170 + Math.random() * 40);
-      const y = p.y + Math.sin(ang) * (170 + Math.random() * 40);
-      if (Math.hypot(x - home.x, y - home.y) < 160) continue;
-      if (world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER || world.isBlocked(x - 6, y - 6, 12, 6)) continue;
-      const w = this.makeWild(type, x, y, 6);
-      w.hp = w.max = Math.round(w.max * 4.5);
+    const tx = p.x / 16;
+    const ty = p.y / 16;
+    for (const z of world.bossZonesIn(tx - 40, ty - 40, tx + 40, ty + 40)) {
+      if (Math.hypot(z.x - home.x / 16, z.y - home.y / 16) < 60) continue; // never next to where everyone lives
+      const st = this.zones.get(z.id) || { w: null, until: 0 };
+      this.zones.set(z.id, st);
+      if (st.w) {
+        if (st.w.state === 'dead') {
+          st.until = this.zoneClock + 600; // beaten: back in ten minutes
+          st.w = null;
+        } else if (!this.wilds.includes(st.w)) st.w = null; // it was swept away (left the dungeon, and so on): a new one is waiting
+      }
+      if (st.w || st.until > this.zoneClock) continue;
+      if (Math.hypot(z.x - tx, z.y - ty) < z.r + 6) st.w = this.spawnZoneBoss(z);
+    }
+  }
+
+  spawnZoneBoss(z) {
+    const { world } = this.g;
+    const cx = z.x * 16 + 8;
+    const cy = z.y * 16 + 8;
+    const type = pickOf(foesAt(world, cx, cy)[z.kind === 'boss' ? 'boss' : 'mini']);
+    let x = cx;
+    let y = cy;
+    for (let k = 0; k < 40; k++) {
+      const ang = k * 2.4;
+      const d = k === 0 ? 0 : 8 + k * 2.5;
+      const px = cx + Math.cos(ang) * d;
+      const py = cy + Math.sin(ang) * d;
+      if (world.type(Math.floor(px / 16), Math.floor(py / 16)) !== WATER && !world.isBlocked(px - 6, py - 6, 12, 6)) {
+        x = px;
+        y = py;
+        break;
+      }
+    }
+    const boss = z.kind === 'boss';
+    const w = this.makeWild(type, x, y, boss ? 8 : 6);
+    w.hp = w.max = Math.round(w.max * (boss ? 2.2 : 4.5));
+    if (boss) w.nightBoss = true; // (the flag that means "a big boss"; these no longer burn at sunrise)
+    else {
       w.miniBoss = true;
       w.dmgMul = 1.3;
-      if (MONSTERS[type].tiny) w.scale = 1.5;
-      this.wilds.push(w);
-      this.g.announceBoss('⚔️ A MINI BOSS APPEARS', `${MONSTERS[type].name} · small but tough · follow the arrow`);
-      return true;
     }
-    return false;
+    if (MONSTERS[type].tiny) w.scale = boss ? 2 : 1.5;
+    w.zone = z.id;
+    w.zx = cx;
+    w.zy = cy;
+    w.zr = z.r * 16;
+    this.wilds.push(w);
+    this.g.announceBoss(boss ? '☠ A BOSS AWAKENS' : '⚔️ A MINI BOSS AWAKENS', `${MONSTERS[type].name} guards this zone · it stays inside the red circle`);
+    return w;
   }
 
   // the tougher the days get, the higher the levels that can show up (and at night, two more)
@@ -1480,8 +1501,8 @@ export class Combat {
     const dist = Math.hypot(dx, dy) || 1;
     w.anim += dt;
     if (w.state === 'dead') return (w.t += dt) < (def.tiny ? 0.85 : 0.5);
-    if (!w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : 430)) return false;
-    if (w.nightBoss && !this.g.dungeon && this.g.darkness() < 0.15) w.burning = true; // sunrise
+    if (!w.zone && !w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : 430)) return false;
+    if (w.nightBoss && !w.zone && !this.g.dungeon && this.g.darkness() < 0.15) w.burning = true; // sunrise
     if (w.burning) {
       // it burns away in the daylight. Nothing drops from something that burned to death.
       w.hp -= w.max * 0.08 * dt;
@@ -1531,6 +1552,21 @@ export class Combat {
       // in the middle of an attack: it stands its ground until the animation is done
       this.tickSwing(w, dt);
       return true;
+    }
+    if (w.zone) {
+      // a zone boss never leaves its circle: when you walk away (or it is dragged out) it goes home and heals
+      const hx = w.zx - w.x;
+      const hy = w.zy - w.y;
+      const hd = Math.hypot(hx, hy) || 1;
+      if (hd > w.zr * 1.05 || (dist > 300 && hd > 24)) w.homing = true;
+      else if (hd < 28) w.homing = false;
+      if (w.homing) {
+        const sp = def.speed * 1.6 * dt;
+        step((hx / hd) * sp, (hy / hd) * sp);
+        w.face = hx >= 0 ? 1 : -1;
+        w.hp = Math.min(w.max, w.hp + w.max * 0.05 * dt);
+        return true;
+      }
     }
     if (def.tiny && dist < 260 && !this.hidden && !this.g.dead && this.tinySkill(w, def, dt, dist, hitNow, by)) return true;
     if ((w.nightBoss || w.miniBoss || def.skill === 'charge') && this.nightBossSkill(w, def, dt, dist, dx, dy, step)) return true;
@@ -1788,7 +1824,7 @@ export class Combat {
         // a mini boss is worth the trouble
         this.shareCoins(w.x, w.y, 6 + Math.floor(Math.random() * 6), 3);
         for (const [id, qty] of [['gem', 1], ['gold', 2], ['wood', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
-        this.g.onToast?.(w.guardian ? `🌀 The realm's guardian, ${def.name}, is down! Loot the chests.` : `⚔️ The mini boss ${def.name} is down!`);
+        this.g.onToast?.(w.guardian ? `🌀 The realm's guardian, ${def.name}, is down! Loot the chests.` : `⚔️ The mini boss ${def.name} is down! Its zone is quiet for a while.`);
       }
       if (w.nightBoss) {
         // slain before dawn: a real prize (the coins can be picked up by everyone in the room)

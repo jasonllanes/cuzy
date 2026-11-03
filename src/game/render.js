@@ -245,7 +245,8 @@ function renderTidalChunk(world, img, chunk) {
     for (let tx = 0; tx <= CHUNK; tx++) {
       const x = chunk.cx * CHUNK + tx;
       const y = chunk.cy * CHUNK + ty;
-      const set = world.mixed ? world.biomeAt(x, y) : world.tileset; // (in the patchwork map every tile belongs to a region)
+      // (in the patchwork map every tile belongs to a region; but the water between two regions, and its beaches, are always the island tileset's)
+      const set = world.mixed ? (world.rimAt(x, y) ? 'tidal' : world.biomeAt(x, y)) : world.tileset;
       const key = bit(set, x - 1, y - 1) * 8 + bit(set, x, y - 1) * 4 + bit(set, x - 1, y) * 2 + bit(set, x, y);
       const [c, r] = TIDAL[key];
       ctx.drawImage(img[`maps/${set}`], c * T, r * T, T, T, tx * T - T / 2, ty * T - T / 2, T, T);

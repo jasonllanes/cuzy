@@ -1553,7 +1553,7 @@ export class Game {
   // where every boss is right now, so the map and the arrow can point to them
   bossTargets() {
     const out = [];
-    for (const w of this.combat?.wilds || []) if ((w.nightBoss || w.miniBoss) && w.state !== 'dead') out.push({ x: w.x, y: w.y, name: MONSTERS[w.type].name, burning: !!w.burning, mini: !!w.miniBoss });
+    for (const w of this.combat?.wilds || []) if ((w.nightBoss || w.miniBoss) && w.state !== 'dead') out.push({ x: w.x, y: w.y, name: MONSTERS[w.type].name, burning: !!w.burning, mini: !!w.miniBoss, zone: !!w.zone });
     for (const m of this.wave?.monsters || []) if (MONSTERS[m.type]?.boss && m.state !== 'dead') out.push({ x: m.x, y: m.y, name: MONSTERS[m.type].name });
     return out;
   }
@@ -2792,7 +2792,13 @@ export class Game {
         this.hudTimer = 0.15;
         this.emitHud();
       }
+      this.miniTimer -= dt; // (the maps keep drawing while a menu is open: that is when you look at the big one)
+      if (this.miniTimer <= 0) {
+        this.miniTimer = 0.2;
+        this.drawMinimap();
+      }
     }
+    this.pumpMapTerrain(); // the ground of a map is painted a little every frame, not just when the dots move
   }
 
   // A browser stops requestAnimationFrame in a tab you are not looking at, and the game stopped with it: in a room that
@@ -4824,88 +4830,166 @@ export class Game {
 
   // The small corner map, and the big one opened with M
   drawMinimap() {
-    this.paintMap(this.minimap, 2, 0.8);
-    if (this.bigMap) this.paintMap(this.bigMap, 1, 3);
+    this.paintMap(this.minimap, 2);
+    if (this.bigMap) this.paintMap(this.bigMap, 1);
   }
 
-  // Terrain is repainted now and then (`every` seconds); the dots for creatures and heroes every time.
-  paintMap(c, step, every) {
+  // One picture of the ground (a pixel is `step` tiles), painted in slices over a few frames. The ground never changes, so a
+  // picture only has to be made again once you have walked a little way from the middle of it; it is bigger than the map so there is room to walk.
+  startTerrain(cs, step, ox, oy) {
+    const cv = document.createElement('canvas');
+    cv.width = cs;
+    cv.height = cs;
+    const ctx = cv.getContext('2d');
+    return { cs, step, ox, oy, cv, ctx, img: ctx.createImageData(cs, cs), row: 0, done: false };
+  }
+
+  paintTerrain(job, ms) {
+    const { cs, step, img, ox, oy } = job;
+    const t0 = performance.now();
+    const from = job.row;
+    const { world } = this;
+    const WATER_RGB = [126, 203, 230];
+    const SAND_RGB = [236, 217, 166];
+    const GRASS_RGB = [139, 198, 106];
+    const FOREST_RGB = [92, 160, 87];
+    while (job.row < cs && performance.now() - t0 < ms) {
+      const j = job.row;
+      const y = oy + (j - cs / 2) * step;
+      for (let i = 0; i < cs; i++) {
+        const x = ox + (i - cs / 2) * step;
+        const t = world.type(x, y);
+        const col = t === WATER ? WATER_RGB : t === SAND ? SAND_RGB : world.forest(x, y) > 0.6 ? FOREST_RGB : GRASS_RGB;
+        const o = (j * cs + i) * 4;
+        img.data[o] = col[0];
+        img.data[o + 1] = col[1];
+        img.data[o + 2] = col[2];
+        img.data[o + 3] = 255;
+      }
+      job.row++;
+    }
+    if (job.row > from) job.ctx.putImageData(img, 0, 0, 0, from, cs, job.row - from);
+    if (job.row >= cs) job.done = true;
+  }
+
+  // keep painting a map's new picture of the ground, a few milliseconds per frame, until it is done
+  pumpMapTerrain() {
+    for (const c of [this.minimap, this.bigMap]) {
+      const store = c?._terrain;
+      if (!store?.job) continue;
+      this.paintTerrain(store.job, store.cur ? 3 : 8);
+      if (store.job.done) {
+        store.cur = store.job;
+        store.job = null;
+      }
+    }
+  }
+
+  paintMap(c, step) {
     if (!c) return;
     const ctx = c.getContext('2d');
     const size = c.width;
     const ptx = Math.floor(this.player.x / T);
     const pty = Math.floor(this.player.y / T);
-    const cache = (c._terrain ||= { at: -99, cv: document.createElement('canvas') });
-    if (this.t - cache.at > every || cache.size !== size) {
-      cache.at = this.t;
-      cache.size = size;
-      cache.ox = ptx;
-      cache.oy = pty;
-      cache.cv.width = size;
-      cache.cv.height = size;
-      const cctx = cache.cv.getContext('2d');
-      const img = cctx.createImageData(size, size);
-      const palette = {
-        [WATER]: [126, 203, 230],
-        [SAND]: [236, 217, 166],
-        [GRASS]: [139, 198, 106],
-      };
-      const forest = [92, 160, 87];
-      for (let j = 0; j < size; j++) {
-        for (let i = 0; i < size; i++) {
-          const x = ptx + (i - size / 2) * step;
-          const y = pty + (j - size / 2) * step;
-          const t = this.world.type(x, y);
-          let col = palette[t];
-          if (t === GRASS && this.world.forest(x, y) > 0.6) col = forest;
-          const o = (j * size + i) * 4;
-          img.data[o] = col[0];
-          img.data[o + 1] = col[1];
-          img.data[o + 2] = col[2];
-          img.data[o + 3] = 255;
-        }
+    const cs = Math.round(size * 1.5);
+    const margin = (cs - size) / 2;
+    const store = (c._terrain ||= { size: 0, step: 0, cur: null, job: null });
+    if (store.size !== size || store.step !== step) Object.assign(store, { size, step, cur: null, job: null });
+    const away = store.cur ? Math.max(Math.abs(store.cur.ox - ptx), Math.abs(store.cur.oy - pty)) / step : Infinity;
+    if (!store.job && away > size * 0.12) store.job = this.startTerrain(cs, step, ptx, pty);
+    if (store.job) {
+      this.paintTerrain(store.job, store.cur ? 3 : 14); // milliseconds this frame: a little while you can already see a map, more while there is none
+      if (store.job.done) {
+        store.cur = store.job;
+        store.job = null;
       }
-      cctx.putImageData(img, 0, 0);
     }
+    const show = store.cur || store.job;
     ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(cache.cv, Math.round(((cache.ox - ptx) * 1) / step), Math.round(((cache.oy - pty) * 1) / step));
+    if (show) ctx.drawImage(show.cv, Math.round((show.ox - ptx) / step - margin), Math.round((show.oy - pty) / step - margin));
+
+    const big = size > 120;
+    const mapX = (x) => size / 2 + (x / T - this.player.x / T) / step;
+    const mapY = (y) => size / 2 + (y / T - this.player.y / T) / step;
     const dot = (x, y, color, r) => {
-      const mx = size / 2 + (x / T - this.player.x / T) / step;
-      const my = size / 2 + (y / T - this.player.y / T) / step;
+      const mx = mapX(x);
+      const my = mapY(y);
       if (mx < 1 || my < 1 || mx > size - 1 || my > size - 1) return;
       ctx.fillStyle = color;
       ctx.fillRect(Math.round(mx - r), Math.round(my - r), r * 2, r * 2);
     };
-    const r = size > 120 ? 2 : 1;
+    const r = big ? 2 : 1;
+
+    // boss zones: a big red circle on the ground with the boss's skull in the middle (smaller and orange for a mini boss, grey while it is beaten)
+    if (!this.demo && !this.dungeon && !this.wave && !this.world.apoc && this.combat) {
+      const span = (size / 2) * step + 24;
+      const home = this.home;
+      const pulse = 0.5 + 0.5 * Math.sin(this.t * 4);
+      for (const z of this.world.bossZonesIn(ptx - span, pty - span, ptx + span, pty + span)) {
+        if (home && Math.hypot(z.x - home.x / T, z.y - home.y / T) < 60) continue;
+        const mx = size / 2 + (z.x - this.player.x / T) / step;
+        const my = size / 2 + (z.y - this.player.y / T) / step;
+        const rad = z.r / step;
+        if (mx < -rad || my < -rad || mx > size + rad || my > size + rad) continue;
+        const state = this.combat.zoneState(z);
+        const color = state === 'cleared' ? '#8d8d9a' : z.kind === 'boss' ? '#e0192b' : '#ff7a2e';
+        ctx.beginPath();
+        ctx.arc(mx, my, rad, 0, Math.PI * 2);
+        ctx.globalAlpha = state === 'awake' ? 0.3 + 0.12 * pulse : 0.22;
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = z.kind === 'boss' ? 2 : 1.5;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        const ir = big ? (z.kind === 'boss' ? 8 : 6) : z.kind === 'boss' ? 5 : 4; // the boss logo
+        ctx.beginPath();
+        ctx.arc(mx, my, ir, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(ir * 1.5)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(state === 'cleared' ? '✓' : '☠', mx, my + 0.5);
+      }
+      ctx.textBaseline = 'alphabetic';
+    }
+
     if (!this.demo && this.combat) {
       for (const s of this.combat.skeletons) if (s.state !== 'dead') dot(s.x, s.y, '#f4f0e6', r);
-      for (const w of this.combat.wilds) if (w.state !== 'dead') dot(w.x, w.y, '#b45cd8', r);
+      for (const w of this.combat.wilds) if (w.state !== 'dead' && !w.zone) dot(w.x, w.y, '#b45cd8', r);
       for (const m of this.wave?.monsters || []) if (m.state !== 'dead') dot(m.x, m.y, '#e0384a', r);
     }
-    // every other player (and AI rival) shows as their own little face, kept on the edge of the map when they are farther away
-    const face = (x, y, hero, name, ring, me = false) => {
-      if (!hero) return;
-      const big = size > 120;
-      const fw = (big ? 10 : 8) * (me ? 1.2 : 1);
-      const fh = fw * (11 / 12);
-      const mx = Math.min(size - fw / 2 - 2, Math.max(fw / 2 + 2, size / 2 + (x / T - this.player.x / T) / step));
-      const my = Math.min(size - fh / 2 - 2, Math.max(fh / 2 + 2, size / 2 + (y / T - this.player.y / T) / step));
-      ctx.fillStyle = ring;
-      ctx.fillRect(Math.round(mx - fw / 2) - 1, Math.round(my - fh / 2) - 1, fw + 2, fh + 2);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(this.faceOf(hero, name, ring), Math.round(mx - fw / 2), Math.round(my - fh / 2), fw, fh);
+
+    // every other player is a blue circle (an AI rival an orange one), kept on the edge of the map when they are farther away than it reaches
+    const circle = (x, y, color) => {
+      const rr = big ? 4.5 : 3;
+      const mx = Math.min(size - rr - 1, Math.max(rr + 1, mapX(x)));
+      const my = Math.min(size - rr - 1, Math.max(rr + 1, mapY(y)));
+      ctx.beginPath();
+      ctx.arc(mx, my, rr, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
     };
     if (!this.demo && this.combat) {
-      for (const b of this.bots?.list || []) if (Number.isFinite(b.x)) face(b.x, b.y, b.hero, b.name, '#f2a33c');
-      for (const o of this.remotes.values()) if (!o.hidden) face(o.x, o.y, o.hero, o.name, o.bot || o.ai ? '#f2a33c' : '#5aaee8');
+      for (const b of this.bots?.list || []) if (Number.isFinite(b.x)) circle(b.x, b.y, '#f2a33c');
+      for (const o of this.remotes.values()) if (!o.hidden) circle(o.x, o.y, o.bot || o.ai ? '#f2a33c' : '#2f8cf0');
     }
+
     // portals to other realms, as little coloured diamonds
     if (!this.demo && !this.dungeon && !this.wave && !this.world.apoc) {
       const reg = DREGION * 16;
       const span = Math.ceil((size / 2) * step / DREGION) + 1;
       const rx0 = Math.floor(this.player.x / reg);
       const ry0 = Math.floor(this.player.y / reg);
-      const pr2 = size > 120 ? 5 : 3;
+      const pr2 = big ? 5 : 3;
       for (let j = -span; j <= span; j++) {
         for (let i = -span; i <= span; i++) {
           const s = this.world.dungeonSite(rx0 + i, ry0 + j);
@@ -4927,35 +5011,50 @@ export class Game {
         }
       }
     }
-    // bosses: a big pulsing red marker, kept on the edge of the map when they are farther away than it reaches
-    for (const b of this.bossTargets()) {
-      const bx = Math.min(size - 5, Math.max(5, size / 2 + (b.x / T - this.player.x / T) / step));
-      const by = Math.min(size - 5, Math.max(5, size / 2 + (b.y / T - this.player.y / T) / step));
-      const br = (size > 120 ? 5 : 3) + (Math.sin(this.t * 6) > 0 ? 1 : 0);
-      ctx.fillStyle = b.burning ? '#ff9a3c' : '#ff1f1f';
+
+    // Survival's wave bosses: a pulsing red square, kept on the edge of the map when they are farther away than it reaches
+    for (const bt of this.bossTargets()) {
+      if (bt.zone) continue; // (a zone boss is already in its red circle)
+      const bx = Math.min(size - 5, Math.max(5, mapX(bt.x)));
+      const by = Math.min(size - 5, Math.max(5, mapY(bt.y)));
+      const br = (big ? 5 : 3) + (Math.sin(this.t * 6) > 0 ? 1 : 0);
+      ctx.fillStyle = bt.burning ? '#ff9a3c' : '#ff1f1f';
       ctx.fillRect(Math.round(bx - br), Math.round(by - br), br * 2, br * 2);
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(Math.round(bx - br) - 0.5, Math.round(by - br) - 0.5, br * 2 + 1, br * 2 + 1);
-      if (size > 120) {
+      if (big) {
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('☠', bx, by - br - 3);
       }
     }
-    // you: your own face in the middle, framed in pink
-    if (this.hero && !this.demo) face(this.player.x, this.player.y, this.hero, this.name, '#ff6f91', true);
-    else {
-      const pr = size > 120 ? 3 : 2;
-      ctx.fillStyle = '#ff6f91';
-      ctx.fillRect(size / 2 - pr, size / 2 - pr, pr * 2, pr * 2);
-    }
+
+    // you: an arrow in the middle, pointing the way you are facing
+    const facing = { down: Math.PI / 2, up: -Math.PI / 2, left: Math.PI, right: 0 }[this.player.dir] ?? Math.PI / 2;
+    const ar = big ? 7 : 5;
+    ctx.save();
+    ctx.translate(size / 2, size / 2);
+    ctx.rotate(facing);
+    ctx.beginPath();
+    ctx.moveTo(ar * 1.3, 0);
+    ctx.lineTo(-ar * 0.9, -ar * 0.95);
+    ctx.lineTo(-ar * 0.4, 0);
+    ctx.lineTo(-ar * 0.9, ar * 0.95);
+    ctx.closePath();
+    ctx.fillStyle = '#ff6f91';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#fff';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.restore();
   }
 
   // Called by the map overlay: give the game a canvas to keep painting, or null to let go
   setBigMap(canvas) {
     this.bigMap = canvas;
-    if (canvas) this.paintMap(canvas, 1, 0);
+    if (canvas) this.paintMap(canvas, 1);
   }
 }

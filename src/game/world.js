@@ -14,7 +14,12 @@ export const WATER = 0;
 export const SAND = 1;
 export const GRASS = 2;
 
-const EDGE_PROBES = [[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, -3], [3, -3], [-3, 3]];
+// The Open World keeps its regions apart with a band of water (about 6 tiles wide, so crossing from one region to the next
+// means swimming), and draws a beach rim (about 2 more tiles) on each shore. These are the tiles to look at, round a tile, to
+// find out whether another region is that close.
+const MOAT_PROBES = [[3, 0], [-3, 0], [0, 3], [0, -3], [2, 2], [-2, -2], [2, -2], [-2, 2]];
+const RIM_PROBES = [[5, 0], [-5, 0], [0, 5], [0, -5], [4, 4], [-4, -4], [4, -4], [-4, 4]];
+const BREGION = 70; // tiles: each region of the world may hold one boss zone
 const BIOMES = ['tidal', 'emerald', 'crystal', 'marsh', 'lava', 'beach', 'asphalt', 'mountain']; // the Patchwork Lands regions
 const BIOME_LOW = { tidal: 0.1, emerald: 0.1, crystal: 0.04, marsh: 0.05, lava: 0.05, beach: 0.05, asphalt: 0, mountain: 0 }; // how far each sinks the ground
 const SEA = 0.43;
@@ -76,6 +81,7 @@ export class World {
     this.typeCache = new Map();
     this.siteCache = new Map();
     this.dsites = new Map(); // dungeon entrances
+    this.bsites = new Map(); // boss zones
     this.dkindOverride = new Map(); // regions forced to a kind (the -dimension command)
     this.activeZone = null; // the dungeon you are in (only that one is built)
     this.treeCache = new Map();
@@ -111,18 +117,25 @@ export class World {
     return b;
   }
 
-  // water only where all the neighbours are in the same region, so a shore never sits on a region's edge
-  biomeCalm(x, y) {
+  // Open World: is another region close enough to this tile that it is part of the water between the two?
+  moatAt(x, y) {
+    if (!this.mixed) return false;
     const b = this.biomeAt(x, y);
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) if (this.biomeAt(x + dx, y + dy) !== b) return false;
-    }
-    return true;
+    for (const [dx, dy] of MOAT_PROBES) if (this.biomeAt(x + dx, y + dy) !== b) return true;
+    return false;
   }
 
-  // is the water at this tile lava?
+  // ...or close enough to be on its shores (the rim of beach, drawn with the island tileset so every region meets the water the same way)
+  rimAt(x, y) {
+    if (!this.mixed) return false;
+    const b = this.biomeAt(x, y);
+    for (const [dx, dy] of RIM_PROBES) if (this.biomeAt(x + dx, y + dy) !== b) return true;
+    return false;
+  }
+
+  // is the water at this tile lava? (the water between two regions never is)
   lavaAt(tx, ty) {
-    return this.lava || (this.mixed && this.biomeAt(tx, ty) === 'lava');
+    return this.lava || (this.mixed && this.biomeAt(tx, ty) === 'lava' && !this.moatAt(tx, ty));
   }
 
   // the winding roads (or paths) of the asphalt and mountain maps: ridges of two noise fields, so they cross and branch
@@ -153,8 +166,9 @@ export class World {
       // Survival has no water: low ground is patchy dry dirt instead
       if (this.mixed) {
         const b = this.biomeAt(x, y);
-        if (b === 'asphalt' || b === 'mountain') t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS;
-        else t = e < SEA && this.biomeCalm(x, y) ? WATER : e < BEACH ? SAND : GRASS;
+        if (this.moatAt(x, y)) t = WATER; // the water between two regions: you have to swim across
+        else if (b === 'asphalt' || b === 'mountain') t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS;
+        else t = e < SEA ? WATER : e < BEACH ? SAND : GRASS;
       } else if (this.groundSet) t = this.roadAt(x, y) || e < BEACH ? SAND : GRASS; // (roads are open ground: nothing grows on them, and nothing is water)
       else t = this.depot ? GRASS : this.apoc ? (this.tileset && e < SEA ? WATER : e < BEACH && hash2(x, y, this.seed + 90) < 0.92 ? SAND : GRASS) : e < SEA ? WATER : e < BEACH ? SAND : GRASS;
       if (this.typeCache.size > 600000) this.typeCache.clear();
@@ -343,7 +357,6 @@ export class World {
     const y = by * 2;
     const f = this.forest(x + 1, y + 1);
     let p = 0.02 + 0.55 * smoothstep(0.5, 0.66, f);
-    if (this.mixed && this.nearBiomeEdge(x + 1, y + 1)) p = Math.max(p, 0.72); // a belt of trees hides the seam between two regions
     if (hash2(bx, by, this.seed + 11) < p) {
       let ok = !this.isCleared(x, y);
       for (let j = 0; j < 2 && ok; j++) {
@@ -800,6 +813,48 @@ export class World {
       }
     }
     return { x: 8, y: 12 };
+  }
+
+  // ---------- boss zones (Free Roam) ----------
+
+  // Where the bosses live. Nothing spawns at random: each region of the world may hold one zone, a circle on the ground with a
+  // boss (or a mini boss) asleep in the middle, always well away from where everyone starts. The same region always gives the
+  // same answer for a seed. Returns { id, kind: 'boss' | 'mini', x, y, r } in tiles, or null.
+  bossSite(brx, bry) {
+    const key = `${brx},${bry}`;
+    if (this.bsites.has(key)) return this.bsites.get(key);
+    let site = null;
+    if (!this.apoc && !this.waveMode && !this.depot && hash2(brx, bry, this.seed + 9100) < 0.62) {
+      const kind = hash2(brx, bry, this.seed + 9101) < 0.34 ? 'boss' : 'mini';
+      const r = kind === 'boss' ? 18 : 11;
+      const far = kind === 'boss' ? 120 : 80; // tiles from the middle of the world, where the houses are
+      for (let a = 0; a < 14 && !site; a++) {
+        const x = brx * BREGION + r + 3 + Math.floor(hash2(brx, bry, this.seed + 9102 + a * 13) * (BREGION - 2 * r - 6));
+        const y = bry * BREGION + r + 3 + Math.floor(hash2(brx, bry, this.seed + 9103 + a * 13) * (BREGION - 2 * r - 6));
+        if (Math.hypot(x, y) < far) continue;
+        let ok = this.type(x, y) === GRASS && !this.moatAt(x, y);
+        for (let k = 0; k < 8 && ok; k++) {
+          const px = x + Math.round(Math.cos((k / 8) * Math.PI * 2) * r * 0.4);
+          const py = y + Math.round(Math.sin((k / 8) * Math.PI * 2) * r * 0.4);
+          if (this.type(px, py) === WATER) ok = false;
+        }
+        if (ok) site = { id: key, kind, x, y, r };
+      }
+    }
+    this.bsites.set(key, site);
+    return site;
+  }
+
+  // the boss zones that touch a square of the world: tile x0..x1, y0..y1
+  bossZonesIn(x0, y0, x1, y1) {
+    const out = [];
+    for (let j = Math.floor((y0 - 22) / BREGION); j <= Math.floor((y1 + 22) / BREGION); j++) {
+      for (let i = Math.floor((x0 - 22) / BREGION); i <= Math.floor((x1 + 22) / BREGION); i++) {
+        const z = this.bossSite(i, j);
+        if (z) out.push(z);
+      }
+    }
+    return out;
   }
 
   // A skeleton camp, if this chunk has one: three of them stand guard on an open patch of meadow.

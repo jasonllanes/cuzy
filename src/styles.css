@@ -1626,3 +1626,8 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .welcome-card .page-title { text-align: center; margin: 4px 0 0; }
 .welcome-note { text-align: center; margin: 0; }
 .welcome-card .home-btn:disabled { opacity: 0.6; cursor: wait; }
+
+/* the map legend: the arrow, the blue circles and the boss zones */
+.map-legend .lg-dot { border-radius: 50%; border: 1.5px solid #fff; }
+.map-legend .lg-zone { border-radius: 50%; border: 2px solid; }
+.map-legend .lg-arrow { width: 0; height: 0; background: none; border-style: solid; border-width: 5px 0 5px 10px; border-color: transparent transparent transparent #ff6f91; border-radius: 0; }
