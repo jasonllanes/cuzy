@@ -294,7 +294,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             offlineText={net.offlineText}
           />
         ) : (
-          <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => { setMode('together'); setError(''); setView('multi'); }} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} onTrainingV2={onTrainingV2} onV2={onV2} notice={notice} assets={assets} />
+          <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => { setMode('together'); setError(''); setView('multi'); }} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} onTrainingV2={onTrainingV2} onV2={onV2} notice={notice} assets={assets} onAccountName={(n) => setName((cur) => (cur.trim() ? cur : n.slice(0, 14)))} />
         )}
       </div>
     );

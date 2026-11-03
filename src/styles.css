@@ -1605,3 +1605,24 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .play-side .wave-setup .hint { margin: 0 0 6px; font-size: 0.82rem; line-height: 1.3; }
 .play-side .preview-row { display: flex; gap: 8px; align-items: center; }
 .play-side .hint { margin: 0; font-size: 0.82rem; line-height: 1.3; }
+
+/* Sign in with Google */
+.account-box { display: grid; gap: 6px; }
+.account-box.compact { margin: -4px 0 2px; }
+.account-who { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.account-who > small { flex: 1 1 100%; color: var(--ink-soft); font-size: 0.78rem; line-height: 1.3; }
+.account-box.compact .account-who { justify-content: center; }
+.account-text { display: grid; min-width: 0; flex: 1 1 auto; }
+.account-text b { font: 700 0.95rem var(--pixel); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-text small { color: var(--ink-soft); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-avatar { width: 36px; height: 36px; border-radius: 50%; border: 2px solid #5d557f; object-fit: cover; background: #36334f; display: grid; place-items: center; flex: none; }
+.google-btn { display: inline-flex; align-items: center; gap: 10px; background: #fff; color: #3c4043; border-color: #dadce0; font-weight: 700; }
+.menu-card .btn.google-btn { background: #fff; color: #3c4043; border-color: #dadce0; box-shadow: 0 3px 0 #b9bcc2; }
+.menu-card .btn.google-btn:hover:not(:disabled) { background: #f4f5f7; }
+.google-btn .g-logo { flex: none; }
+
+/* the welcome page: Sign in with Google or Play as guest */
+.welcome-card { width: min(560px, 100%); }
+.welcome-card .page-title { text-align: center; margin: 4px 0 0; }
+.welcome-note { text-align: center; margin: 0; }
+.welcome-card .home-btn:disabled { opacity: 0.6; cursor: wait; }

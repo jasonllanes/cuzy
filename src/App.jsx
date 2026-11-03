@@ -7,6 +7,8 @@ import { music } from './game/music';
 import { Net } from './game/net';
 import { SupaNet } from './game/supaNet';
 import { cloudOn, rawClient, store } from './game/store';
+import { chooseGuest, isGuest, watchAccount } from './game/auth';
+import Welcome from './components/Welcome';
 import MainMenu from './components/MainMenu';
 import { FREE_MAPS } from './game/maps';
 import GameView from './components/GameView';
@@ -97,6 +99,20 @@ export default function App() {
   const [error, setError] = useState(null);
   const [profile, setProfile] = useState(initialProfile);
   const [playing, setPlaying] = useState(() => new URLSearchParams(window.location.search).has('play'));
+  const [account, setAccount] = useState(undefined); // who is signed in with Google (null: nobody; undefined: still finding out)
+  const [guest, setGuest] = useState(isGuest); // "Play as guest" was chosen on this browser
+  useEffect(() => {
+    if (!cloudOn) {
+      setAccount(null);
+      return undefined;
+    }
+    const off = watchAccount(setAccount);
+    const t = setTimeout(() => setAccount((a) => (a === undefined ? null : a)), 5000); // the cloud never answered: carry on as a guest
+    return () => {
+      off();
+      clearTimeout(t);
+    };
+  }, []);
   const [session, setSession] = useState(null); // set while inside a multiplayer room
   const [lobby, setLobby] = useState(false); // true while the room is waiting for its host to press Start
   const [invites, setInvites] = useState([]); // pop-up invitations from other players
@@ -309,6 +325,12 @@ export default function App() {
 
   if (error) return <div className="splash">Oh no, something went wrong loading the meadow. ({error.message})</div>;
   if (!assets) return <div className="splash"><span className="splash-dot" /> Gathering acorns…</div>;
+  // the welcome page: sign in with Google, or play as a guest (not asked again on this browser; invite links and the dev tools skip it)
+  const skipWelcome = guest || reconnect || /[?&](room|play)=|#\/?training/.test(`${window.location.search}${window.location.hash}`);
+  if (cloudOn && !account?.google && !skipWelcome) {
+    if (account === undefined) return <div className="splash"><span className="splash-dot" /> Gathering acorns…</div>;
+    return <Welcome onGuest={() => { chooseGuest(true); setGuest(true); }} />;
+  }
   if (reconnect && !session) {
     return (
       <div className="splash reconnect">

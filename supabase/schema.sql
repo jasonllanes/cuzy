@@ -1,6 +1,16 @@
 -- Cuzy's cloud storage. Run this once in the Supabase dashboard: SQL Editor -> New query -> paste -> Run.
--- It is safe to run again. Also turn on Authentication -> Providers -> "Anonymous sign-ins": that is how each
--- browser gets private saved games (rooms below do not need sign-in).
+-- It is safe to run again. The same SQL lives in supabase/migrations/ for the Supabase CLI (`supabase db push`);
+-- keep the two in step.
+--
+-- Dashboard switches the game relies on (Authentication):
+--   * Sign In / Providers -> Google: ON, with your Google client ID and secret
+--       (Google accounts keep their name, character and saved games in the kv table below; guests keep them in the browser only)
+--   * Sign In / Providers -> "Allow manual linking": ON   (only so a browser that used an older, anonymous version keeps its
+--       saves when it signs in with Google; "Allow anonymous sign-ins" is no longer needed)
+--   * URL Configuration: Site URL and Redirect URLs include the game's address, e.g.
+--       https://jasonllanes.github.io/cuzy/   and   http://localhost:5173/
+-- No extra tables are needed for Google: the kv rows belong to auth.uid().
+-- (Rooms below do not need sign-in.)
 
 -- ---------- saved games and profile ----------
 

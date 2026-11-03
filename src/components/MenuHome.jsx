@@ -8,10 +8,11 @@ import AccessForm from './AccessForm';
 import { isUnlocked, lockAgain } from '../game/access';
 import Avatar from './Avatar';
 import V2Sprite from './V2Sprite';
+import AccountBox from './AccountBox';
 
 
 // The main menu: Play, Multiplay, Settings, About and Exit, and the pages behind them.
-export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, onTrainingV2, onV2, name, setName, online, notice = '', assets }) {
+export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, onTrainingV2, onV2, name, setName, online, notice = '', assets, onAccountName }) {
   const [gone, setGone] = useState(false);
   const [msg, setMsg] = useState('');
   const [access, setAccess] = useState(isUnlocked); // the developer tools are locked until the code is typed in Settings
@@ -45,6 +46,7 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, o
       <p className="tagline">a tiny cozy world to explore</p>
 
       {view === 'home' && notice && <div className="notice">{notice}</div>}
+      {view === 'home' && <AccountBox compact onName={onAccountName} />}
       {view === 'home' && (
         <nav className="home-menu" aria-label="Main menu">
           <button type="button" className="home-btn play" onClick={onPlay}>
@@ -82,6 +84,8 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, o
           <div>
           <h3 className="shop-h">📐 Mobile layout</h3>
           <ControlsLayout />
+          <h3 className="shop-h">☁️ Account</h3>
+          <AccountBox onName={onAccountName} />
           <h3 className="shop-h">🧑 Player</h3>
           <label className="sub-label" htmlFor="set-name">Your name</label>
           <input id="set-name" value={name} maxLength={14} autoComplete="off" onChange={(e) => setName(e.target.value)} />

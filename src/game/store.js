@@ -29,21 +29,19 @@ export function rawClient() {
   return basePromise;
 }
 
-// One anonymous Supabase user per browser: no sign-up screen, and saved rows are private to that user
+// Cloud saves are only for someone signed in with Google (see auth.js); a guest keeps everything in this browser.
+// Saved rows are private to the signed-in user (row-level security in supabase/schema.sql).
 function client() {
   if (!cloudOn) return Promise.resolve(null);
   clientPromise ||= rawClient()
     .then(async (sb) => {
       if (!sb) return null;
       const { data } = await sb.auth.getSession();
-      if (!data.session) {
-        const { error } = await sb.auth.signInAnonymously();
-        if (error) throw error;
-      }
-      return sb;
+      const user = data.session?.user;
+      return user && (user.identities || []).some((i) => i.provider === 'google') ? sb : null;
     })
     .catch((err) => {
-      console.warn('[cuzy] cloud saves are off (enable Anonymous sign-ins in Supabase), using local storage only:', err.message || err);
+      console.warn('[cuzy] cloud saves are off, using local storage only:', err.message || err);
       return null;
     });
   return clientPromise;
@@ -74,6 +72,17 @@ const local = {
 };
 
 const stampKey = (key) => `${key}#at`;
+
+// a signed-out browser forgets the profile and saved games of the account that was here (the cloud still has them)
+export function forgetLocalSaves() {
+  try {
+    for (const k of Object.keys(window.localStorage)) {
+      if (SYNCED(k.replace(/#at$/, ''))) window.localStorage.removeItem(k);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 async function flush() {
   clearTimeout(timer);
@@ -146,6 +155,14 @@ export const store = {
         if (local.get(row.key) !== null && mine && mine >= row.updated_at) continue; // this device is newer
         local.set(row.key, typeof row.value === 'string' ? row.value : JSON.stringify(row.value));
         local.set(stampKey(row.key), row.updated_at);
+      }
+      // what this device has that the account does not (a guest's progress, a first sign-in) goes up now
+      const cloudAt = new Map((data || []).map((r) => [r.key, r.updated_at]));
+      for (const k of Object.keys(window.localStorage)) {
+        if (k.endsWith('#at') || !SYNCED(k)) continue;
+        const value = local.get(k);
+        const mine = local.get(stampKey(k));
+        if (value !== null && (!cloudAt.has(k) || (mine && mine > cloudAt.get(k)))) queue(k, value);
       }
       return true;
     })();
