@@ -31,7 +31,8 @@ export function chooseGuest(on = true) {
   }
 }
 
-const redirectTo = () => `${window.location.origin}${import.meta.env.BASE_URL}`;
+// come back to the page the game is on (the site is served from ./, so BASE_URL would not make an address): https://jasonllanes.github.io/cuzy/ or http://localhost:5173/
+const redirectTo = () => `${window.location.origin}${window.location.pathname}`;
 
 // what the game needs to know about whoever is signed in
 export function accountOf(user) {
