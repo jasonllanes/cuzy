@@ -315,7 +315,7 @@ export class SupaNet {
     const free = !['waves', 'survival'].includes(mode);
     const cfg = {
       name: clean(name, 24) || `${me.name}'s meadow`,
-      seed: clean(seed, 40) || 'sunny-meadow-101',
+      seed: clean(seed, 48) || 'sunny-meadow-101',
       max: Math.min(MAX_PLAYERS, Math.max(2, Number(max) || 4)),
       // Wave Defense and Survival are co-op: the host runs the monsters, so there is no hero-vs-hero fighting
       mode: free ? 'free' : mode,
@@ -830,6 +830,8 @@ export class SupaNet {
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
+        else if (m.kind === 'trident') this.bcast({ t: 'fx', id: this.me, kind: 'trident', x: num(m.x), y: num(m.y), a: num(m.a), range: num(m.range), speed: num(m.speed), w: clean(m.w, 20) });
+        else if (m.kind === 'cast') this.bcast({ t: 'fx', id: this.me, kind: 'cast', x: num(m.x), y: num(m.y), r: num(m.r), fx: clean(m.fx, 24), hue: num(m.hue), color: clean(m.color, 12) });
         else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
         else if (m.kind === 'ball') this.bcast({ t: 'fx', id: this.me, kind: 'ball', i: Math.max(0, Math.min(7, Math.round(Number(m.i)) || 0)), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), z: num(m.z), vz: num(m.vz) });
         else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) });

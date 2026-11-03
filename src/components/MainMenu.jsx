@@ -10,7 +10,7 @@ import MusicButton from './MusicButton';
 import V2Sprite from './V2Sprite';
 import Avatar from './Avatar';
 import MapPreview from './MapPreview';
-import { FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, joinSeed, mapNameOf, splitSeed } from '../game/maps';
+import { ENDLESS_TAG, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
 
@@ -95,7 +95,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const newRoll = () => Math.random().toString(36).slice(2, 6);
   const [pv, setPv] = useState(null); // the map preview: { roll } while it is open (roll null: the map exactly as it is)
   // Free Roam V2 is the same world with the Modern Exteriors props on top: its seed ends in ~v2
-  const tag = v2 && gameMode === 'free' ? '~v2' : '';
+  const [endless, setEndless] = useState(isEndlessSeed(initial.seed)); // Survival without waves: the zombies just keep coming
+  const tag = v2 && gameMode === 'free' ? '~v2' : gameMode === 'survival' && endless ? ENDLESS_TAG : '';
   const rolledSeed = (!fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survPick) : `${seed}@${roll}`) + tag;
   // the seed the preview shows: the map as it will be played, or (after "Generate another") a freshly rolled layout of it
   const previewSeed = (pv ? (pv.roll ? (gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${pv.roll}`, survPick) : `${seed}@${pv.roll}`) : seed) : seed) + tag;
@@ -510,8 +511,20 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             {gameMode === 'survival' && (
               <div className="wave-setup">
                 <p className="hint">
-                  Survive <b>10 waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. 👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5, {DIFFICULTY[difficulty].boss10} on wave 10. The difficulty can be changed in the room settings.
+                  {endless
+                    ? <>Hold the shelter for as long as you can{mode === 'together' ? ', everyone defending the same base' : ''}. There are no waves: the zombies never stop, and every batch is harder than the last. 👹 A <b>Colossus</b> turns up every 5th batch.</>
+                    : <>Survive <b>10 waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. 👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5, {DIFFICULTY[difficulty].boss10} on wave 10.</>} The difficulty can be changed in the room settings.
                 </p>
+                <div className="diff-row" role="radiogroup" aria-label="Survival style">
+                  <button type="button" role="radio" aria-checked={!endless} className={`diff-chip ${!endless ? 'on' : ''}`} onClick={() => setEndless(false)}>
+                    <b>🌊 10 waves</b>
+                    <small>Wave after wave, with a breather between them, and a win at the end.</small>
+                  </button>
+                  <button type="button" role="radio" aria-checked={endless} className={`diff-chip ${endless ? 'on' : ''}`} onClick={() => setEndless(true)}>
+                    <b>♾️ Endless</b>
+                    <small>No waves and no end: survive as long as you can.</small>
+                  </button>
+                </div>
               <div className="diff-row" role="radiogroup" aria-label="Difficulty">
                   {DIFFICULTY_IDS.map((id) => (
                     <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} title={DIFFICULTY[id].blurb} onClick={() => setDifficulty(id)}>

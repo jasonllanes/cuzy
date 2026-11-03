@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { mapInfo, splitSeed } from './maps';
+import { isEndlessSeed, mapInfo, splitSeed, stripEndless } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -53,7 +53,8 @@ const FLOWER_COLORS = ['#ff9ec7', '#ffffff', '#c9a7ff', '#ffd94a', '#ffb38a', '#
 export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
-    this.seedStr = stripV2(seedStr);
+    this.endless = theme === 'apoc' && isEndlessSeed(seedStr); // Survival without waves
+    this.seedStr = stripEndless(stripV2(stripEndless(seedStr)));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
     this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw); // Free Roam V2: the same world with the Modern Exteriors props on top

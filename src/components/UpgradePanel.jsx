@@ -145,7 +145,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
           <div className="recruit-list">
             {ALLY_KINDS.map((k) => (
               <div key={k} className="recruit-chip hire" style={{ borderColor: ALLIES[k].color }}>
-                <span><b>{ALLIES[k].gun && <img className="ally-gun" src={`${import.meta.env.BASE_URL}assets/guns/${ALLIES[k].gun}.png`} alt="" />}{ALLIES[k].name}</b><small>{ALLIES[k].blurb}</small></span>
+                <span><b>{ALLIES[k].gun ? <img className="ally-gun" src={`${import.meta.env.BASE_URL}assets/guns/${ALLIES[k].gun}.png`} alt="" /> : ALLIES[k].icon ? <span className="ally-icon">{ALLIES[k].icon} </span> : null}{ALLIES[k].name}</b><small>{ALLIES[k].blurb}</small></span>
                 <button className="btn go small-btn" disabled={team >= cap || hud.coins < ALLIES[k].cost} onClick={() => game.tryRecruit(k)}>
                   {team >= cap ? 'Full' : `🪙 ${ALLIES[k].cost}`}
                 </button>

@@ -53,6 +53,14 @@ function dayIcon(hour) {
   return '🌙';
 }
 
+// 3:07 (or 1:03:07) for the Endless clock
+function formatSurvived(secs) {
+  const s = Math.max(0, Math.floor(secs || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s % 60).padStart(2, '0')}`;
+}
+
 // Top-of-screen status for Wave Defense: which wave, how many monsters, the base's health, the boss
 function WaveHud({ w, difficulty, withRoom, survival }) {
   const prep = w.phase === 'prep';
@@ -76,12 +84,12 @@ function WaveHud({ w, difficulty, withRoom, survival }) {
   return (
     <div className={`hud wave-hud panel small ${withRoom ? 'with-room' : ''} ${open ? '' : 'folded'}`}>
       <div className="wave-title">
-        {survival ? '☠️' : '🌊'} Wave <b>{Math.max(1, w.wave)}</b> / {w.total}
+        {w.endless ? <>♾️ Endless · <b>{formatSurvived(w.elapsed)}</b></> : <>{survival ? '☠️' : '🌊'} Wave <b>{Math.max(1, w.wave)}</b> / {w.total}</>}
         <span className="wave-diff">{difficulty}</span>
         <button type="button" className="wave-fold" onClick={toggle} aria-label={open ? 'Fold the wave panel' : 'Open the wave panel'} title={open ? 'Fold' : 'Open'}>{open ? '▴' : '▾'}</button>
       </div>
       <div className="wave-sub">
-        {prep ? <>Next wave in <b>{Math.ceil(w.timer)}s</b> · build and prepare!</> : <><b>{w.left}</b> monsters left</>}
+        {prep ? <>{w.endless ? 'The zombies come in' : 'Next wave in'} <b>{Math.ceil(w.timer)}s</b> · build and prepare!</> : w.endless ? <><b>{w.left}</b> zombies around · batch <b>{Math.max(1, w.wave)}</b></> : <><b>{w.left}</b> monsters left</>}
       </div>
       {open && prep && w.coming && (
         <div className="wave-forecast">
@@ -108,17 +116,37 @@ function WaveHud({ w, difficulty, withRoom, survival }) {
           )}
         </div>
       )}
-      <div className="base-bar" title={`Base health ${Math.ceil(w.baseHp)} / ${w.baseMax}`}>
-        <span>{survival ? '🏚️' : '🏠'}</span>
-        <b className="base-lv">Lv {(w.baseLevel || 0) + 1}</b>
-        <div className="base-track"><div className={`base-fill ${w.baseHp / w.baseMax < 0.35 ? 'low' : ''}`} style={{ width: `${(w.baseHp / w.baseMax) * 100}%` }} /></div>
-      </div>
       {w.boss && (
         <div className="boss-bar">
           <span>{w.boss.name}</span>
           <div className="boss-track"><div className="boss-fill" style={{ width: `${(w.boss.hp / w.boss.max) * 100}%` }} /></div>
         </div>
       )}
+    </div>
+  );
+}
+
+// The shelter's (or the base's) health, always on screen whether or not you can see it: it shakes when it takes a hit and pulses when it is low
+function ShelterBar({ w, survival, withRoom }) {
+  const [hit, setHit] = useState(false);
+  const last = useRef(w.baseHp);
+  useEffect(() => {
+    if (w.baseHp < last.current - 0.05) {
+      setHit(true);
+      const id = setTimeout(() => setHit(false), 350);
+      last.current = w.baseHp;
+      return () => clearTimeout(id);
+    }
+    last.current = w.baseHp;
+    return undefined;
+  }, [w.baseHp]);
+  const share = Math.max(0, Math.min(1, w.baseHp / w.baseMax));
+  return (
+    <div className={`hud shelter-bar panel small ${withRoom ? 'with-room' : ''} ${hit ? 'hit' : ''} ${share < 0.35 ? 'low' : ''}`} title={`${survival ? 'Shelter' : 'Base'} health ${Math.ceil(w.baseHp)} / ${w.baseMax}`}>
+      <span className="shelter-ico">{survival ? '🏚️' : '🏠'}</span>
+      <b className="shelter-name">{survival ? 'Shelter' : 'Base'} Lv {(w.baseLevel || 0) + 1}</b>
+      <div className="base-track"><div className={`base-fill ${share < 0.35 ? 'low' : ''}`} style={{ width: `${share * 100}%` }} /></div>
+      <b className="shelter-hp">{Math.ceil(w.baseHp)}<i>/{w.baseMax}</i></b>
     </div>
   );
 }
@@ -721,7 +749,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} onSupply={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
-      {!mobile && <div className="hud hud-help">{waves ? <>WASD move · Shift sprint · Click slash · Hold click dash · Space shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · R turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
+      {!mobile && <div className="hud hud-help">{waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -771,7 +799,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             className="skill ready"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => gameRef.current?.rotateWall()}
-            title="Turn the wall you are about to place (R). The number is how many boxes you have."
+            title="Turn the wall you are about to place (T). The number is how many boxes you have."
           >
             <span className="skill-icon">🔄</span>
             <kbd>R</kbd>
@@ -786,7 +814,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </div>
       <div className="hud skills right">
-        <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? (waves ? 'Hold left click, then release to dash' : 'Press Space (hold it to charge) or hold left click, then release, to use your sword skill') : 'Sword skill: Dash unlocks at level 6, Spiral Sword at level 8'}>
+        <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? (waves ? 'Press Space (hold it to charge) to dash' : 'Press Space (hold it to charge) or hold left click, then release, to use your sword skill') : 'Sword skill: Dash unlocks at level 6, Spiral Sword at level 8'}>
           <span className="skill-icon">{hud.activeSkill === 'spiral' ? '🌀' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? (waves ? 'hold click' : 'Space') : 'locked'}</small>
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'spiral' ? 1.4 : 1.2)) * 100)}%` }} />
@@ -808,6 +836,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <b>{formatClock(hud.hour)}</b>
         <small>Day {hud.day}</small>
       </div>
+      {waves && hud.wave && <ShelterBar w={hud.wave} survival={survival} withRoom={!!session} />}
       {waves && hud.wave && <WaveHud w={hud.wave} difficulty={live?.difficulty || difficulty} withRoom={!!session} survival={survival} />}
       {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && (
         <EndingScene
@@ -817,7 +846,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           hero={profile.hero}
           assets={assets}
           stats={[
-            { icon: '🌊', label: 'Wave reached', value: hud.wave.wave, text: (n) => `${n} / ${hud.wave.total}` },
+            hud.wave.endless
+              ? { icon: '⏱️', label: 'Survived', value: hud.wave.elapsed, text: formatSurvived }
+              : { icon: '🌊', label: 'Wave reached', value: hud.wave.wave, text: (n) => `${n} / ${hud.wave.total}` },
             { icon: '💀', label: 'Monsters defeated', value: hud.kills || 0 },
             { icon: '⭐', label: 'Your level', value: hud.level || 1 },
             { icon: '🪙', label: 'Coins left', value: hud.coins || 0 },

@@ -63,6 +63,11 @@ export const splitSeed = (seed) => {
   return { base, map: SURVIVAL_MAPS.some((m) => m.id === map) ? map : 'ruins' };
 };
 
+// Endless Survival (no waves) is a flag at the end of the seed: the same map, played differently
+export const ENDLESS_TAG = '~endless';
+export const isEndlessSeed = (s) => /~endless$/.test(String(s));
+export const stripEndless = (s) => String(s).replace(/~endless$/, '');
+
 export const joinSeed = (base, map) => (map && map !== 'ruins' ? `${base}~${map}` : base);
 
 // The host switched a room between Free Roam and Survival: the matching map (same name where both have one, otherwise

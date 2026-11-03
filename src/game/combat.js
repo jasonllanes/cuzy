@@ -1,6 +1,6 @@
 import { CHUNK_PX, WATER } from './world';
 import { sfx } from './sfx';
-import { BOSS_WIND, POWER_SLOW_TIME } from './waves';
+import { BOSS_WIND, POWER_SLOW_TIME, bossDashHalf } from './waves';
 import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
 import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
@@ -32,6 +32,17 @@ const BIOME_FOES = {
 // the region a spot belongs to (the open world is a patchwork of all of them)
 export const biomeOf = (world, x, y) => (world.mixed ? world.biomeAt(Math.floor(x / 16), Math.floor(y / 16)) : world.tileset) || 'clover';
 const foesAt = (world, x, y) => BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover;
+
+// Is the player inside the red fan a monster's swing shows? (the fan reaches `reach` ahead of it, about 130° wide: see drawSwingWarning)
+const FAN_HALF = 1.15;
+function inFan(w, p, reach) {
+  const dx = p.x - w.x;
+  const dy = p.y - (w.y - 6);
+  if (Math.hypot(dx, dy) > reach) return false;
+  let d = Math.atan2(dy, dx) - (w.face < 0 ? Math.PI : 0);
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  return Math.abs(d) <= FAN_HALF;
+}
 const pickOf = (a) => a[Math.floor(Math.random() * a.length)];
 const MINION = 't_skeleton';
 // some flyers that spit from a distance, besides the shooters in MONSTERS
@@ -168,6 +179,7 @@ export class Combat {
     this.wilds = [];
     this.wildShots = []; // what the ranged monsters spit and shoot
     this.spells = []; // spells that are about to land (or just did) on the ground
+    this.remoteTridents = []; // other players' tridents in flight
     this.treeBars = []; // the health bar of a tree you have just hit
     this.wildT = 8;
     this.zones = new Map(); // boss zone id -> { w: the boss that is out, until: when it is back after being beaten }
@@ -394,7 +406,17 @@ export class Combat {
     this.swingCd = this.swingCooldown() * 1.4;
     this.revealT = 1.5;
     sfx.play('wave', 0.6);
+    // everyone else sees the circle on the ground too (and the spell landing)
+    const last = this.spells[this.spells.length - 1];
+    g.mp?.net.send({ t: 'fx', kind: 'cast', x: last.x, y: last.y, r: radius, fx: sp.fx, hue: sp.hue || 0, color: sp.color || '#ffffff' });
     this.faceAim(Math.atan2(m.y - cy, m.x - cx));
+  }
+
+  // another player's staff spell: the circle that fills up, then the blast. It only looks the part: the caster's own game does the damage.
+  remoteCast(m) {
+    const frames = TINY.fx[m.fx];
+    if (!frames) return;
+    this.spells.push({ x: m.x, y: m.y, t: -0.45, delay: 0.45, fx: m.fx, hue: m.hue || 0, color: m.color, frames, radius: Math.max(8, Math.min(60, m.r || 24)), mine: true, did: true, remote: true });
   }
 
   // a slingshot stone, or a fan of them
@@ -439,7 +461,44 @@ export class Combat {
     this.swingCd = Math.max(this.swingCd, 0.25);
     this.revealT = 1.5;
     sfx.play('dash', 0.8);
+    this.g.mp?.net.send({ t: 'fx', kind: 'trident', x: cx, y: cy, a, range: this.thrown.range, speed: w.throw.speed, w: w.id }); // the others see it fly too
     this.faceAim(a);
+  }
+
+  // another player's trident: it flies out and comes back to them, for show (their own game does the hitting)
+  remoteTrident(m) {
+    if (!weaponById(m.w) || !this.g.remotes.has(m.id)) return;
+    this.remoteTridents.push({ id: m.id, x: m.x, y: m.y, a: m.a, out: true, range: Math.min(400, m.range || 100), went: 0, rot: m.a, speed: Math.min(400, m.speed || 200), age: 0, w: m.w });
+  }
+
+  updateRemoteTridents(dt) {
+    this.remoteTridents = this.remoteTridents.filter((th) => {
+      const r = this.g.remotes.get(th.id);
+      if (!r) return false;
+      th.age += dt;
+      const cx = r.x;
+      const cy = r.y - 8;
+      const step = th.speed * (th.out ? 1 : 1.15) * dt;
+      if (th.out) {
+        const nx = th.x + Math.cos(th.a) * step;
+        const ny = th.y + Math.sin(th.a) * step;
+        if (this.g.world.isBlocked(nx - 1, ny - 1, 2, 2, true, true)) th.went = th.range;
+        else {
+          th.x = nx;
+          th.y = ny;
+          th.went += step;
+        }
+        th.rot = th.a;
+        if (th.went >= th.range) th.out = false;
+      } else {
+        const d = Math.hypot(cx - th.x, cy - th.y);
+        if (d < 10 || th.age > 8) return false;
+        th.rot = Math.atan2(cy - th.y, cx - th.x);
+        th.x += ((cx - th.x) / d) * Math.min(d, step);
+        th.y += ((cy - th.y) / d) * Math.min(d, step);
+      }
+      return true;
+    });
   }
 
   updateTrident(dt) {
@@ -581,7 +640,7 @@ export class Combat {
   }
 
   // Left click let go. Free Roam: a tap swings (or bashes, or fires a bolt); holding first does the weapon's big move:
-  // a staff drops a spell at the cursor, a trident is hurled and a slingshot fires, as far as you held. Dash and Spiral are on Space.
+  // a staff drops a spell at the cursor, a trident is hurled and a slingshot fires, as far as you held. Dash and Spiral are on Space (in every mode).
   holdEnd() {
     if (!this.hold) return;
     const t = this.hold.t;
@@ -592,13 +651,7 @@ export class Combat {
       this.warnIndoors();
       return;
     }
-    if (this.g.wave) {
-      // Survival and the wave modes: tap to swing, hold and let go to dash
-      const skill = this.g.activeSkill();
-      if (t < HOLD_MIN || !skill) this.attack();
-      else if (skill === 'spiral') this.startSpin(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
-      else this.startDash(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
-    } else if (t < HOLD_MIN) this.attack();
+    if (t < HOLD_MIN) this.attack();
     else if (kind === 'staff') this.castGround(w, Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
     else if (kind === 'trident' || kind === 'sling') this.releaseCharge(w, t);
     else this.attack();
@@ -1186,6 +1239,8 @@ export class Combat {
       }
       this.updateWilds(dt); // (underground it only moves the monsters that wait in the rooms: nothing new turns up)
     }
+    this.updateRemoteTridents(dt);
+    this.updateSpells(dt); // (in every mode: Survival and the inside of a house too, or the circles of a staff stay on the screen)
     this.skeletons = this.skeletons.filter((s) => this.updateSkeleton(s, dt));
     this.projectiles = this.projectiles.filter((p) => this.updateProjectile(p, dt));
     // other players' throws are just for show; their own client works out the damage
@@ -1321,7 +1376,6 @@ export class Combat {
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
     if (this.wildQ?.length) this.wilds.push(...this.wildQ.splice(0));
     this.updateWildShots(dt);
-    this.updateSpells(dt);
   }
 
   updateWildShots(dt) {
@@ -1599,9 +1653,16 @@ export class Combat {
           // the blow lands partway through the swing, so you can step out of it
           const reach = (def.reach || 14) * (w.scale || 1) + 8;
           const boss = w.nightBoss || w.miniBoss; // a boss winds up slowly, so the red fan is easy to read and dodge
-          this.startSwing(w, pickOf(def.swings), boss ? 1.5 : 0.6, boss ? 0.75 : 0.55, () => {
+          const dur = boss ? 1.8 : 0.6;
+          const at = boss ? (w.nightBoss ? 0.75 : 0.65) : 0.55; // a boss: about 1.35s of warning (a mini boss 1.2s), the others a third of a second
+          if (boss) {
+            w.cd = dur + 0.9 + Math.random() * 0.5; // ...and then it recovers, so the blows come in a steady rhythm you can learn
+            w.skT = Math.max(w.skT ?? 0, 1.5); // (no skill straight after a blow)
+          }
+          this.startSwing(w, pickOf(def.swings), dur, at, () => {
             w.atk = 0.2;
-            if (!this.hidden && !this.g.dead && Math.hypot(this.g.player.x - w.x, this.g.player.y - w.y) <= reach) this.hurtPlayer(hitNow, w.x, w.y, { by });
+            // the blow lands in the red fan and nowhere else: in front of it, within its reach
+            if (!this.hidden && !this.g.dead && inFan(w, this.g.player, reach)) this.hurtPlayer(hitNow, w.x, w.y, { by });
           }, { warn: 'fan', reach });
         } else {
           w.atk = 0.2;
@@ -1667,7 +1728,7 @@ export class Combat {
       this.startSwing(w, pickOf(def.swings), 0.7 * slow, 0.5, null);
       return;
     }
-    this.startSwing(w, 'atk1', 0.65 * slow, 0.6, () => {
+    this.startSwing(w, 'atk1', 0.65 * slow, slow > 1 ? 0.85 : 0.6, () => { // (a boss draws its bow back for about a second)
       const a = Math.atan2(p.y - 6 - (w.y - 8), p.x - w.x);
       w.atk = 0.2;
       sfx.play('swing', 0.5);
@@ -1750,7 +1811,10 @@ export class Combat {
       }
       if (!s.mine && !s.fxOnly && !s.did && s.t >= 0.1) {
         s.did = true;
-        if (!this.hidden && !this.g.dead && Math.hypot(p.x - s.x, p.y - s.y) <= s.radius) this.hurtPlayer(s.dmg, s.x, s.y, { by: s.by });
+        // (the red mark on the ground is an ellipse, 0.55 as tall as it is wide: that is the area that hurts)
+        const ex = (p.x - s.x) / s.radius;
+        const ey = (p.y - s.y) / (s.radius * 0.55);
+        if (!this.hidden && !this.g.dead && ex * ex + ey * ey <= 1) this.hurtPlayer(s.dmg, s.x, s.y, { by: s.by });
       }
       return s.t < s.frames / 12;
     });
@@ -1760,7 +1824,7 @@ export class Combat {
   nightBossSkill(w, def, dt, dist, dx, dy, step) {
     const scale = w.scale || def.scale || 1;
     const radius = 30 + 14 * scale;
-    const wind = BOSS_WIND * (w.nightBoss || w.miniBoss ? 1.9 : 1.3); // the red mark builds up slowly before the blow
+    const wind = BOSS_WIND * (w.nightBoss ? 1.25 : w.miniBoss ? 1.1 : 0.95); // the red mark builds up slowly before the blow: 2s for a boss, 1.8s for a mini boss
     const who = w.nightBoss ? `the night boss ${def.name}` : w.miniBoss ? `the mini boss ${def.name}` : def.name;
     const hit = (mult) => this.hurtPlayer(Math.max(1, Math.round(def.dmg * (w.dmgMul || 1) * lvDmg(w.lv || 1) * (1 + 0.05 * (this.g.day - 1)) * (1 + 0.5 * this.g.darkness()) * mult)), w.x, w.y, { by: { kind: 'monster', id: w.id, name: who } });
     w.skT = (w.skT ?? 3 + (def.skill === 'charge' ? 3 : 0)) - dt;
@@ -1779,14 +1843,18 @@ export class Combat {
         sk.t = 0;
         sk.prog = 0;
         w.atk = 0.3;
-        if (sk.kind === 'spiral' && dist < radius + 6) hit(1.6);
+        // the spiral hurts inside the red ellipse it showed, and nowhere else
+        const ex = (this.g.player.x - w.x) / radius;
+        const ey = (this.g.player.y - (w.y - 2)) / (radius * 0.8);
+        if (sk.kind === 'spiral' && ex * ex + ey * ey <= 1) hit(1.6);
       }
       return true;
     }
     if (sk.kind === 'dash') {
       sk.prog = Math.min(1, sk.t / 0.4);
       step(Math.cos(sk.ang) * 250 * dt, Math.sin(sk.ang) * 250 * dt);
-      if (!sk.hit && dist < 12 + 6 * scale) {
+      // the dash hurts whoever is in the red lane (as wide as the mark: see bossDashHalf)
+      if (!sk.hit && Math.hypot(this.g.player.x - w.x, this.g.player.y - w.y) < bossDashHalf(scale)) {
         sk.hit = true;
         hit(1.4);
       }
@@ -1794,12 +1862,14 @@ export class Combat {
       if (sk.t >= 0.4) {
         w.skill = null;
         w.skT = 5 + Math.random() * 4;
+        w.cd = Math.max(w.cd, 1.3); // it catches its breath before the next blow
       }
     } else {
       sk.prog = Math.min(1, sk.t / 0.35);
       if (sk.t >= 0.35) {
         w.skill = null;
         w.skT = 5 + Math.random() * 4;
+        w.cd = Math.max(w.cd, 1.3);
       }
     }
     return true;
@@ -2113,7 +2183,10 @@ export class Combat {
         this.treeBars = this.treeBars.filter((b) => b.key !== o.tkey);
         if (this.g.wave) {
           this.drops.push({ x: o.x, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 30, vy: Math.random() * 14, vz: 90, fly: true, burst: true, id: 'barricade', qty: 1, age: 0 });
-          this.g.onToast?.('🪵 The tree fell and left a Barricade Box.');
+          // ...and some wood, which the shop buys (Buy menu, Sell tab)
+          const logs = { large: 3, medium: 2, sapling: 1, stump: 1 }[o.tk] || 1;
+          for (let n = 0; n < logs; n++) this.drops.push({ x: o.x + (n - (logs - 1) / 2) * 5, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 50, vy: Math.random() * 18, vz: 90 + Math.random() * 30, fly: true, burst: true, id: 'wood', qty: 1, age: 0 });
+          this.g.onToast?.(`🪵 The tree fell: a Barricade Box and ${logs} wood (sell wood in the shop).`);
         } else {
           const logs = { large: 3, medium: 2, sapling: 1, stump: 1 }[o.tk] || 1;
           for (let n = 0; n < logs; n++) this.drops.push({ x: o.x + (n - (logs - 1) / 2) * 5, y: o.y - 2, z: 6, vx: (Math.random() - 0.5) * 50, vy: Math.random() * 18, vz: 90 + Math.random() * 30, fly: true, burst: true, id: 'wood', qty: 1, age: 0 });
@@ -2335,6 +2408,7 @@ export class Combat {
     this.wilds = [];
     this.wildShots = [];
     this.spells = [];
+    this.remoteTridents = [];
     this.projectiles = [];
     this.swing = null;
     this.dash = null;
@@ -2588,6 +2662,7 @@ export class Combat {
     for (const w of this.wilds) list.push({ kind: 'monster', m: w, y: w.y });
     for (const p of this.projectiles) list.push({ kind: 'projectile', p, y: p.y + 6 });
     if (this.thrown) list.push({ kind: 'projectile', p: { id: 'trident', th: this.thrown }, y: this.thrown.y + 6 });
+    for (const th of this.remoteTridents) list.push({ kind: 'projectile', p: { id: 'trident', th }, y: th.y + 6 });
     for (const s of this.wildShots) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'wshot', arrow: s.arrow, ang: Math.atan2(s.vy, s.vx) }, y: s.y + 6 });
     for (const s of this.spells) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'spell', s }, y: s.y + 1 });
     for (const sm of this.smokes) list.push({ kind: 'projectile', p: { x: sm.x, y: sm.y, id: 'smoke', sm }, y: sm.y + 30 });

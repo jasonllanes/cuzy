@@ -8,6 +8,7 @@ import ItemIcon from './ItemIcon';
 export default function SellPanel({ hud, game, inventory = [] }) {
   const swords = WEAPONS.filter((w) => w.id !== 'trusty' && hud.weapons?.owned?.[w.id]);
   const wood = hud.wood || 0;
+  const woodEach = hud.wave ? 2 : 1; // Survival and Wave Defense pay double
   const guns = hud.gunsOwned ? GUN_ORDER.filter((id) => id !== 'pistol' && hud.gunsOwned[id]) : [];
   const bag = inventory.map((slot, i) => ({ slot, i })).filter(({ slot }) => slot && sellValue(slot.id) > 0);
   const food = Object.entries(hud.consumables || {}).filter(([id, q]) => q > 0 && sellValue(id) > 0);
@@ -32,11 +33,11 @@ export default function SellPanel({ hud, game, inventory = [] }) {
           <div className="recruit-chip hire rar rar-common">
             <span>
               <b><ItemIcon id="wood" scale={2} /> Wood ×{wood}</b>
-              <small>🪙 1 each</small>
+              <small>🪙 {woodEach} each</small>
             </span>
             <span className="row-btns">
               <button className="btn go small-btn" onClick={() => game.sell('wood')}>Sell 1</button>
-              {wood > 1 && <button className="btn small-btn" onClick={() => game.sell('wood', null, true)}>All 🪙 {wood}</button>}
+              {wood > 1 && <button className="btn small-btn" onClick={() => game.sell('wood', null, true)}>All 🪙 {wood * woodEach}</button>}
             </span>
           </div>
         )}

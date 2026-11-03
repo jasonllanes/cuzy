@@ -15,6 +15,8 @@ export const ALLIES = {
   guard: { name: 'Guard', cost: 9, hero: 'adam', color: '#f2b05e', pips: 2, ai: 'melee', range: 120, rate: 0.9, dmg: 2, speed: 55, blurb: 'Stays below on the ground, runs down nearby enemies and cuts them with a grey slash.' },
   rifle: { name: 'Rifle Survivor', cost: 14, hero: 'bob', color: '#e8506a', pips: 2, ai: 'ranged', gun: 'rifle', range: 150, rate: 0.55, dmg: 1.2, shotSpeed: 240, blurb: 'A rifle on the roof: quick, accurate shots from a good way off.' },
   plasma: { name: 'Plasma Survivor', cost: 24, hero: 'amelia', color: '#4aa8ff', pips: 3, ai: 'ranged', gun: 'plasma', range: 140, rate: 1.0, dmg: 3.5, shotSpeed: 160, pierce: 1, pad: 'rifle', blurb: 'A plasma gun on the roof. Slow glowing bolts that burn through two enemies in a line.' },
+  // lob: it throws grenades instead of shooting: a slow arc, then a blast that hits everything inside its circle (R, px)
+  grenadier: { name: 'Grenadier', cost: 18, hero: 'alex', color: '#ff9a3c', pips: 3, ai: 'ranged', lob: true, icon: '💣', range: 150, rate: 2.6, dmg: 4, R: 30, pad: 'rifle', blurb: 'Watches from the roof and lobs grenades into the crowd. The blast hits every zombie in its circle.' },
 };
 
 export const ALLY_KINDS = Object.keys(ALLIES);

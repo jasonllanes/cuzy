@@ -1157,6 +1157,19 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 
 .base-lv { font: 700 0.7rem var(--pixel); color: #b0782a; white-space: nowrap; }
 
+/* the shelter's health: always at the top of the screen, under the weather chip, wherever you are on the map */
+.shelter-bar { top: 46px; left: 50%; transform: translateX(-50%); width: 300px; display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; pointer-events: none; z-index: 5; }
+.shelter-bar .shelter-ico { font-size: 1.1rem; line-height: 1; }
+.shelter-bar .shelter-name { font: 700 0.72rem var(--pixel); color: #b0782a; white-space: nowrap; }
+.shelter-bar .base-track { height: 13px; min-width: 70px; }
+.shelter-bar .shelter-hp { font: 700 0.78rem var(--pixel); color: var(--ink); white-space: nowrap; }
+.shelter-bar .shelter-hp i { font-style: normal; font-weight: 400; color: var(--ink-soft); font-size: 0.68rem; }
+.shelter-bar.low { border-color: var(--rose); }
+.shelter-bar.hit { animation: shelter-shake 0.35s linear; }
+@keyframes shelter-shake { 0%, 100% { transform: translateX(-50%); } 20% { transform: translateX(calc(-50% - 4px)); } 40% { transform: translateX(calc(-50% + 4px)); } 60% { transform: translateX(calc(-50% - 3px)); } 80% { transform: translateX(calc(-50% + 3px)); } }
+.mobile-ui .game.mobile .shelter-bar { top: 40px; width: 270px; transform: translateX(-50%) scale(calc(var(--mz) * var(--hs))); transform-origin: top center; }
+.mobile-ui .game.mobile .shelter-bar.hit { animation: none; }
+
 .kill-board { margin-top: 6px; }
 .mobile-ui .game.mobile .kill-board { display: none; }
 

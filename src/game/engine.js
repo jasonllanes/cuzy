@@ -5,7 +5,7 @@ import { Combat, GUNS, SHIELD_DUR } from './combat';
 import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
 import { TINY } from './tiny';
-import { BARRICADE_COST, BARRICADE_RECT, REPAIR_COST, WaveMirror, WaveSim } from './waves';
+import { BARRICADE_COST, BARRICADE_RECT, REPAIR_COST, WaveMirror, WaveSim, bossDashHalf } from './waves';
 import { ALLIES } from './allies';
 import { Bots } from './bots';
 import { AiPlayers } from './aiPlayers';
@@ -328,17 +328,15 @@ export class Game {
         }
       } else if (e.code === 'Space') {
         e.preventDefault();
-        if (!e.repeat && !this.dead) {
-          if (this.wave) this.combat?.activateShield(); // Survival: Space is the shield (holding left click is the dash)
-          else this.combat?.skillKeyDown();
-        }
+        if (!e.repeat && !this.dead) this.combat?.skillKeyDown(); // Space is the dash (hold it to charge) in every mode
       } else if (this.dead) {
         // downed heroes just wait for the respawn
       } else if (e.code === 'KeyH' && !e.repeat) {
         this.combat?.startRecall();
       } else if (e.code === 'KeyR' && !e.repeat) {
-        if (this.wave) this.rotateWall(1); // turn the barricade you are about to place
-        else this.combat?.activateUtil(); // Free Roam: your Shield or Invisibility
+        this.combat?.activateUtil(); // your Shield (in Survival always), or Invisibility in Free Roam
+      } else if (e.code === 'KeyT' && !e.repeat && this.wave) {
+        this.rotateWall(1); // turn the barricade you are about to place
       }
     };
     this.onKeyUp = (e) => {
@@ -349,7 +347,7 @@ export class Game {
         this.spaceLock = false;
         this.spaceHold = 0;
       }
-      if (e.code === 'Space' && !this.wave) this.combat?.skillKeyUp();
+      if (e.code === 'Space') this.combat?.skillKeyUp();
     };
     this.onBlur = () => {
       this.spaceDown = false;
@@ -382,7 +380,7 @@ export class Game {
           this.wallHold = { x, y };
           return;
         }
-        this.combat.holdStart(); // otherwise left click is your melee weapon: tap = swing, hold + release = dash (a staff, trident or sling in Free Roam: its big move)
+        this.combat.holdStart(); // otherwise left click is your melee weapon: tap = swing (a staff, trident or sling: hold + release for its big move). The dash is on Space
       }
     };
     this.onMouseUp = (e) => {
@@ -1146,7 +1144,14 @@ export class Game {
 
   onWaveEvent(ev) {
     const c = this.combat;
-    if (ev.type === 'start') {
+    if (ev.type === 'start' && ev.endless) {
+      // Endless: there are no waves to announce, only the Colossus that turns up now and then
+      if (ev.bosses > 0) {
+        sfx.play('wave');
+        this.announceBoss('☠ A COLOSSUS IS COMING', 'Follow the red arrow to find it');
+        this.onToast?.(`${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming!`);
+      }
+    } else if (ev.type === 'start') {
       sfx.play('wave');
       if (ev.bosses > 0) this.announceBoss(ev.boss ? '☠ FINAL WAVE: BOSS INCOMING' : `☠ WAVE ${ev.wave}: BOSS INCOMING`, 'Follow the red arrow to find the boss');
       if (this.world.apoc && ev.bosses > 0) this.onToast?.(`${ev.boss ? 'FINAL WAVE! ' : `Wave ${ev.wave}: `}${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming!`);
@@ -1168,6 +1173,9 @@ export class Game {
       for (const l of ev.loot) {
         c.drops.push({ x: ev.x + (Math.random() - 0.5) * 16, y: ev.y + (Math.random() - 0.5) * 8, id: l.id, qty: l.qty, age: 0 });
       }
+    } else if (ev.type === 'boom') {
+      c.blasts.push({ x: ev.x, y: ev.y, t: 0, R: ev.R || 30 }); // a grenadier's grenade
+      sfx.play('boom', 0.6);
     } else if (ev.type === 'bhit') {
       this.startHouseHit(ev);
     } else if (ev.type === 'bbreak') {
@@ -1672,7 +1680,7 @@ export class Game {
       const n = all ? this.wood : Math.min(1, this.wood);
       if (n < 1) return;
       this.wood -= n;
-      paid(n, `${n} wood`);
+      paid(n * (this.wave ? 2 : 1), `${n} wood`); // (Survival pays double: wood is its only trade good)
     } else if (kind === 'gun') {
       const g = GUNS[id];
       if (!g || id === 'pistol' || !c.owned[id]) return;
@@ -1822,6 +1830,16 @@ export class Game {
     this.lastSelId = id;
     const gun = id && ITEMS[id]?.gun;
     if (gun && this.combat?.owned[gun]) this.combat.equipGun(gun);
+  }
+
+  // Survival's Shelter light is one level for the whole team: whoever buys it lights the lamps for everyone, and the level you see is the team's
+  syncShelterLight() {
+    const w = this.wave;
+    if (!w || !this.world.apoc) return;
+    const mine = this.upgrades.light || 0;
+    const team = w.lightLevel || 0;
+    if (team > mine) this.upgrades.light = team;
+    else if (mine > team) w.setLight(mine);
   }
 
   buyUpgrade(id) {
@@ -2001,16 +2019,17 @@ export class Game {
     ctx.translate(x, y);
     if (sk.kind === 'dash') {
       const len = 100;
+      const hw = bossDashHalf(sc); // the lane is exactly as wide as what the dash hurts
       ctx.rotate(sk.ang);
       if (sk.phase === 0) {
         const flash = sk.prog > 0.7 && Math.sin(this.t * 40) > 0 ? 0.25 : 0;
         ctx.fillStyle = `rgba(255,30,30,${0.14 + flash})`;
-        ctx.fillRect(0, -12, len, 24);
+        ctx.fillRect(0, -hw, len, hw * 2);
         ctx.fillStyle = `rgba(255,40,40,${0.35 + 0.25 * sk.prog})`;
-        ctx.fillRect(0, -12, len * sk.prog, 24);
+        ctx.fillRect(0, -hw, len * sk.prog, hw * 2);
         ctx.strokeStyle = 'rgba(255,70,70,0.95)';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(0.5, -11.5, len - 1, 23);
+        ctx.strokeRect(0.5, -hw + 0.5, len - 1, hw * 2 - 1);
         ctx.beginPath();
         ctx.moveTo(len, 0);
         ctx.lineTo(len - 10, -9);
@@ -2386,7 +2405,17 @@ export class Game {
     ctx.save();
     ctx.translate(Math.round(s.x), Math.round(s.y));
     ctx.rotate(ang);
-    if (s.k === 2) {
+    if (s.k === 3) {
+      // a grenade in the air, with a little shadow on the ground where it will come down
+      ctx.rotate(-ang);
+      ctx.rotate(this.t * 9);
+      ctx.fillStyle = '#4b5b2e';
+      ctx.fillRect(-2, -2, 4, 4);
+      ctx.fillStyle = '#7d8f4c';
+      ctx.fillRect(-2, -2, 2, 2);
+      ctx.fillStyle = '#ffd24d';
+      ctx.fillRect(1, -3, 2, 1);
+    } else if (s.k === 2) {
       ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = 'rgba(74,168,255,0.35)';
       ctx.beginPath();
@@ -2450,6 +2479,15 @@ export class Game {
     ctx.globalAlpha = 1;
     this.drawHeroAt(ctx, hero, dir, a.moving, a.anim, a.x, a.y);
     if (def.gun) this.drawAllyGun(ctx, a, def, x, y);
+    if (def.lob) {
+      // a grenade in the raised hand, which is gone for a moment after the throw
+      if (a.atk < 0.1) {
+        ctx.fillStyle = '#4b5b2e';
+        ctx.fillRect(x + 4, y - 14, 4, 4);
+        ctx.fillStyle = '#ffd24d';
+        ctx.fillRect(x + 6, y - 15, 2, 1);
+      }
+    }
     if (def.ai === 'melee' && a.atk > 0) {
       // the guard's slash: a grey crescent swept across the way they face
       const p = 1 - a.atk / 0.25;
@@ -2688,6 +2726,10 @@ export class Game {
     } else if (m.t === 'fx' && m.kind === 'swing') {
       const r = this.remotes.get(m.id);
       if (r) r.swing = { t: 0, a: m.a, w: m.w, lv: r.lv };
+    } else if (m.t === 'fx' && m.kind === 'trident') {
+      this.combat.remoteTrident(m);
+    } else if (m.t === 'fx' && m.kind === 'cast') {
+      this.combat.remoteCast(m);
     } else if (m.t === 'fx' && m.kind === 'spin') {
       const r = this.remotes.get(m.id);
       if (r) r.spin = { t: 0, dur: m.d || 0.6, a0: m.a || 0, r: Math.min(80, m.r || 40) };
@@ -2997,6 +3039,7 @@ export class Game {
         this.aiSim?.update(dt);
       }
       this.wave?.update(dt);
+      this.syncShelterLight();
       if (this.mp) {
         // everyone in the room reads the same clock
         const total = this.mp.clockHour + ((performance.now() - this.mp.clockAt) / 1000) * HOURS_PER_SECOND;

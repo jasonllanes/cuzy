@@ -87,6 +87,26 @@ export const WAVES_APOC = [
   [['z_big', 8], ['z_armor', 10], ['z_axe', 14], ['z_runner', 16], ['z_small', 20]], // + Colossus bosses (see bossesFor)
 ];
 
+// Endless Survival: no waves to wait for. Zombies keep coming in batches (a "stage" is only how hard the batch is), and every
+// stage is a little harder than the last, for as long as the shelter stands. A Colossus turns up every 5th stage.
+export function endlessList(stage, diff) {
+  const table = WAVES_APOC[Math.min(stage, 10) - 1];
+  const grow = stage > 10 ? 1 + 0.12 * (stage - 10) : 1;
+  const list = [];
+  for (const [type, n] of table) {
+    const count = Math.max(1, Math.round(n * diff.count * 0.55 * grow));
+    for (let i = 0; i < count; i++) list.push(type);
+  }
+  for (let i = 0; i < endlessBosses(stage, diff); i++) list.push('z_boss');
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}
+
+export const endlessBosses = (stage, diff) => (stage % 5 === 0 ? (stage % 10 === 0 ? diff.boss10 : diff.boss5) + Math.floor(stage / 20) : 0);
+
 // Survival's Colossus bosses come on wave 5 and wave 10, and how many depends on the difficulty
 export const bossesFor = (wave, diff) => (wave === 5 ? diff.boss5 : wave === 10 ? diff.boss10 : 0) || 0;
 
