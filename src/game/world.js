@@ -16,6 +16,8 @@ export const GRASS = 2;
 
 // The Duel colosseum: sand tiles -ARENA_HALF .. ARENA_HALF-1 each way, a two-tile wall all round it, and things to hide behind
 export const ARENA_HALF = 15;
+export const ARENA_ZONE = 9000; // in every Free Roam world the Colosseum also stands far off at this tile, for the duels that happen in the middle of a round
+const ARENA_BOX = 26; // the area around it that belongs to it
 const ARENA_PILLARS = [[-9, -8], [7, -8], [-9, 6], [7, 6], [-1, -1]]; // (2x2 tiles each, by their top-left tile)
 const ARENA_CRATES = [[-4, -10], [3, 9], [3, -10], [-4, 9], [-5, -3], [4, 2], [4, -3], [-5, 2], [-12, -7], [11, 6], [11, -7], [-12, 6]];
 const ARENA_STARTS = [[-13, 0], [12, 0], [-1, -12], [0, 11]]; // where the players stand (by slot): across the sand from each other
@@ -60,7 +62,9 @@ export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
     this.endless = theme === 'apoc' && isEndlessSeed(seedStr); // Survival without waves
-    this.arena = theme !== 'apoc' && !waves && isArenaSeed(seedStr); // the Duel colosseum
+    this.arena = theme !== 'apoc' && !waves && isArenaSeed(seedStr); // the Duel colosseum (a whole world of it)
+    this.hasArena = theme !== 'apoc' && !waves; // (Free Roam worlds have the Colosseum far off too, where the duels of a running round are fought)
+    this.ac = this.arena ? { x: 0, y: 0 } : { x: ARENA_ZONE, y: ARENA_ZONE }; // its middle, in tiles
     this.seedStr = stripEndless(stripV2(stripEndless(stripArena(seedStr))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
@@ -167,7 +171,8 @@ export class World {
 
   type(x, y) {
     if (x >= ZONE_TILE0 && x < ZONE_TILE1 && y >= ZONE_TILE0 && y < ZONE_TILE1) return GRASS; // inside a dungeon
-    if (this.arena) return x >= -ARENA_HALF && x < ARENA_HALF && y >= -ARENA_HALF && y < ARENA_HALF ? SAND : GRASS;
+    const at = this.arenaTile(x, y);
+    if (at !== undefined) return at;
     const key = (x + 32768) * 65536 + (y + 32768);
     let t = this.typeCache.get(key);
     if (t === undefined) {
@@ -201,6 +206,7 @@ export class World {
       for (let a = 0; a < 10 && !site; a++) {
         const x = drx * DREGION + 8 + Math.floor(hash2(drx, dry, this.seed + 8802 + a * 17) * 24);
         const y = dry * DREGION + 12 + Math.floor(hash2(drx, dry, this.seed + 8803 + a * 17) * 20);
+        if (this.nearArena(x, y, 14)) continue; // (not in the Colosseum)
         const kind = portal ? this.riftFor(x, y, drx, dry) : base;
         const rad = kind === 'ruin' ? 5 : 3;
         let ok = true;
@@ -355,7 +361,7 @@ export class World {
 
   // Trees live on a 2x2 tile grid so their bases never overlap.
   treeAt(bx, by) {
-    if (this.arena) return null;
+    if (this.arena || this.nearArena(bx * 2, by * 2, 2)) return null;
     if (this.tileset === 'wood') return null; // (no trees growing through the floorboards)
     const key = `${bx},${by}`;
     if (this.treeCache.has(key)) return this.treeCache.get(key);
@@ -554,7 +560,7 @@ export class World {
   buildChunk(cx, cy) {
     const zone = zoneOf(cx, cy);
     if (zone) return this.buildZoneChunk(cx, cy, zone);
-    if (this.arena) return this.buildArenaChunk(cx, cy);
+    if (this.arena || this.chunkInArena(cx, cy)) return this.buildArenaChunk(cx, cy);
     const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
     const x0 = cx * CHUNK;
     const y0 = cy * CHUNK;
@@ -687,48 +693,82 @@ export class World {
     return chunk;
   }
 
+  // what a tile is where the Colosseum stands (undefined: not part of it)
+  arenaTile(x, y) {
+    if (!this.hasArena) return undefined;
+    const lx = x - this.ac.x;
+    const ly = y - this.ac.y;
+    if (!this.arena && (lx < -ARENA_BOX || lx > ARENA_BOX || ly < -ARENA_BOX || ly > ARENA_BOX)) return undefined;
+    return lx >= -ARENA_HALF && lx < ARENA_HALF && ly >= -ARENA_HALF && ly < ARENA_HALF ? SAND : GRASS;
+  }
+
+  // is this tile (give or take `pad`) inside the Colosseum's area? (a world made of it is all of it)
+  nearArena(tx, ty, pad = 0) {
+    if (!this.hasArena) return false;
+    return this.arena || (Math.abs(tx - this.ac.x) <= ARENA_BOX + pad && Math.abs(ty - this.ac.y) <= ARENA_BOX + pad);
+  }
+
+  chunkInArena(cx, cy) {
+    if (!this.hasArena) return false;
+    if (this.arena) return true;
+    const x0 = cx * CHUNK;
+    const y0 = cy * CHUNK;
+    return x0 + CHUNK > this.ac.x - ARENA_BOX && x0 <= this.ac.x + ARENA_BOX && y0 + CHUNK > this.ac.y - ARENA_BOX && y0 <= this.ac.y + ARENA_BOX;
+  }
+
+  // is this spot (in pixels) in the Colosseum?
+  inArenaZone(px, py) {
+    return this.nearArena(Math.floor(px / T), Math.floor(py / T), 0);
+  }
+
   // where a player stands at the start of a duel
   // (`k` of `n` is the place among the others on the same side: a team stands in a short line)
   arenaSpawn(slot = 0, k = 0, n = 1) {
     const i = Math.abs(slot | 0) % ARENA_STARTS.length;
     const [tx, ty] = ARENA_STARTS[i];
     const off = (k - (n - 1) / 2) * 20;
-    return i < 2 ? { x: tx * T + 8, y: ty * T + 12 + off } : { x: tx * T + 8 + off, y: ty * T + 12 };
+    const ox = this.ac.x * T;
+    const oy = this.ac.y * T;
+    return i < 2 ? { x: ox + tx * T + 8, y: oy + ty * T + 12 + off } : { x: ox + tx * T + 8 + off, y: oy + ty * T + 12 };
   }
 
   // the ones who only watch a duel wait outside the wall (their view follows the fighters)
   arenaSpectator(k = 0) {
-    return { x: (k % 6) * 16 - 40, y: -(ARENA_HALF + 6) * T };
+    return { x: this.ac.x * T + (k % 6) * 16 - 40, y: this.ac.y * T - (ARENA_HALF + 6) * T };
   }
 
   // the colosseum: wall tiles all round, pillars and crates inside (the same for everyone: no randomness)
   buildArenaChunk(cx, cy) {
     const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
+    const ox = this.ac.x;
+    const oy = this.ac.y;
     const inChunk = (tx, ty) => Math.floor(tx / CHUNK) === cx && Math.floor(ty / CHUNK) === cy;
-    const lo = -ARENA_HALF - 2;
-    const hi = ARENA_HALF + 1;
-    for (let ty = lo; ty <= hi; ty++) {
-      for (let tx = lo; tx <= hi; tx++) {
-        if (tx >= -ARENA_HALF && tx < ARENA_HALF && ty >= -ARENA_HALF && ty < ARENA_HALF) continue;
-        if (!inChunk(tx, ty)) continue;
+    const floor = (tx, ty) => tx >= ox - ARENA_HALF && tx < ox + ARENA_HALF && ty >= oy - ARENA_HALF && ty < oy + ARENA_HALF;
+    for (let ty = oy - ARENA_HALF - 2; ty <= oy + ARENA_HALF + 1; ty++) {
+      for (let tx = ox - ARENA_HALF - 2; tx <= ox + ARENA_HALF + 1; tx++) {
+        if (floor(tx, ty) || !inChunk(tx, ty)) continue;
         chunk.rects.push({ x: tx * T, y: ty * T, w: T, h: T });
-        const faces = ty + 1 >= -ARENA_HALF && ty + 1 < ARENA_HALF && tx >= -ARENA_HALF && tx < ARENA_HALF; // the sand lies just south of it: its front face shows
+        const faces = floor(tx, ty + 1); // the sand lies just south of it: its front face shows
         chunk.objects.push({ kind: 'arenawall', x: tx * T + 8, y: ty * T + T, tx, ty, faces });
       }
     }
-    for (const [tx, ty] of ARENA_PILLARS) {
+    for (const [dx, dy] of ARENA_PILLARS) {
+      const tx = ox + dx;
+      const ty = oy + dy;
       if (!inChunk(tx, ty)) continue;
       chunk.rects.push({ x: tx * T + 1, y: ty * T + 10, w: 30, h: 22 });
       chunk.objects.push({ kind: 'arenablock', style: 'pillar', x: tx * T + 16, y: (ty + 2) * T - 1 });
     }
-    for (const [tx, ty] of ARENA_CRATES) {
+    for (const [dx, dy] of ARENA_CRATES) {
+      const tx = ox + dx;
+      const ty = oy + dy;
       if (!inChunk(tx, ty)) continue;
       chunk.rects.push({ x: tx * T + 1, y: ty * T + 6, w: 14, h: 9 });
       chunk.objects.push({ kind: 'arenablock', style: 'crate', x: tx * T + 8, y: ty * T + 15 });
     }
     // a few pebbles on the sand
-    for (let ty = Math.max(cy * CHUNK, -ARENA_HALF); ty < Math.min((cy + 1) * CHUNK, ARENA_HALF); ty++) {
-      for (let tx = Math.max(cx * CHUNK, -ARENA_HALF); tx < Math.min((cx + 1) * CHUNK, ARENA_HALF); tx++) {
+    for (let ty = Math.max(cy * CHUNK, oy - ARENA_HALF); ty < Math.min((cy + 1) * CHUNK, oy + ARENA_HALF); ty++) {
+      for (let tx = Math.max(cx * CHUNK, ox - ARENA_HALF); tx < Math.min((cx + 1) * CHUNK, ox + ARENA_HALF); tx++) {
         if (hash2(tx, ty, this.seed + 25) < 0.04) chunk.decor.push({ kind: 'pebble', x: tx * T + Math.floor(hash2(tx, ty, this.seed + 26) * 11) + 2, y: ty * T + Math.floor(hash2(tx, ty, this.seed + 27) * 11) + 2 });
       }
     }
@@ -737,7 +777,7 @@ export class World {
 
   animalSpawns(cx, cy) {
     const out = [];
-    if (this.arena) return out;
+    if (this.arena || this.chunkInArena(cx, cy)) return out;
     if (zoneOf(cx, cy)) return out; // none underground
     if (this.apoc) return out; // no friendly farm animals in the apocalypse
     if (hash2(cx, cy, this.seed + 51) > 0.45) return out;
@@ -893,7 +933,7 @@ export class World {
       for (let a = 0; a < 14 && !site; a++) {
         const x = brx * BREGION + r + 3 + Math.floor(hash2(brx, bry, this.seed + 9102 + a * 13) * (BREGION - 2 * r - 6));
         const y = bry * BREGION + r + 3 + Math.floor(hash2(brx, bry, this.seed + 9103 + a * 13) * (BREGION - 2 * r - 6));
-        if (Math.hypot(x, y) < far) continue;
+        if (Math.hypot(x, y) < far || this.nearArena(x, y, r + 8)) continue;
         let ok = this.type(x, y) === GRASS && !this.moatAt(x, y);
         for (let k = 0; k < 8 && ok; k++) {
           const px = x + Math.round(Math.cos((k / 8) * Math.PI * 2) * r * 0.4);
@@ -926,7 +966,7 @@ export class World {
     if (hash2(cx, cy, this.seed + 71) > 0.2) return null;
     const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 72) * (CHUNK - 8));
     const ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 73) * (CHUNK - 8));
-    if (Math.hypot(tx, ty) < 36) return null; // keep the neighbourhood around the first houses calm
+    if (Math.hypot(tx, ty) < 36 || this.nearArena(tx, ty, 30)) return null; // keep the neighbourhood around the first houses calm
     if (this.type(tx, ty) !== GRASS || !this.isOpenMeadow(tx, ty) || this.isCleared(tx, ty)) return null;
     return { x: tx * T + 8, y: ty * T + 12 };
   }

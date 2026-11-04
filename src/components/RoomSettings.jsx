@@ -1,4 +1,4 @@
-import { TEAMS, TEAM_COUNTS } from '../game/teams';
+import { TEAM_COUNTS } from '../game/teams';
 import { DIFFICULTY, DIFFICULTY_IDS, WAVE_COUNTS } from '../game/monsters';
 import { FREE_MAPS, SURVIVAL_MAPS, mapIdOf } from '../game/maps';
 
@@ -9,6 +9,13 @@ export const WAVE_START = [
   ['manual', '🎮 Host starts', 'The host presses V (or Start) when the team is ready. No countdown.'],
   ['instant', '⚡ Non-stop', 'No breaks: the next wave comes as soon as the last zombie falls.'],
 ];
+
+const PICK_HINT = {
+  pick: 'The host picks who duels.',
+  random: 'Two players are drawn at random for every duel.',
+  streak: 'The winner stays on and the one who lost sits out: whoever has waited longest steps in.',
+  robin: 'Everybody duels everybody in turn.',
+};
 
 // One on/off setting, drawn as a switch
 export function Switch({ label, hint, on, disabled, onChange }) {
@@ -22,23 +29,42 @@ export function Switch({ label, hint, on, disabled, onChange }) {
   );
 }
 
-// The host's room rules. Everyone can see them; only the host can change them, and most are locked once a round is running.
+// A group of settings that can be folded away (what it holds, in short, shows while it is folded)
+function Section({ icon, title, note, open = true, children }) {
+  return (
+    <details className="set-section" open={open}>
+      <summary><span className="set-sec-title">{icon} {title}</span>{note && <small>{note}</small>}</summary>
+      <div className="set-grid">{children}</div>
+    </details>
+  );
+}
+
+// The host's room rules. Everyone can see them; only the host can change them. Most apply at once, even in the middle of a round.
 export default function RoomSettings({ room, count, editable, onChange, players = [] }) {
   const free = room.mode === 'free';
-  const locked = !editable || room.started; // the mode, the map, the duel and the startup money are fixed once the round starts (the rest applies at once)
-  const duel = !!room.duel;
+  const locked = !editable || room.started; // the mode, the map, the Colosseum round and the startup money are fixed once the round starts
+  const duel = !!room.duel; // a whole round in the Colosseum
+  const every = Number(room.duelEvery) || 0; // a duel every so many minutes of a running round
+  const duels = duel ? 'round' : every > 0 ? 'timed' : 'off';
   const monsters = room.winBy === 'monsters';
   const bet = Number(room.bet) || 0;
   const humans = players.filter((p) => !p.ai);
   const fighters = (room.fighters || []).filter((id) => humans.some((p) => p.id === id)); // a one-against-one duel: who fights (the others watch)
   const pair = fighters.length === 2 ? fighters : humans.slice(0, 2).map((p) => p.id);
+  const pick = room.duelPick || 'pick';
+  const duelLocked = !editable || (duel ? room.started : !!room.duelLive); // (a duel round is set up before it starts; the timed duels can be changed between duels)
+  const oneVsOne = duels === 'timed' || (duel && !room.teams);
+  const fightNote = [room.teams ? `${room.teams} teams` : 'free for all', room.pvp || duel ? 'player damage' : 'no damage'].join(' · ');
+  const duelNote = duels === 'round' ? `Colosseum round${bet ? ` · 🪙 ${bet}` : ''}` : duels === 'timed' ? `every ${every} min${bet ? ` · 🪙 ${bet}` : ''}` : 'off';
+
   return (
     <section className="settings-panel" aria-label="Room settings">
-      <h3>⚙️ Room settings {!editable && <small>set by the host</small>}{editable && room.started && <small>the mode, map, duel and startup money are fixed during a round: everything else changes right away</small>}</h3>
-      <div className="set-grid">
+      <h3>⚙️ Room settings {!editable && <small>set by the host</small>}{editable && room.started && <small>the mode, map, Colosseum round and startup money are fixed during a round: everything else changes right away</small>}</h3>
+
+      <Section icon="🌍" title="World" note={`${count} in the room · max ${room.max}`}>
         {room.mode !== 'waves' && (
           <div className="set-row">
-            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : free ? 'Free Roam: a cozy world to explore, fight or win in' : 'Survival: co-op against zombies, with the shelter to defend. The map changes to match.'}</small></div>
+            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : free ? 'Free Roam: a cozy world to explore, fight or win in' : 'Survival: co-op against zombies. The map changes to match.'}</small></div>
             <div className="seg">
               <button type="button" className={free ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'free' })}>🌻 Free Roam</button>
               <button type="button" className={room.mode === 'survival' ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'survival' })}>🧟 Survival</button>
@@ -46,7 +72,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
           </div>
         )}
         <div className="set-row">
-          <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Change the map before the round starts: everyone in the room gets the new world.'}</small></div>
+          <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Everyone in the room gets the new world.'}</small></div>
           <select value={duel ? 'colosseum' : mapIdOf(room.seed, room.mode)} disabled={locked || duel} onChange={(e) => onChange({ map: e.target.value })}>
             {duel && <option value="colosseum">🏛️ Colosseum</option>}
             {(free ? FREE_MAPS : SURVIVAL_MAPS).map((m) => <option key={m.id} value={m.id}>{m.icon} {m.name}</option>)}
@@ -64,104 +90,141 @@ export default function RoomSettings({ room, count, editable, onChange, players 
             {[0, 25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n ? `🪙 ${n}` : 'None'}</option>)}
           </select>
         </div>
-        {!free && (
+      </Section>
+
+      {!free && (
+        <Section icon="🧟" title="Survival" note={`${DIFFICULTY[room.difficulty]?.name || 'Medium'} · ${room.waves === 0 ? 'endless' : `${room.waves ?? 10} waves`}`}>
           <div className="set-row">
-            <div className="set-label"><b>Difficulty</b><small>{DIFFICULTY[room.difficulty]?.blurb || 'How tough the waves are'} The host can change it at any time, even in a round.</small></div>
+            <div className="set-label"><b>Difficulty</b><small>{DIFFICULTY[room.difficulty]?.blurb || 'How tough the waves are'} Changes at once, even in a round.</small></div>
             <div className="seg">
               {DIFFICULTY_IDS.map((d) => (
                 <button key={d} type="button" className={room.difficulty === d ? 'on' : ''} disabled={!editable} onClick={() => onChange({ difficulty: d })}>{DIFFICULTY[d].name}</button>
               ))}
             </div>
           </div>
-        )}
-        {!free && (
           <div className="set-row">
-            <div className="set-label"><b>Number of waves</b><small>{room.waves === 0 ? 'Endless: no end, the zombies and bosses keep getting stronger.' : `${room.waves ?? 10} waves, with the bosses halfway and at the end. Monsters, and the bosses too, get stronger and higher level as the run goes on. The host can change it at any time.`}</small></div>
+            <div className="set-label"><b>Number of waves</b><small>{room.waves === 0 ? 'Endless: the zombies and bosses keep getting stronger.' : `${room.waves ?? 10} waves, bosses halfway and at the end; everything gets stronger as the run goes on.`}</small></div>
             <select value={room.waves ?? 10} disabled={!editable} onChange={(e) => onChange({ waves: Number(e.target.value) })}>
               {WAVE_COUNTS.map((n) => <option key={n} value={n}>{n === 0 ? '♾️ Endless' : `${n} waves`}</option>)}
             </select>
           </div>
-        )}
-        {!free && (
           <div className="set-row">
-            <div className="set-label"><b>Next wave</b><small>{WAVE_START.find(([id]) => id === (room.waveStart || 'timer'))?.[2]} The host can change it at any time.</small></div>
+            <div className="set-label"><b>Next wave</b><small>{WAVE_START.find(([id]) => id === (room.waveStart || 'timer'))?.[2]}</small></div>
             <select value={room.waveStart || 'timer'} disabled={!editable} onChange={(e) => onChange({ waveStart: e.target.value })}>
               {WAVE_START.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select>
           </div>
-        )}
-        <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too, and everyone sees them' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />
+        </Section>
+      )}
+
+      <Section icon="👥" title="Players" note={[room.allowLate !== false ? 'late join' : 'no late join', room.allowVisit ? 'visit' : null, room.allowCheats ? 'cheats' : null].filter(Boolean).join(' · ')}>
         <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
-        <Switch label="Allow visit" hint="Players can teleport straight to another player in the room (the Room button, then Visit next to their name)" on={!!room.allowVisit} disabled={!editable} onChange={(v) => onChange({ allowVisit: v })} />
-        <Switch label="Allow cheats?" hint="Players can type commands like -gold 100 or -level 5 in the chat (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />
-        {free && (
-          <>
-            <Switch label="Duel" hint={duel ? (room.teams ? 'A team duel in the Colosseum, against the clock: a fighter who goes down is out, and the last team standing wins. When time is up the team with the lowest total health loses (the same total is a draw).' : 'A 1v1 in the Colosseum, against the clock: the first one down loses, and when time is up the lowest health loses (the same health is a draw). Everybody else in the room watches.') : 'A fight in a small walled Colosseum with crates and pillars to hide behind, against the clock: 1v1 (the others watch), or teams against teams if you pick teams.'} on={duel} disabled={locked} onChange={(v) => onChange({ duel: v })} />
-            {duel && !room.teams && humans.length > 0 && (
+        <Switch label="Allow visit" hint="Teleport straight to another player (Room button, then Visit)" on={!!room.allowVisit} disabled={!editable} onChange={(v) => onChange({ allowVisit: v })} />
+        <Switch label="Allow cheats?" hint="Chat commands like -gold 100 or -level 5 (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />
+        <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />
+      </Section>
+
+      {free && (
+        <Section icon="⚔️" title="Fighting" note={fightNote}>
+          <div className="set-row">
+            <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score and one camp. Tap a free slot under a team to join it, or use Shuffle.' : 'Free for all: everyone for themselves'}</small></div>
+            <select value={room.teams || 0} disabled={!editable || (duel && room.started)} onChange={(e) => onChange({ teams: Number(e.target.value) })}>
+              {TEAM_COUNTS.map((n) => <option key={n} value={n}>{n ? `${n} teams` : 'Free for all'}</option>)}
+            </select>
+          </div>
+          {room.teams > 0 && (
+            <div className="set-row">
+              <div className="set-label"><b>Shuffle teams</b><small>Deals everyone out to the teams at random, as evenly as it goes.</small></div>
+              <button type="button" className="btn go small-btn" disabled={!editable || (duel && room.started)} onClick={() => onChange({ shuffleTeams: true })}>🎲 Shuffle</button>
+            </div>
+          )}
+          {!duel && <Switch label="Player damage" hint="Heroes can hurt each other" on={!!room.pvp} disabled={!editable} onChange={(v) => onChange({ pvp: v })} />}
+          <Switch label="Allow melee" hint="Sword, axe, dash" on={room.allowMelee !== false} disabled={!editable} onChange={(v) => onChange({ allowMelee: v })} />
+          <Switch label="Allow throwing" hint="Right-click throws" on={room.allowThrow !== false} disabled={!editable} onChange={(v) => onChange({ allowThrow: v })} />
+          {!duel && (
+            <>
               <div className="set-row">
-                <div className="set-label"><b>Fighters</b><small>{humans.length > 2 ? 'These two duel and everybody else watches.' : 'The two of you duel.'}</small></div>
+                <div className="set-label"><b>Win by</b><small>{room.pvp ? 'What counts towards the win' : 'Player damage is off, so monsters it is'}</small></div>
                 <div className="seg">
-                  {[0, 1].map((i) => (
-                    <select key={i} value={pair[i] || ''} disabled={locked} onChange={(e) => { const next = [...pair]; next[i] = e.target.value; if (next[0] !== next[1]) onChange({ fighters: next }); }}>
-                      {humans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  ))}
+                  <button type="button" className={!monsters ? 'on' : ''} disabled={!editable || !room.pvp} onClick={() => onChange({ winBy: 'duel', target: 10 })}>⚔️ Players</button>
+                  <button type="button" className={monsters ? 'on' : ''} disabled={!editable} onClick={() => onChange({ winBy: 'monsters', target: 15 })}>👹 Monsters</button>
                 </div>
               </div>
-            )}
-            {duel && (
-              <>
-                <div className="set-row">
-                  <div className="set-label"><b>Time limit</b><small>When the bell rings, whoever has the lowest health loses.</small></div>
-                  <select value={room.duelMins || 3} disabled={locked} onChange={(e) => onChange({ duelMins: Number(e.target.value) })}>
-                    {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} min</option>)}
-                  </select>
-                </div>
-                <Switch label="Bet" hint={bet ? `Each fighter puts ${bet} 🪙 on the table: the winner (or the winning team, sharing it) takes the losers' stakes, a draw gives them back. A player who cannot cover it stakes what they have, and the pot is only as big as the smaller stake.` : 'Off: the duel is for pride only'} on={bet > 0} disabled={locked} onChange={(v) => onChange(v ? { bet: 100, startMoney: Math.max(room.startMoney || 0, 100) } : { bet: 0 })} />
-                {bet > 0 && (
-                  <div className="set-row">
-                    <div className="set-label"><b>Stake</b><small>Taken from each player's coins when the duel starts (the startup money is raised to cover it)</small></div>
-                    <select value={bet} disabled={locked} onChange={(e) => onChange({ bet: Number(e.target.value), startMoney: Math.max(room.startMoney || 0, Number(e.target.value)) })}>
-                      {[25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>🪙 {n}</option>)}
-                    </select>
-                  </div>
-                )}
-              </>
-            )}
+              <div className="set-row wide">
+                <div className="set-label"><b>Reach {room.target} {monsters ? 'monster ' : 'player '}kills to win</b><small>Drag to change</small></div>
+                <input type="range" min={1} max={50} value={Math.min(50, room.target)} disabled={!editable} onChange={(e) => onChange({ target: Number(e.target.value) })} />
+              </div>
+            </>
+          )}
+        </Section>
+      )}
+
+      {free && (
+        <Section icon="🏛️" title="Duels" note={duelNote} open={duels !== 'off'}>
+          <div className="set-row wide">
+            <div className="set-label">
+              <b>Colosseum duels</b>
+              <small>{duels === 'off' ? 'No duels.' : duels === 'timed' ? 'Every few minutes the game calls two players (never two from the same team) to the Colosseum while everyone else watches. They come back afterwards.' : 'The whole round is fought in the Colosseum against the clock: 1v1 with the others watching, or teams against teams.'}</small>
+            </div>
+            <div className="seg">
+              <button type="button" className={duels === 'off' ? 'on' : ''} disabled={duelLocked || (duel && room.started)} onClick={() => onChange({ duel: false, duelEvery: 0 })}>Off</button>
+              <button type="button" className={duels === 'timed' ? 'on' : ''} disabled={duelLocked || (duel && room.started)} onClick={() => onChange({ duel: false, duelEvery: every || 5 })}>⏱ Timed</button>
+              <button type="button" className={duels === 'round' ? 'on' : ''} disabled={!editable || room.started} onClick={() => onChange({ duel: true })}>🏛️ Round</button>
+            </div>
+          </div>
+          {duels === 'timed' && (
             <div className="set-row">
-              <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score and one camp (a house they all go into). Tap a free slot under a team to join it, or use Shuffle.' : 'Free for all: everyone for themselves'}</small></div>
-              <select value={room.teams || 0} disabled={!editable || (duel && room.started)} onChange={(e) => onChange({ teams: Number(e.target.value) })}>
-                {TEAM_COUNTS.map((n) => <option key={n} value={n}>{n ? `${n} teams` : 'Free for all'}</option>)}
+              <div className="set-label"><b>A duel every</b><small>Counted from the start of the round, and again after each duel.</small></div>
+              <select value={every} disabled={duelLocked} onChange={(e) => onChange({ duelEvery: Number(e.target.value) })}>
+                {[...new Set([2, 3, 5, 10, 15, 20, every])].filter(Boolean).sort((a, b) => a - b).map((n) => <option key={n} value={n}>{n} min</option>)}
               </select>
             </div>
-            {room.teams > 0 && (
-              <div className="set-row">
-                <div className="set-label"><b>Shuffle teams</b><small>Deals everyone (computer players too) out to the teams at random, as evenly as it goes. Tap it again for another draw.</small></div>
-                <button type="button" className="btn go small-btn" disabled={!editable || (duel && room.started)} onClick={() => onChange({ shuffleTeams: true })}>🎲 Shuffle</button>
-              </div>
-            )}
-            {!duel && <Switch label="Player damage" hint="Heroes can hurt each other" on={!!room.pvp} disabled={!editable} onChange={(v) => onChange({ pvp: v })} />}
-            <Switch label="Allow melee" hint="Sword, axe, dash" on={room.allowMelee !== false} disabled={!editable} onChange={(v) => onChange({ allowMelee: v })} />
-            <Switch label="Allow throwing" hint="Right-click throws" on={room.allowThrow !== false} disabled={!editable} onChange={(v) => onChange({ allowThrow: v })} />
-            {!duel && (
-              <>
+          )}
+          {duels !== 'off' && oneVsOne && (
             <div className="set-row">
-              <div className="set-label"><b>Win by</b><small>{room.pvp ? 'What counts towards the win' : 'Player damage is off, so monsters it is'}</small></div>
+              <div className="set-label"><b>Who duels</b><small>{PICK_HINT[pick]} {duels === 'timed' && room.teams ? 'Never two from the same team. ' : ''}The others watch.</small></div>
+              <select value={pick} disabled={duelLocked} onChange={(e) => onChange({ duelPick: e.target.value })}>
+                <option value="pick">🖐 Host picks</option>
+                <option value="random">🎲 Random</option>
+                <option value="streak">🏆 Winner stays (loser sits out)</option>
+                <option value="robin">🔁 Round robin</option>
+              </select>
+            </div>
+          )}
+          {duels !== 'off' && oneVsOne && humans.length > 0 && (pick === 'pick' || duel) && (
+            <div className="set-row">
+              <div className="set-label"><b>{pick === 'pick' ? 'Fighters' : 'Next duel'}</b><small>{pick === 'pick' ? (humans.length > 2 ? 'These two duel and everybody else watches.' : 'The two of you duel.') : 'Worked out from the rule above after every duel.'}</small></div>
               <div className="seg">
-                <button type="button" className={!monsters ? 'on' : ''} disabled={!editable || !room.pvp} onClick={() => onChange({ winBy: 'duel', target: 10 })}>⚔️ Players</button>
-                <button type="button" className={monsters ? 'on' : ''} disabled={!editable} onClick={() => onChange({ winBy: 'monsters', target: 15 })}>👹 Monsters</button>
+                {pick === 'random' && duel && <button type="button" className="btn go small-btn" disabled={duelLocked} onClick={() => onChange({ reroll: true })}>🎲 Redraw</button>}
+                {[0, 1].map((i) => (
+                  <select key={i} value={pair[i] || ''} disabled={duelLocked || pick !== 'pick'} onChange={(e) => { const next = [...pair]; next[i] = e.target.value; if (next[0] !== next[1]) onChange({ fighters: next }); }}>
+                    {humans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                ))}
               </div>
             </div>
-            <div className="set-row wide">
-              <div className="set-label"><b>Reach {room.target} {monsters ? 'monster ' : 'player '}kills to win</b><small>Drag to change</small></div>
-              <input type="range" min={1} max={50} value={Math.min(50, room.target)} disabled={!editable} onChange={(e) => onChange({ target: Number(e.target.value) })} />
-            </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
+          )}
+          {duels !== 'off' && (
+            <>
+              <div className="set-row">
+                <div className="set-label"><b>Time limit</b><small>When the bell rings, whoever has the lowest health loses (the same health is a draw).</small></div>
+                <select value={room.duelMins || 3} disabled={duelLocked} onChange={(e) => onChange({ duelMins: Number(e.target.value) })}>
+                  {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} min</option>)}
+                </select>
+              </div>
+              <Switch label="Bet" hint={bet ? `Each fighter puts ${bet} 🪙 on the table: the winner takes the losers' stakes, a draw gives them back. Whoever cannot cover it stakes what they have; the pot is only as big as the smaller stake.` : 'Off: the duel is for pride only'} on={bet > 0} disabled={duelLocked} onChange={(v) => onChange(v ? { bet: 100, ...(duel ? { startMoney: Math.max(room.startMoney || 0, 100) } : {}) } : { bet: 0 })} />
+              {bet > 0 && (
+                <div className="set-row">
+                  <div className="set-label"><b>Stake</b><small>Taken from each fighter's coins when the duel starts{duel ? ' (the startup money is raised to cover it)' : ''}</small></div>
+                  <select value={bet} disabled={duelLocked} onChange={(e) => onChange({ bet: Number(e.target.value), ...(duel ? { startMoney: Math.max(room.startMoney || 0, Number(e.target.value)) } : {}) })}>
+                    {[25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>🪙 {n}</option>)}
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+      )}
     </section>
   );
 }
-

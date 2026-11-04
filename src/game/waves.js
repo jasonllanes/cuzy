@@ -9,6 +9,7 @@ const PREP_BETWEEN = 14;
 const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
 const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
 const MAX_ALIVE = 60;
+const MAX_AIR = 8; // aircraft in the sky at once
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
 export const BARRICADE_COST = 4; // a Barricade Box from the shop
 export const REPAIR_COST = 2; // per destroyed barricade planted back
@@ -85,8 +86,7 @@ export class WaveSim {
     this.baseLevel = 0;
     this.lightLevel = 0; // the shelter's lamps (Survival): one level for the whole team
     this.mendLevel = 0; // the shelter's self-repair (Survival): it heals this much more every second, for the whole team
-    this.airCd = 0; // seconds until another air strike can be called
-    this.air = null; // the air strike in the sky
+    this.airs = []; // the air strikes in the sky (as many as were bought: there is no waiting)
     this.airBombs = []; // bombs on their way down
     this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES; // how many waves the run lasts (the host picks it); 0 is endless
     this.endless = !!game.world.endless || game.waveCount === 0; // Endless Survival: no waves, the zombies just keep coming
@@ -155,8 +155,7 @@ export class WaveSim {
       baseMax: this.baseMax,
       baseLevel: this.baseLevel,
       mendLevel: this.mendLevel || 0,
-      airCd: Math.max(0, Math.ceil(this.airCd || 0)),
-      air: this.air ? this.air.kind : null,
+      air: this.airs.length,
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       allies: this.allies.length,
@@ -219,7 +218,6 @@ export class WaveSim {
     if (this.phase !== 'victory' && this.phase !== 'defeat') {
       this.elapsed += dt;
       if (this.mendLevel > 0 && this.baseHp > 0 && this.baseHp < this.baseMax) this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.0025 * this.mendLevel * dt); // the shelter mends itself
-      this.airCd = Math.max(0, (this.airCd || 0) - dt);
       this.updateAir(dt);
       this.updateAirBombs(dt);
       this.updateFlow(dt);
@@ -952,24 +950,26 @@ export class WaveSim {
   // ---------- air support (bought in the shop) ----------
 
   // 'carpet': a helicopter sweeps across the whole map and drops bombs along its path. 'gunship': a chopper circles the shelter
-  // for a minute, firing its machine gun at the zombies. One at a time, and a pause after each.
+  // for a minute, firing its machine gun at the zombies. They can be bought any time, as many as you like (a few at once is plenty).
   callAir(kind) {
-    if (this.phase === 'victory' || this.phase === 'defeat' || this.air || this.airCd > 0) return false;
+    if (this.phase === 'victory' || this.phase === 'defeat' || this.airs.length >= MAX_AIR) return false;
     const c = this.center;
     if (kind === 'carpet') {
       const ang = Math.random() * Math.PI * 2;
-      this.air = { kind, t: 0, dur: 5.6, ang, x: c.x - Math.cos(ang) * 460, y: c.y - Math.sin(ang) * 460, dropT: 0.4 };
+      this.airs.push({ kind, t: 0, dur: 5.6, ang, x: c.x - Math.cos(ang) * 460, y: c.y - Math.sin(ang) * 460, dropT: 0.4 });
     } else if (kind === 'gunship') {
-      this.air = { kind, t: 0, dur: 60, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false };
+      this.airs.push({ kind, t: 0, dur: 60, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false });
     } else return false;
-    this.airBombs = [];
     this.emit({ type: 'air', kind });
     return true;
   }
 
   updateAir(dt) {
-    const a = this.air;
-    if (!a) return;
+    if (this.airs.length) this.airs = this.airs.filter((a) => this.updateOneAir(a, dt));
+  }
+
+  // (false once it has flown its time)
+  updateOneAir(a, dt) {
     a.t += dt;
     const c = this.center;
     if (a.kind === 'carpet') {
@@ -1009,10 +1009,7 @@ export class WaveSim {
         } else a.fireT = 0.25;
       }
     }
-    if (a.t >= a.dur) {
-      this.air = null;
-      this.airCd = 20; // a pause before the next one
-    }
+    return a.t < a.dur;
   }
 
   updateAirBombs(dt) {
@@ -1095,8 +1092,7 @@ export class WaveSim {
       bl: this.baseLevel,
       sl: this.lightLevel || 0,
       ml: this.mendLevel || 0,
-      ac: Math.ceil(this.airCd || 0),
-      ar: this.air ? [this.air.kind === 'carpet' ? 1 : 2, Math.round(this.air.x * 10) / 10, Math.round(this.air.y * 10) / 10, Math.round(this.air.ang * 100) / 100, this.air.firing ? 1 : 0, Math.round(this.air.t * 10) / 10] : 0,
+      ar: this.airs.map((a) => [a.kind === 'carpet' ? 1 : 2, Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10]),
       ab: (this.airBombs || []).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.fall * 100) / 100, b.R]),
       el: Math.round(this.elapsed),
       sm: this.startMode,
@@ -1129,8 +1125,7 @@ export class WaveMirror {
     this.baseLevel = 0;
     this.lightLevel = 0;
     this.mendLevel = 0;
-    this.airCd = 0;
-    this.air = null; // the air strike in the sky: { kind, x, y, tx, ty, ang, firing }
+    this.airs = []; // the air strikes in the sky: { kind, x, y, tx, ty, ang, firing }
     this.airBombs = [];
     this.endless = !!game.world.endless || game.waveCount === 0;
     this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES;
@@ -1179,8 +1174,7 @@ export class WaveMirror {
       allies: this.allies.length,
       teamCap: teamCap(this.baseLevel),
       mendLevel: this.mendLevel || 0,
-      airCd: Math.max(0, Math.ceil(this.airCd || 0)),
-      air: this.air ? this.air.kind : null,
+      air: this.airs.length,
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       boss: boss ? { hp: boss.hp, max: boss.max, name: MONSTERS[boss.type].name } : null,
@@ -1192,9 +1186,10 @@ export class WaveMirror {
     const k = 1 - Math.exp(-dt * 14);
     this.timer -= dt;
     this.elapsed += dt;
-    if (this.air && this.air.tx !== undefined) {
-      this.air.x += (this.air.tx - this.air.x) * k;
-      this.air.y += (this.air.ty - this.air.y) * k;
+    for (const a of this.airs) {
+      if (a.tx === undefined) continue;
+      a.x += (a.tx - a.x) * k;
+      a.y += (a.ty - a.y) * k;
     }
     for (const b of this.airBombs) b.fall -= dt;
     for (const m of this.monsters) {
@@ -1242,12 +1237,12 @@ export class WaveMirror {
     this.baseLevel = s.bl || 0;
     this.lightLevel = s.sl || 0;
     this.mendLevel = s.ml || 0;
-    this.airCd = s.ac || 0;
-    if (s.ar) {
-      const [k, x, y, ang, firing] = s.ar;
-      if (!this.air) this.air = { kind: k === 1 ? 'carpet' : 'gunship', x, y };
-      Object.assign(this.air, { tx: x, ty: y, ang, firing: !!firing });
-    } else this.air = null;
+    const sky = Array.isArray(s.ar) && Array.isArray(s.ar[0]) ? s.ar : [];
+    this.airs.length = Math.min(this.airs.length, sky.length);
+    sky.forEach(([k, x, y, ang, firing], i) => {
+      if (!this.airs[i]) this.airs[i] = { x, y };
+      Object.assign(this.airs[i], { kind: k === 1 ? 'carpet' : 'gunship', tx: x, ty: y, ang, firing: !!firing });
+    });
     this.airBombs = (s.ab || []).map(([x, y, fall, R]) => ({ x, y, fall, R }));
     this.elapsed = s.el || 0;
     this.startMode = s.sm || 'timer';

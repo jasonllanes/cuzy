@@ -258,11 +258,14 @@ export class Game {
     if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
     // a duel with a bet: the stake goes on the table now (what you cannot cover is not at risk); the host pays the pot out at the end
     this.duelLeft = null; // seconds on the duel clock (the host sends it once the scene is over)
-    const duelRoom = this.mp?.duel ? session.room : null;
+    this.duelEvent = !!(this.mp && !this.mp.duel && session.room?.duelLive); // a duel in the middle of a round is being fought (you came in while it was on: you watch)
+    this.duelNextLeft = null; // seconds until the next duel of a running round
+    this.duelReturn = null; // where a fighter goes back to when a duel of a running round is over
+    const duelRoom = this.mp?.duel || this.duelEvent ? session.room : null;
     this.duelFighters = (duelRoom?.duelFighters || []).map(String); // the ones fighting (everyone else in the room watches)
     this.duelFallen = new Set((duelRoom?.duelFallen || []).map(String)); // fighters who are out
     this.duelUnits = duelRoom?.duelUnits || {}; // fighter id -> their side (a team, or themselves)
-    this.spectating = !!(duelRoom && this.duelFighters.length && !this.duelFighters.includes(String(session.you)));
+    this.spectating = !!(duelRoom && (this.duelEvent || (this.duelFighters.length && !this.duelFighters.includes(String(session.you)))));
     this.duelStake = 0;
     this.duelBet = this.mp?.duel ? Math.max(0, Math.round(Number(session.room.bet)) || 0) : 0;
     if (this.mp?.duel && !this.spectating && this.duelBet > 0) {
@@ -709,7 +712,7 @@ export class Game {
 
   // the duel bar: the clock, a health bar for each side (a fighter, or a team) and what is on the table
   duelHud() {
-    if (!this.mp?.duel) return null;
+    if (!this.duelActive()) return null;
     const me = String(this.mp.you);
     const info = (id) => {
       if (id === me) return { id, name: this.name || 'You', hero: this.hero, hp: this.dead ? 0 : this.combat.hp, max: this.combat.maxHp };
@@ -756,7 +759,7 @@ export class Game {
   }
 
   // the duel is decided (the last side standing, the clock, or the others walked out): pay the stakes and cheer, or shrug on a draw
-  duelOver(m) {
+  duelOver(m, after = null) {
     const me = String(this.mp.you);
     const fighters = (m.fighters || []).map(String);
     const winners = (m.winners || []).map(String);
@@ -774,7 +777,7 @@ export class Game {
     const why = m.reason === 'time' ? (m.draw ? 'The bell: the same health, so it is a draw.' : 'The bell: the lowest health loses.') : m.reason === 'forfeit' ? 'The others left.' : m.draw ? 'Everybody went down together.' : team ? 'The last team standing!' : 'Knocked out!';
     const money = !fighter || (!mine && !eff) ? '' : m.draw ? ` Draw: your ${mine} 🪙 comes back.` : won ? ` You win ${share} 🪙!` : eff ? ` You lose ${eff} 🪙.` : '';
     sfx.play(won ? 'win' : 'wave');
-    this.celebrate(m.draw ? 'draw' : String(m.id), m.draw ? 'Nobody' : m.name, 6.9, `${why}${money}`);
+    this.celebrate(m.draw ? 'draw' : String(m.id), m.draw ? 'Nobody' : m.name, after ? 5 : 6.9, `${why}${money}`, after);
     if (this.celeb && m.draw) this.celeb.draw = true;
   }
 
@@ -1210,7 +1213,106 @@ export class Game {
 
   // true when swords and throws can hurt other heroes (a fight-mode room, or AI rivals)
   get fight() {
-    return !!(this.mp?.pvp || this.bots);
+    return !!(this.mp?.pvp || this.duelEvent || this.bots);
+  }
+
+  // is a duel being fought where you are? (a duel round, or a duel in the middle of a round)
+  duelActive() {
+    return !!(this.mp?.duel || this.duelEvent);
+  }
+
+  // are you standing in the Colosseum?
+  inArena() {
+    return this.world.arena || this.world.inArenaZone(this.player.x, this.player.y);
+  }
+
+  // ---------- the duels of a running round ----------
+
+  // two players were called to the Colosseum: they go there (and pay their stake), everybody else watches
+  beginDuelEvent(m) {
+    if (!this.mp) return;
+    const me = String(this.mp.you);
+    this.duelEvent = true;
+    this.duelFighters = (m.fighters || []).map(String);
+    this.duelUnits = m.units || {};
+    this.duelFallen = new Set();
+    this.duelBet = Math.max(0, Math.round(Number(m.bet)) || 0);
+    this.duelLeft = Number(m.left) || null;
+    this.duelStake = 0;
+    this.duelNextLeft = null;
+    this.specZoom = false;
+    const fighter = this.duelFighters.includes(me);
+    this.spectating = !fighter;
+    this.keys.clear();
+    this.mouseHeld = { 0: false, 2: false };
+    this.combat.cancelHold();
+    if (!fighter) {
+      this.combat.invuln = 1e9; // (nothing can touch you while you watch)
+      this.onToast?.('⚔️ A duel is starting in the Colosseum: you watch!');
+      return;
+    }
+    const p = this.player;
+    this.duelReturn = this.dungeon ? null : this.inside ? { x: this.inside.out.x, y: this.inside.out.y } : { x: p.x, y: p.y };
+    this.combat.dash = null;
+    this.combat.shieldT = 0;
+    if (this.duelBet > 0) {
+      this.duelStake = Math.min(this.duelBet, this.coins);
+      this.coins -= this.duelStake;
+      this.mp.net.send({ t: 'stake', amount: this.duelStake });
+    }
+    const idx = Math.max(0, this.duelFighters.indexOf(me));
+    this.transition(() => {
+      this.leaveDungeon(false);
+      this.inside = null;
+      this.storageOpen = false;
+      if (this.mount) this.dismount();
+      const s = this.world.arenaSpawn(idx, 0, 1);
+      p.x = s.x;
+      p.y = s.y;
+      p.dir = idx === 0 ? 'right' : 'left';
+      this.cam.x = p.x;
+      this.cam.y = p.y;
+      this.combat.hp = this.combat.maxHp; // (everybody goes in at full health)
+      this.combat.invuln = 1.2;
+    });
+    this.onToast?.(`⚔️ You are in the duel! The first one down loses, and at the bell the lowest health loses.${this.duelStake ? ` Stake: ${this.duelStake} 🪙` : ''}`);
+  }
+
+  // the duel is decided: pay the stakes, cheer, then everybody goes back to what they were doing
+  endDuelEvent(m) {
+    if (!this.duelEvent) return;
+    if (this.celeb) {
+      this.returnFromDuel();
+      return;
+    }
+    this.duelOver(m, () => this.returnFromDuel());
+  }
+
+  returnFromDuel() {
+    const p = this.player;
+    this.duelEvent = false;
+    this.spectating = false;
+    this.duelLeft = null;
+    this.duelFighters = [];
+    this.duelFallen = new Set();
+    this.duelStake = 0;
+    this.combat.invuln = 1.5;
+    this.combat.hidden = false;
+    this.dead = null;
+    const back = this.duelReturn;
+    this.duelReturn = null;
+    if (back) {
+      this.transition(() => {
+        p.x = back.x;
+        p.y = back.y;
+        this.cam.x = p.x;
+        this.cam.y = p.y;
+        this.combat.hp = this.combat.maxHp;
+      });
+    } else if (this.inArena()) {
+      this.goHome(true);
+      this.combat.hp = this.combat.maxHp;
+    }
   }
 
   // ---------- being downed ----------
@@ -1218,7 +1320,7 @@ export class Game {
   // A hero who is defeated by another loses a random share of their coins (never more than 70%) on the spot,
   // for anyone to pick up. Everybody in the room sees the same pieces, and the first to grab one takes it.
   dropCoinsOnDeath() {
-    if (this.mp?.duel) return; // (the stakes are settled by the host: nothing falls on the sand)
+    if (this.duelActive()) return; // (the stakes are settled by the host: nothing falls on the sand)
     const have = this.coinCount();
     const share = 0.08 + 0.62 * Math.random() ** 2.2; // usually around a quarter, sometimes much less or more, never past 70%
     const n = Math.min(Math.floor(have * 0.7), Math.floor(have * share));
@@ -1244,7 +1346,7 @@ export class Game {
     this.streaks.died(this.myKey());
     if (this.mp && by?.kind !== 'player') this.mp.net.send({ t: 'fell' });
     this.push = null;
-    this.dead = { t: 0, dur: this.mp?.duel ? 1e9 : RESPAWN_TIME, by, x: this.player.x, y: this.player.y, last: null }; // (out of a duel: no coming back, you watch the rest)
+    this.dead = { t: 0, dur: this.duelActive() ? 1e9 : RESPAWN_TIME, by, x: this.player.x, y: this.player.y, last: null }; // (out of a duel: no coming back, you watch the rest)
   }
 
   // where the one who killed you is right now (or was last seen)
@@ -1405,7 +1507,7 @@ export class Game {
       this.onToast?.('The base is already as strong as it gets.');
     } else if ((d.op === 'mendUp' || d.op === 'mendHeal' || d.op === 'air') && !d.ok) {
       this.giveCoins(this.paidFor?.[d.op] || 0); // it did not happen: the coins come back
-      this.onToast?.(d.op === 'air' ? 'Air support is busy. Try again in a moment.' : 'The shelter is already in perfect shape.');
+      this.onToast?.(d.op === 'air' ? 'Too many aircraft are in the sky already. Try again in a moment.' : 'The shelter is already in perfect shape.');
     }
   }
 
@@ -2160,10 +2262,6 @@ export class Game {
   buyAir(kind) {
     const info = AIR_SUPPORT[kind];
     if (!this.wave || !this.world.apoc || !info) return;
-    if (this.wave.air || this.wave.airCd > 0) {
-      this.onToast?.('Air support is busy. Try again in a moment.');
-      return;
-    }
     if (!this.spendCoins(info.cost)) {
       this.onToast?.(`${info.name} costs ${info.cost} coins. You have ${this.coinCount()}.`);
       return;
@@ -2171,7 +2269,7 @@ export class Game {
     (this.paidFor ||= {}).air = info.cost;
     if (this.wave.callAir(kind) === false) {
       this.giveCoins(info.cost);
-      this.onToast?.('Air support is busy. Try again in a moment.');
+      this.onToast?.('Too many aircraft are in the sky already. Try again in a moment.');
     }
   }
 
@@ -3073,6 +3171,13 @@ export class Game {
       this.allowVisit = !!m.room.allowVisit;
       if (this.mp) this.mp.pvp = !!m.room.pvp; // the host can switch player damage on or off mid-round
       if (this.mp && !this.world.arena && m.room.mode === 'free' && m.room.winBy) this.winBy = m.room.winBy;
+      if (!m.room.duelEvery || m.room.duel) this.duelNextLeft = null; // (the duels of a running round were switched off)
+    } else if (m.t === 'duelstart') {
+      this.beginDuelEvent(m);
+    } else if (m.t === 'duelend') {
+      this.endDuelEvent(m);
+    } else if (m.t === 'duelnext') {
+      this.duelNextLeft = m.left === null || m.left === undefined ? null : Math.max(0, Number(m.left) || 0);
     } else if (m.t === 'duelfall') {
       this.duelFallen.add(String(m.id));
     } else if (m.t === 'duel') {
@@ -3086,6 +3191,10 @@ export class Game {
       const r = this.remotes.get(m.id);
       if (!r) return;
       if (this.fight && r.hp > 0 && m.hp <= 0) this.dropKillLoot(r.x, r.y);
+      if (Math.hypot(m.x - r.x, m.y - r.y) > 500) {
+        r.x = m.x; // (a jump to the Colosseum, or back: no gliding across the world)
+        r.y = m.y;
+      }
       r.tx = m.x;
       r.ty = m.y;
       r.dir = m.dir;
@@ -3224,7 +3333,7 @@ export class Game {
 
   // 0 in full daylight, up to 1 in the dead of night
   darkness() {
-    if (this.world.arena) return 0; // the colosseum is always sunlit
+    if (this.world.arena || (this.duelEvent && this.inArena())) return 0; // the colosseum is always sunlit
     if (this.world.depot) return 0.5;
     if (this.dungeon) return 0.55;
     const g = skyTint(this.hour)[1];
@@ -3448,7 +3557,7 @@ export class Game {
       }
       // while downed, the camera drifts over to whoever did it
       // and when a round is won, over to the winner
-      const watching = this.mp?.duel && (this.spectating || this.dead) && !this.celeb; // in a duel the ones who watch (or are out) follow the fight
+      const watching = this.duelActive() && (this.spectating || this.dead) && !this.celeb; // in a duel the ones who watch (or are out) follow the fight
       const focus = watching ? this.duelPoint() : this.dead ? this.killerPoint() || { x: p.x, y: p.y } : this.celeb ? this.celebPoint() || p : p;
       const k = 1 - Math.exp(-dt * (this.dead || this.celeb || watching ? 3.5 : 9));
       this.cam.x += (focus.x - this.cam.x) * k;
@@ -3479,7 +3588,7 @@ export class Game {
       }
       this.wave?.update(dt);
       this.syncShelterLight();
-      if (this.wave?.air?.firing && this.t - (this.airSfxAt ?? -9) > 0.16) {
+      if (this.wave?.airs?.some((a) => a.firing) && this.t - (this.airSfxAt ?? -9) > 0.16) {
         this.airSfxAt = this.t;
         sfx.play('gun', 0.18); // the gunship's machine gun
       }
@@ -3489,7 +3598,8 @@ export class Game {
         this.hour = total % 24;
         this.skyTotal = this.wave && this.world.apoc ? total * SKY_PACE : total;
         this.day = this.mp.clockDay + Math.floor(total / 24) - Math.floor(this.mp.clockHour / 24);
-        if (this.world.arena) this.hour = 12;
+        if (this.world.arena || (this.duelEvent && this.inArena())) this.hour = 12;
+        if (this.duelNextLeft !== null && !this.duelEvent && !this.paused) this.duelNextLeft = Math.max(0, this.duelNextLeft - dt);
         if (this.spectating && !this.specZoom) {
           this.specZoom = true;
           this.zoomOffset = -1; // a little further out, to see the whole fight
@@ -3555,7 +3665,8 @@ export class Game {
       day: this.day,
       zoom: this.zoom,
       hidden: this.combat.hidden && !this.dead,
-      dead: this.dead ? { name: this.killerName(), left: Math.max(0, this.dead.dur - this.dead.t), total: this.dead.dur, duel: !!this.mp?.duel } : null,
+      dead: this.dead ? { name: this.killerName(), left: Math.max(0, this.dead.dur - this.dead.t), total: this.dead.dur, duel: this.duelActive() } : null,
+      duelNext: this.duelNextLeft,
       wave: this.wave?.hudState() || null,
       fight: this.bots?.scoreboard() || null,
       duel: this.duelHud(),
@@ -4897,7 +5008,7 @@ export class Game {
       for (const a of this.wave.allies) drawList.push({ kind: 'ally', a, y: a.y + (this.world.apoc && ALLIES[a.kind].ai === 'ranged' ? 90 : 0) });
       for (const s of this.wave.ashots) drawList.push({ kind: 'ashot', s, y: s.y + 6 });
       for (const b of this.wave.airBombs || []) drawList.push({ kind: 'airbomb', b, y: b.y });
-      if (this.wave.air) drawList.push({ kind: 'air', y: 1e7 }); // (it flies above everything)
+      for (const air of this.wave.airs) drawList.push({ kind: 'air', air, y: 1e7 }); // (they fly above everything)
       if (this.houseHit && this.world.apoc) drawList.push({ kind: 'househit', y: this.wave.sprite.y + this.wave.sprite.h + 3 });
     }
     drawList.sort((a, b) => a.y - b.y);
@@ -5058,7 +5169,7 @@ export class Game {
           this.drawAirBomb(ctx, o.b);
           break;
         case 'air':
-          this.drawAir(ctx, this.wave.air);
+          this.drawAir(ctx, o.air);
           break;
         case 'projectile':
         case 'drop':

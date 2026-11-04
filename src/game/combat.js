@@ -134,7 +134,7 @@ export const GUNS = {
   raygun: { name: 'Ray gun', icon: '⚡', len: 16, mag: 24, reload: 2.2, rate: 0.3, pellets: 1, spread: 0.02, dmg: 3, life: 0.7, price: 150, plasma: true, arc: 1, blurb: 'Electric zaps that burn through two enemies, and a bolt of lightning leaps to a nearby one. 24 charges.' },
   sniper: { name: 'Sniper rifle', icon: '🎯', len: 26, mag: 5, reload: 2.6, rate: 1.1, pellets: 1, spread: 0, dmg: 12, life: 1.1, price: 200, pierce: 2, blurb: 'One slow, huge shot that goes through up to three zombies. 5 rounds.' },
   laser: { name: 'Blue laser', icon: '⚡', len: 22, mag: 40, reload: 2.4, rate: 0.09, pellets: 1, spread: 0.03, dmg: 1.5, life: 0.7, price: 210, plasma: true, arc: 2, blurb: 'A rapid electric beam: every hit zaps lightning on to two more enemies nearby. 40 charges.' },
-  fireplasma: { name: 'Flamethrower', icon: '🔥', len: 18, mag: 120, reload: 2.8, rate: 0.07, pellets: 1, spread: 0, dmg: 0.55, life: 0.2, price: 230, flame: true, range: 74, blurb: 'Hold the trigger to spray fire in a cone. Everything in it burns, and keeps burning. 120 shots of fuel.' },
+  fireplasma: { name: 'Flamethrower', icon: '🔥', len: 18, mag: 120, reload: 2.8, rate: 0.07, pellets: 1, spread: 0, dmg: 0.55, life: 0.2, price: 230, flame: true, range: 150, blurb: 'Hold the trigger to spray fire in a cone. Everything in it burns, and keeps burning. 120 shots of fuel.' },
   quantum: { name: 'Quantum plasma', icon: '⚡', len: 24, mag: 30, reload: 2.8, rate: 0.2, pellets: 1, spread: 0.02, dmg: 3.5, life: 0.8, price: 320, plasma: true, pierce: 2, arc: 3, blurb: 'The best gun there is: plasma through whole lines of zombies, and every hit throws lightning on to three more. 30 charges.' },
   plasma: { name: 'Plasma gun', icon: '⚡', len: 26, mag: 20, reload: 2.4, rate: 0.42, pellets: 1, spread: 0.02, dmg: 4, life: 0.75, price: 160, plasma: true, arc: 1, blurb: 'Glowing bolts that burn through two enemies in a line, and a lightning arc leaps to one nearby. 20 charges.' },
 };
@@ -1404,7 +1404,7 @@ export class Combat {
     const dmg = this.gunDmg(this.gun) + this.throwBonus() * 0.25;
     const inCone = (x, y, r) => {
       const d = Math.hypot(x - cx, y - cy);
-      return d <= range + r && (d < 10 || Math.abs(wrapAngle(Math.atan2(y - cy, x - cx) - a)) <= 0.55);
+      return d <= range + r && (d < 10 || Math.abs(wrapAngle(Math.atan2(y - cy, x - cx) - a)) <= (d > 70 ? 0.36 : 0.55)); // (a cone: narrower at the far end)
     };
     const burn = (kind, t) => {
       this.dotHit(kind, t, dmg);
@@ -1432,9 +1432,9 @@ export class Combat {
 
   spawnFlames(cx, cy, a, n) {
     for (let i = 0; i < n; i++) {
-      const spread = (Math.random() - 0.5) * 0.9;
-      const sp = 70 + Math.random() * 60;
-      this.flames.push({ x: cx + Math.cos(a) * 12, y: cy + Math.sin(a) * 12, vx: Math.cos(a + spread) * sp, vy: Math.sin(a + spread) * sp, t: 0, life: 0.38 + Math.random() * 0.14, r: 3 + Math.random() * 2 });
+      const spread = (Math.random() - 0.5) * 0.7;
+      const sp = 250 + Math.random() * 90; // a long jet: it reaches about 150px
+      this.flames.push({ x: cx + Math.cos(a) * 12, y: cy + Math.sin(a) * 12, vx: Math.cos(a + spread) * sp, vy: Math.sin(a + spread) * sp, t: 0, life: 0.5 + Math.random() * 0.12, r: 3 + Math.random() * 2.5 });
     }
   }
 
@@ -1717,8 +1717,9 @@ export class Combat {
       f.t += dt;
       f.x += f.vx * dt;
       f.y += f.vy * dt;
-      f.vx *= 0.94;
-      f.vy *= 0.94;
+      const slow = Math.exp(-dt * 1.0);
+      f.vx *= slow;
+      f.vy *= slow;
       return f.t < f.life;
     });
 
@@ -1857,7 +1858,7 @@ export class Combat {
   // ---------- wild monsters ----------
 
   updateWilds(dt) {
-    if (this.g.world.arena) return; // nothing wild in the colosseum
+    if (this.g.world.arena || this.g.world.inArenaZone(this.g.player.x, this.g.player.y)) return; // nothing wild in the colosseum
     this.wildT -= dt;
     if (this.wildT <= 0) {
       this.wildT = 3 + Math.random() * 3;
@@ -2868,7 +2869,7 @@ export class Combat {
       }
     }
     if (this.hp <= 0) {
-      if (killer !== null || this.g.mp?.duel) this.g.mp?.net.send({ t: 'died', killer: killer ?? '' }); // (a duel needs to hear about every fall)
+      if (killer !== null || this.g.duelActive()) this.g.mp?.net.send({ t: 'died', killer: killer ?? '' }); // (a duel needs to hear about every fall)
       this.g.die(by || (killer !== null ? { kind: 'player', id: killer } : null));
     }
   }

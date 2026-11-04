@@ -1690,3 +1690,15 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .duel-mid small { font-size: 11px; }
 @keyframes duel-pulse { to { transform: scale(1.12); } }
 @media (max-width: 640px) { .duel-hp { width: 64px; } .duel-side { min-width: 80px; } .duel-sides { gap: 8px; } }
+
+/* room settings: folding sections */
+.set-section { border: 2px solid rgba(127, 127, 127, 0.35); border-radius: 12px; margin: 6px 0; background: rgba(127, 127, 127, 0.07); }
+.set-section > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 10px; padding: 6px 10px; font: 700 0.98rem var(--pixel); color: var(--ink); user-select: none; }
+.set-section > summary::-webkit-details-marker { display: none; }
+.set-section > summary::before { content: '▸'; font-size: 0.8rem; opacity: 0.7; transition: transform 0.12s; }
+.set-section[open] > summary::before { transform: rotate(90deg); }
+.set-section > summary small { margin-left: auto; font: 400 0.72rem var(--body); color: var(--ink-soft); text-align: right; }
+.set-section > .set-grid { padding: 0 12px 8px; }
+.waiting-card .set-section > .set-grid { gap: 2px 22px; }
+.duel-next { position: fixed; top: 62px; left: 50%; transform: translateX(-50%); z-index: 6; padding: 4px 12px; background: var(--paper); font: 700 0.85rem var(--pixel); pointer-events: none; }
+.duel-next.soon { color: #d6293e; animation: duel-pulse 0.6s infinite alternate; }

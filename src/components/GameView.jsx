@@ -805,6 +805,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
+      {!hud.duel && hud.duelNext !== null && hud.duelNext !== undefined && (
+        <div className={`duel-next panel small ${hud.duelNext <= 10 ? 'soon' : ''}`}>⚔️ Next duel in {Math.floor(hud.duelNext / 60)}:{String(Math.floor(hud.duelNext % 60)).padStart(2, '0')}</div>
+      )}
       <div className="hud hud-right">
         <canvas ref={miniRef} width={80} height={80} className="minimap" onClick={() => setMapOpen(true)} title="Click the map to see all of it (or press M)" />
         <div className="zoom-box panel small">
