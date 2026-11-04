@@ -309,7 +309,7 @@ export class Game {
     this.prompt = null;
 
     this.onKeyDown = (e) => {
-      if (this.frozen || this.cutscene) return;
+      if (this.frozen || this.cutscene || this.stunnedT > 0) return;
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
       // a HUD button that kept focus after a click would otherwise react to Space/Enter
@@ -376,7 +376,7 @@ export class Game {
     };
     this.onMouseDown = (e) => {
       if (this.touchMode) return; // taps are for the on-screen buttons
-      if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || this.cutscene || (e.button !== 0 && e.button !== 2)) return;
+      if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || this.cutscene || this.stunnedT > 0 || (e.button !== 0 && e.button !== 2)) return;
       this.onMouseMove(e);
       this.mouseHeld[e.button] = true;
       if (e.button === 0 && !this.dead) {
@@ -1238,16 +1238,15 @@ export class Game {
     const c = this.combat;
     if (ev.type === 'start' && ev.endless) {
       // Endless: there are no waves to announce, only the Colossus that turns up now and then
-      if (ev.bosses > 0) {
-        sfx.play('wave');
-        this.announceBoss('☠ A COLOSSUS IS COMING', 'Follow the red arrow to find it');
-        this.onToast?.(`${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming!`);
-      }
+      if (ev.bosses > 0) this.onToast?.(`${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming at the end of this batch!`);
     } else if (ev.type === 'start') {
       sfx.play('wave');
-      if (ev.bosses > 0) this.announceBoss(ev.boss ? '☠ FINAL WAVE: BOSS INCOMING' : `☠ WAVE ${ev.wave}: BOSS INCOMING`, 'Follow the red arrow to find the boss');
-      if (this.world.apoc && ev.bosses > 0) this.onToast?.(`${ev.boss ? 'FINAL WAVE! ' : `Wave ${ev.wave}: `}${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming!`);
+      if (this.world.apoc && ev.bosses > 0) this.onToast?.(`${ev.boss ? 'FINAL WAVE! ' : `Wave ${ev.wave}: `}${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming at the end of it!`);
       else this.onToast?.(ev.boss ? 'FINAL WAVE! The Crushing Cyclops is coming!' : `Wave ${ev.wave} is coming!`);
+    } else if (ev.type === 'boss') {
+      // the bosses of the wave have arrived (the last burst)
+      sfx.play('wave');
+      this.announceBoss(ev.endless ? '☠ A COLOSSUS IS HERE' : ev.wave >= 10 ? '☠ FINAL BOSS' : `☠ WAVE ${ev.wave}: THE BOSS ARRIVES`, `${ev.n} Colossus${ev.n > 1 ? 'es' : ''} · follow the red arrow to find ${ev.n > 1 ? 'them' : 'it'}`);
     } else if (ev.type === 'surge') {
       sfx.play('wave');
       this.onToast?.(`🧟 A pack of ${ev.n} runners is charging in from the ${ev.dir}!`);
@@ -1951,6 +1950,16 @@ export class Game {
     this.lastSelId = id;
     const gun = id && ITEMS[id]?.gun;
     if (gun && this.combat?.owned[gun]) this.combat.equipGun(gun);
+  }
+
+  // a stun grenade got you: you cannot move or fight for a few seconds
+  stunMe(secs) {
+    if (this.dead || this.combat.god) return;
+    this.stunnedT = Math.max(this.stunnedT || 0, secs);
+    this.combat.cancelHold();
+    this.mouseHeld[0] = false;
+    this.mouseHeld[2] = false;
+    this.onToast?.('💫 Stunned by a grenade!');
   }
 
   // Visit: teleport straight to where another player is (only when the room allows it)
@@ -3087,6 +3096,13 @@ export class Game {
   update(dt) {
     const p = this.player;
     if (this.cutscene) this.driveCutscene(dt);
+    if (this.stunnedT > 0) {
+      this.stunnedT -= dt;
+      this.keys.clear(); // (frozen: no walking while the stars spin)
+      this.combat.cancelHold();
+      this.mouseHeld[0] = false;
+      this.mouseHeld[2] = false;
+    }
     this.updateFade(dt);
     this.updateWeather(dt);
     this.updateLightning(dt);
@@ -4694,6 +4710,7 @@ export class Game {
           ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
+          if (this.stunnedT > 0) this.combat.drawStun(ctx, this.player.x, this.player.y - 26, '#ffe36b');
           if (this.levelFx) this.drawLevelFx(ctx);
           if (this.wave && this.world.apoc) this.combat.drawGun(ctx, this.player.x, this.player.y);
           if (!this.wave) this.drawHealthBar(ctx, { x: this.player.x, y: this.player.y - this.rideLift(), hp: this.combat.hp, max: this.combat.maxHp, hero: this.hero, lv: this.level });
@@ -4748,6 +4765,7 @@ export class Game {
     // screen-space overlay
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawDaylight(camX, camY);
+    this.drawLurkers(camX, camY);
     this.drawMotes();
     this.drawPrecip();
     if (!this.demo) {
@@ -4863,6 +4881,37 @@ export class Game {
       ctx.fillStyle = '#fffbe8';
       ctx.fillRect(sx - u / 2, sy - u / 2, u, u);
     }
+  }
+
+  // In the dark (night, a storm, a cave) the monsters outside your light were nearly invisible, and their arrows seemed to come from
+  // nowhere: so every monster that is out there gets a faint red glow at its feet and a pair of bright eyes, drawn over the darkness.
+  drawLurkers(camX, camY) {
+    if (this.wave || this.demo || this.inside) return;
+    const dark = Math.max(this.darkness(), (this.weather?.cloud || 0) * 0.6);
+    if (dark < 0.2) return;
+    const { ctx, canvas, zoom } = this;
+    const list = [...this.combat.wilds, ...this.combat.skeletons];
+    ctx.save();
+    for (const m of list) {
+      if (m.state === 'dead') continue;
+      const [sx, sy] = this.toScreen(m.x, m.y, camX, camY);
+      if (sx < -40 || sy < -40 || sx > canvas.width + 40 || sy > canvas.height + 40) continue;
+      const a = Math.min(0.75, 0.25 + dark * 0.6);
+      const r = zoom * 9;
+      const g = ctx.createRadialGradient(sx, sy - zoom * 2, 0, sx, sy - zoom * 2, r);
+      g.addColorStop(0, `rgba(255,70,60,${0.55 * a})`);
+      g.addColorStop(1, 'rgba(255,70,60,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - r, sy - zoom * 2 - r, r * 2, r * 2);
+      // eyes: a monster that is not flying sits on the ground, a flyer a little higher
+      const eyeY = sy - zoom * (m.type && MONSTERS[m.type]?.kind === 'fly' ? 18 : 11) * (m.scale || 1);
+      const blink = Math.sin(this.t * 3 + (m.x + m.y)) > 0.92 ? 0.2 : 1;
+      ctx.fillStyle = `rgba(255,${200 - Math.round(60 * dark)},120,${0.95 * a * blink})`;
+      const e = Math.max(1.5, zoom * 0.7);
+      ctx.fillRect(Math.round(sx - zoom * 1.6 - e / 2), Math.round(eyeY), e, e);
+      ctx.fillRect(Math.round(sx + zoom * 1.6 - e / 2), Math.round(eyeY), e, e);
+    }
+    ctx.restore();
   }
 
   drawDaylight(camX, camY) {

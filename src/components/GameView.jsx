@@ -5,6 +5,7 @@ import { heroById } from '../game/heroes';
 import { emptyInventory } from '../game/inventory';
 import MapPanel from './MapPanel';
 import MonsterIcon from './MonsterIcon';
+import Bestiary from './Bestiary';
 import { TEAMS } from '../game/teams';
 import IntroScene from './IntroScene';
 import OnlinePlayers from './OnlinePlayers';
@@ -289,6 +290,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [musicOn, setMusicOn] = useState(music.on);
   useEffect(() => music.listen(() => setMusicOn(music.on)), []);
   const [guideOpen, setGuideOpen] = useState(() => new URLSearchParams(window.location.search).has('guide'));
+  const [bestiaryOpen, setBestiaryOpen] = useState(false); // the list of every creature
   const guideRef = useRef(false);
   const [upgOpen, setUpgOpen] = useState(false);
   const [supplyOpen, setSupplyOpen] = useState(null); // 'hp' or 'stam': the list behind that quick slot
@@ -441,18 +443,18 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
 
   // a button picked from the folded-away menu closes it
   useEffect(() => {
-    if (upgOpen || mapOpen || onlineOpen || paused || roomSetOpen || guideOpen) setHudMenuOpen(false);
-  }, [upgOpen, mapOpen, onlineOpen, paused, roomSetOpen, guideOpen]);
+    if (upgOpen || mapOpen || onlineOpen || paused || roomSetOpen || guideOpen || bestiaryOpen) setHudMenuOpen(false);
+  }, [upgOpen, mapOpen, onlineOpen, paused, roomSetOpen, guideOpen, bestiaryOpen]);
 
   useEffect(() => {
     mapRef.current = mapOpen;
     pausedRef.current = paused;
-    guideRef.current = guideOpen;
+    guideRef.current = guideOpen || bestiaryOpen;
     upgRef.current = upgOpen || storeOpen || !!qty || roomSetOpen;
     roomSetRef.current = roomSetOpen;
     storeRef.current = storeOpen;
     chatRef.current = chatOpen;
-  }, [mapOpen, paused, guideOpen, upgOpen, storeOpen, qty, roomSetOpen, chatOpen]);
+  }, [mapOpen, paused, guideOpen, bestiaryOpen, upgOpen, storeOpen, qty, roomSetOpen, chatOpen]);
 
   // keep the latest backpack handy, and move on when the selected slot just ran out
   useEffect(() => {
@@ -529,9 +531,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   finishIntroRef.current = finishIntro;
 
   useEffect(() => {
-    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || storeOpen || !!qty || onlineOpen || aboutOpen;
+    if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || bestiaryOpen || upgOpen || storeOpen || !!qty || onlineOpen || aboutOpen;
     gameRef.current?.setStorageOpen(storeOpen);
-  }, [paused, mapOpen, guideOpen, upgOpen, storeOpen, qty, onlineOpen, aboutOpen]);
+  }, [paused, mapOpen, guideOpen, bestiaryOpen, upgOpen, storeOpen, qty, onlineOpen, aboutOpen]);
 
   // how many others are online, for the button
   useEffect(() => {
@@ -594,7 +596,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         else if (roomSetRef.current) setRoomSetOpen(false);
         else if (storeRef.current) setStoreOpen(false);
         else if (upgRef.current) setUpgOpen(false);
-        else if (guideRef.current) setGuideOpen(false);
+        else if (guideRef.current) {
+          setGuideOpen(false);
+          setBestiaryOpen(false);
+        }
         else if (mapRef.current) setMapOpen(false);
         else setPaused((p) => !p);
       }
@@ -795,6 +800,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {!mobile && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
         {mobile && <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat</button>}
         {(session ? isHost : true) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
+        <button className="btn small-btn" onClick={() => setBestiaryOpen(true)} title="Every creature in the game, so you can tell what is attacking you">👹 Creatures</button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu <kbd>Esc</kbd></button>
           </>
         )}
@@ -1053,6 +1059,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         />
       )}
       {training && !preview && <TrainingPanel game={gameRef} assets={assets} initial={profile.hero} map={trainingMap} onMap={onTrainingMap} onHero={onTrainingHero} onExit={onExit} />}
+      {bestiaryOpen && <Bestiary survival={survival} onClose={() => setBestiaryOpen(false)} />}
       {guideOpen && <Guide mode={survival ? 'survival' : waves ? 'waves' : 'free'} onClose={() => setGuideOpen(false)} />}
       {onlineOpen && (
         <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setOnlineOpen(false)}>
@@ -1141,6 +1148,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               <button className="btn" onClick={() => music.setOn(!music.on)} title="Background music on/off">{musicOn ? '🎵 Music on' : '🎵 Music off'}</button>
               <button className="btn" onClick={() => { setPaused(false); setOnlineOpen(true); }} title="See who is online and invite them">🌐 Online {onlineCount > 0 && <b>{onlineCount}</b>}</button>
               <button className="btn" onClick={() => { setPaused(false); setGuideOpen(true); }}>📖 Guide <kbd>G</kbd></button>
+              <button className="btn" onClick={() => { setPaused(false); setBestiaryOpen(true); }}>👹 Creatures</button>
               <button className="btn" onClick={() => { setPaused(false); setAboutOpen(true); }}>ℹ️ About &amp; credits</button>
               {(session ? isHost : true) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
               {session && <button className="btn" onClick={() => { setPaused(false); pauseRef.current(); }} title="The host pauses the game for everyone">⏸ Pause <kbd>P</kbd></button>}

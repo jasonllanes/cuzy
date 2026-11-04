@@ -745,7 +745,8 @@ export class SupaNet {
       case 'hit': {
         if (!this.cfg.pvp || String(m.target) === this.me) return;
         if (this.cfg.teams && this.teamMap[String(m.target)] === this.teamMap[this.me]) return; // no friendly fire
-        const dmg = Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
+        const stun = Math.min(4, Math.max(0, Number(m.stun) || 0)); // a stun grenade (no damage)
+        const dmg = stun ? 0 : Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
         if (this.members.get(String(m.target))?.ai) {
           // a computer player is played by the host's game, which works out the damage itself
           const hurt = { t: 'aihurt', ai: String(m.target), from: this.me, dmg, fx: this.pos.x, fy: this.pos.y };
@@ -753,7 +754,7 @@ export class SupaNet {
           else this.bcast({ ...hurt, to: 'host' });
           break;
         }
-        this.bcast({ t: 'hit', to: String(m.target), from: this.me, dmg, fx: this.pos.x, fy: this.pos.y });
+        this.bcast({ t: 'hit', to: String(m.target), from: this.me, dmg, ...(stun ? { stun } : {}), fx: this.pos.x, fy: this.pos.y });
         break;
       }
       case 'addai':
@@ -833,7 +834,7 @@ export class SupaNet {
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
         else if (m.kind === 'grapple') this.bcast({ t: 'fx', id: this.me, kind: 'grapple', a: num(m.a), len: num(m.len), hit: m.hit ? 1 : 0 });
-        else if (m.kind === 'bomb') this.bcast({ t: 'fx', id: this.me, kind: 'bomb', item: clean(m.item, 20), tx: num(m.tx), ty: num(m.ty) });
+        else if (m.kind === 'bomb') this.bcast({ t: 'fx', id: this.me, kind: 'bomb', item: clean(m.item, 20), tx: num(m.tx), ty: num(m.ty), x0: num(m.x0), y0: num(m.y0), fl: num(m.fl) });
         else if (m.kind === 'fan') this.bcast({ t: 'fx', id: this.me, kind: 'fan', x: num(m.x), y: num(m.y), a: num(m.a), L: num(m.L), T: num(m.T), side: m.side < 0 ? -1 : 1, w: clean(m.w, 20) });
         else if (m.kind === 'trident') this.bcast({ t: 'fx', id: this.me, kind: 'trident', x: num(m.x), y: num(m.y), a: num(m.a), range: num(m.range), speed: num(m.speed), w: clean(m.w, 20) });
         else if (m.kind === 'cast') this.bcast({ t: 'fx', id: this.me, kind: 'cast', x: num(m.x), y: num(m.y), r: num(m.r), fx: clean(m.fx, 24), hue: num(m.hue), color: clean(m.color, 12) });
@@ -861,7 +862,9 @@ export class SupaNet {
       lv: Math.max(1, Math.min(99, Math.round(Number(m.lv)) || 1)), // character level, shown next to the health bar
       mt: m.mt === 'chicken' || m.mt === 'cow' ? m.mt : '', // what they are riding
     };
-    this.bcast({ t: 'state', id: this.me, ...this.pos });
+    // (who we are rides along with every position, so a player who is somehow missing from someone's list is put back by it)
+    const me = this.members.get(this.me);
+    this.bcast({ t: 'state', id: this.me, ...this.pos, ...(me ? { nm: clean(me.name, 16), hr: clean(me.hero, 24), sl: Number(me.slot) || 0 } : {}) });
   }
 
   // a request for the host (a message of its own kind, so it is never mistaken for an announcement)
@@ -951,8 +954,12 @@ export class SupaNet {
         this.winning = true;
         break;
       case 'state': {
-        const { t, id, ...pos } = msg; // eslint-disable-line no-unused-vars
-        if (!this.members.has(id) && !this.syncing) this.recoverMember(id); // they are playing, so they are here: put them back
+        const { t, id, nm, hr, sl, ...pos } = msg; // eslint-disable-line no-unused-vars
+        if (!this.members.has(id) && !this.syncing) {
+          // they are playing, so they are here: put them back (from the room's list, or from what their own packet says they are)
+          this.recoverMember(id);
+          if (!this.members.has(id) && nm && hr) this.onPresenceJoin([{ id, name: clean(nm, 16) || 'Friend', hero: clean(hr, 24), slot: Number(sl) || 0, at: Date.now() }]);
+        }
         this.posOf.set(id, pos);
         break;
       }

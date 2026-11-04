@@ -360,10 +360,11 @@ export function attachRoomServer(httpServer) {
       const target = room ? findMember(room, m.target) : null;
       if (!room?.pvp || !target || target === ws) return;
       if (room.teams && target.team !== null && target.team === ws.team) return; // no friendly fire
-      const dmg = Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
+      const stun = Math.min(4, Math.max(0, Number(m.stun) || 0)); // a stun grenade (no damage)
+      const dmg = stun ? 0 : Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
       // a computer player is played by the host's game: it works out the damage itself
-      if (target.ai) send(room.players.get(room.hostId), { t: 'aihurt', ai: target.id, from: ws.id, dmg, fx: ws.pos.x, fy: ws.pos.y });
-      else send(target, { t: 'hit', from: ws.id, dmg, fx: ws.pos.x, fy: ws.pos.y });
+      if (target.ai) send(room.players.get(room.hostId), { t: 'aihurt', ai: target.id, from: ws.id, dmg: Math.max(1, dmg), fx: ws.pos.x, fy: ws.pos.y });
+      else send(target, { t: 'hit', from: ws.id, dmg, ...(stun ? { stun } : {}), fx: ws.pos.x, fy: ws.pos.y });
     },
     // the victim reports its own defeat so the right player gets the point
     died(ws, m) {

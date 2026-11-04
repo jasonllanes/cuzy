@@ -240,13 +240,14 @@ export class WaveSim {
       }
       return;
     }
-    // fight: trickle monsters in, then wait for the last one to fall
+    // fight: monsters come in bursts, a whole pack at a time with a pause between, and the bosses last; then wait for the last one to fall
     this.fightT += dt;
     if (this.theme === 'apoc') this.survivalPressure();
     this.spawnT -= dt;
-    if (this.queue.length && this.spawnT <= 0 && this.monsters.filter((m) => m.state !== 'dead').length < MAX_ALIVE) {
-      if (this.spawnMonster(this.queue[this.queue.length - 1])) this.queue.pop();
-      this.spawnT = this.spawnGap;
+    if (this.queue.length && this.spawnT <= 0) {
+      const alive = this.monsters.filter((m) => m.state !== 'dead').length;
+      const came = alive < MAX_ALIVE && this.spawnBurst(MAX_ALIVE - alive);
+      this.spawnT = came ? this.burstGap : 1; // (nothing could come in, so it tries again in a second)
     }
     if (this.endless) {
       // no waves: the next batch follows as soon as the last one is nearly gone (or after a while, whatever is left)
@@ -254,10 +255,41 @@ export class WaveSim {
     } else if (!this.queue.length && this.monsters.every((m) => m.state === 'dead')) this.finishWave();
   }
 
+  // One burst: a pack of the ordinary monsters, all coming in from the same side. When only bosses are left they come together,
+  // fanned out along the edge so they never pile up, as the wave's finale.
+  spawnBurst(room) {
+    const isBoss = (t) => !!MONSTERS[t].boss;
+    const last = this.queue[this.queue.length - 1];
+    if (!last) return false;
+    const bossBurst = isBoss(last);
+    const want = bossBurst ? this.queue.length : Math.min(this.burstSize, room);
+    let made = 0;
+    // (a side with only water or a crowd of players on it is skipped: another side is tried)
+    for (let attempt = 0; attempt < 14 && !made; attempt++) {
+      const base = Math.random() * Math.PI * 2;
+      for (let i = 0; i < want; i++) {
+        const type = this.queue[this.queue.length - 1];
+        if (!type || isBoss(type) !== bossBurst) break;
+        const a = bossBurst ? base + (i - (want - 1) / 2) * 0.75 : base + (Math.random() - 0.5) * 0.7;
+        if (!this.spawnMonster(type, a)) break;
+        this.queue.pop();
+        made++;
+      }
+    }
+    if (bossBurst && made) this.emit({ type: 'boss', n: made, wave: this.wave, endless: this.endless });
+    return made > 0;
+  }
+
   startWave() {
     this.wave++;
     const players = this.g.waveTargets().length; // (the Colossus bosses are scaled to the size of the team)
-    this.queue = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players);
+    const list = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players);
+    // the bosses go last: the queue is spawned from its end
+    this.queue = [...list.filter((t) => MONSTERS[t].boss), ...list.filter((t) => !MONSTERS[t].boss)];
+    const normals = list.length - this.queue.filter((t) => MONSTERS[t].boss).length;
+    const bursts = this.endless ? 2 : Math.max(3, Math.min(7, 3 + Math.floor(this.wave / 2)));
+    this.burstSize = Math.max(4, Math.ceil(normals / bursts));
+    this.burstGap = this.endless ? 3.5 : Math.max(4.5, 10 - this.wave * 0.45); // seconds between one burst and the next
     this.votes.clear();
     this.waveTotal = this.queue.length;
     if (this.endless && this.wave > 1) {
@@ -312,16 +344,31 @@ export class WaveSim {
     }
   }
 
+  // is there water within `d` px of this spot? (zombies are not spawned on the shore)
+  nearWater(x, y, d) {
+    for (let k = 0; k < 8; k++) {
+      const px = x + Math.cos((k * Math.PI) / 4) * d;
+      const py = y + Math.sin((k * Math.PI) / 4) * d;
+      if (this.world.type(Math.floor(px / 16), Math.floor(py / 16)) === WATER) return true;
+    }
+    return this.world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER;
+  }
+
+  // Zombies come in from outside every player's screen and not from the shore. If that cannot be done (a shelter on a small
+  // island, say), they stop being picky after a few tries, so the wave never stalls with monsters that cannot appear.
   spawnMonster(type, angle = null, extra = false) {
     const def = MONSTERS[type];
     const flyer = def.kind === 'fly' || def.fly;
-    for (let i = 0; i < 30; i++) {
+    const relax = (this.spawnFail || 0) >= 3;
+    for (let i = 0; i < 48; i++) {
       const ang = angle ?? Math.random() * Math.PI * 2;
       const r = 210 + Math.random() * 50 + (i > 14 ? (i - 14) * 6 : 0); // (a little further out each time it is turned down)
       const x = this.center.x + Math.cos(ang) * r;
       const y = this.center.y + Math.sin(ang) * r;
       if (!flyer && this.world.isBlocked(x - 4, y - 3, 8, 3)) continue;
-      if (this.g.seenFrom(x, y)) continue; // zombies come in from outside the screen, never on it
+      if (!relax && !flyer && this.nearWater(x, y, 28)) continue;
+      if (!relax && this.g.seenFrom(x, y)) continue; // zombies come in from outside the screen, never on it
+      this.spawnFail = 0;
       // in Survival every wave is a little tougher and quicker than the last
       const apoc = this.theme === 'apoc';
       const lv = def.boss ? 1 : rollMonsterLevel(this.wave);
@@ -332,6 +379,7 @@ export class WaveSim {
       });
       return true;
     }
+    this.spawnFail = (this.spawnFail || 0) + 1;
     return false;
   }
 
@@ -433,12 +481,25 @@ export class WaveSim {
     } else if (kind === 'house' && nearHouse) {
       this.strikeHouse(m, def);
     } else {
-      const moved = this.step(m, def, (dx / dist) * speed * dt, (dy / dist) * speed * dt);
+      // caught on a tree or a rock: it slides round it (a side is picked and kept for a moment) instead of pushing on for ever
+      let mx = (dx / dist) * speed * dt;
+      let my = (dy / dist) * speed * dt;
+      if (m.slideT > 0) {
+        m.slideT -= dt;
+        const c = Math.cos((Math.PI / 2.2) * m.slideDir);
+        const sn = Math.sin((Math.PI / 2.2) * m.slideDir);
+        [mx, my] = [mx * c - my * sn, mx * sn + my * c];
+      }
+      const moved = this.step(m, def, mx, my);
       m.stuck = moved ? 0 : m.stuck + dt;
       if (m.stuck > 0.15 && def.kind !== 'fly') {
         // a wall of barricades is in the way, so chew through it
         const b = this.nearestBarricade(m.x, m.y, reach + 8);
         if (b) this.strikeBarricade(m, def, b);
+        else if (m.stuck > 0.4 && !(m.slideT > 0)) {
+          m.slideDir = Math.random() < 0.5 ? 1 : -1;
+          m.slideT = 0.9;
+        }
       }
     }
   }

@@ -1659,3 +1659,16 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .map-legend .lg-dot { border-radius: 50%; border: 1.5px solid #fff; }
 .map-legend .lg-zone { border-radius: 50%; border: 2px solid; }
 .map-legend .lg-arrow { width: 0; height: 0; background: none; border-style: solid; border-width: 5px 0 5px 10px; border-color: transparent transparent transparent #ff6f91; border-radius: 0; }
+
+/* the creature list */
+.bestiary { width: min(880px, 94vw); max-height: 86vh; overflow: auto; padding: 14px 18px 18px; }
+.bestiary .inv-head { flex-wrap: wrap; }
+.bestiary-search { flex: 1; min-width: 160px; font: 600 0.95rem var(--body); padding: 6px 12px; border: 3px solid var(--wood); border-radius: 999px; background: #fff; color: var(--ink); }
+.bestiary h3 { margin: 14px 0 6px; font: 700 1rem var(--pixel); color: var(--rose-dark); }
+.bestiary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.bestiary-card { display: grid; justify-items: center; gap: 2px; text-align: center; padding: 8px 6px; background: #fff; border: 3px solid var(--wood); border-radius: 12px; font-family: var(--body); color: var(--ink); cursor: pointer; }
+.bestiary-card.on { border-color: var(--rose); background: #fff7f0; grid-column: span 2; }
+.bestiary-card b { font: 700 0.9rem var(--body); }
+.bestiary-card small { font: 600 0.75rem var(--body); color: var(--ink-soft); }
+.bestiary-more { font: 600 0.8rem var(--body); line-height: 1.35; text-align: left; margin-top: 4px; }
+.bestiary-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font: 600 0.88rem var(--body); line-height: 1.4; }

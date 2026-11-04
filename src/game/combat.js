@@ -17,7 +17,7 @@ const CAMP_RESPAWN = 150; // seconds before a wiped-out camp is guarded again
 
 // Wild creatures from the ENEMY pack that roam the free world: ground things by day, flyers and hounds by night
 // Every region has its own people: what walks it by day and by night, its night boss and its mini boss.
-const BIOME_FOES = {
+export const BIOME_FOES = {
   clover: { day: ['t_slime', 't_slime', 't_orc', 't_swordsman', 'jelly', 'redcap'], night: ['t_orc', 't_skeleton', 't_archer', 'bat', 'hound', 'z_small'], boss: ['t_eliteorc', 't_templar'], mini: ['t_axeman', 't_knight', 't_swordsman'] },
   tidal: { day: ['t_slime', 't_soldier', 't_soldier', 't_swordsman', 'jelly'], night: ['t_skarcher', 't_skeleton', 't_bat', 'bat', 'watcher'], boss: ['t_orcrider', 't_eliteorc'], mini: ['t_armskel', 't_lancer', 't_orcrider'] },
   emerald: { day: ['t_werewolf', 't_archer', 't_orc', 't_slime', 'redcap'], night: ['t_werewolf', 't_werebear', 't_bat', 'hound'], boss: ['t_werebear'], mini: ['t_werewolf', 't_werebear', 't_archer'] },
@@ -138,6 +138,7 @@ const GRENADES = {
   smokegrenade: { kind: 'smoke', fuse: 1.1, R: 50 },
 };
 const STUN_TIME = 3.5;
+const STUN_PLAYER = 2.2; // seconds a stun grenade freezes a rival hero
 // who lives in each realm behind a portal, by tier, and the guardian in the last room
 const RIFT_FOES = {
   ember: { pool: ['t_orc', 't_armorc', 'hound', 'scarab', 'redcap'], tier2: ['t_eliteorc', 't_werebear'], tier3: ['t_eliteorc', 't_gskel'], boss: 't_eliteorc' },
@@ -1232,7 +1233,7 @@ export class Combat {
     this.revealT = 1.5;
     sfx.play('throw', 0.8);
     this.throwCd = 0.4;
-    this.g.mp?.net.send({ t: 'fx', kind: 'bomb', item, tx: Math.round(tx), ty: Math.round(ty) }); // the others see the circle and the blast too
+    this.g.mp?.net.send({ t: 'fx', kind: 'bomb', item, tx: Math.round(tx), ty: Math.round(ty), x0: Math.round(x0), y0: Math.round(y0), fl: Math.round(flight * 100) / 100 }); // the others see it fly, the circle and the blast too
     this.faceAim(a);
   }
 
@@ -1240,11 +1241,28 @@ export class Combat {
   remoteBomb(m) {
     const gren = GRENADES[m.item];
     if (!gren || !Number.isFinite(m.tx) || !Number.isFinite(m.ty)) return;
-    this.remoteBombs.push({ x: m.tx, y: m.ty, tx: m.tx, ty: m.ty, fly: 0, flightMax: 1, dist: 0, fuse: gren.fuse, max: gren.fuse, stuck: null, R: gren.R, kind: gren.kind, item: m.item, remote: true });
+    // it flies from where they threw it to where it lands, in the same arc as yours, then the circle fills up
+    const fl = Number.isFinite(m.fl) && m.fl > 0 ? Math.min(1.2, m.fl) : 0;
+    const x0 = Number.isFinite(m.x0) ? m.x0 : m.tx;
+    const y0 = Number.isFinite(m.y0) ? m.y0 : m.ty;
+    this.remoteBombs.push({
+      x: fl ? x0 : m.tx, y: fl ? y0 : m.ty, tx: m.tx, ty: m.ty, vx: fl ? (m.tx - x0) / fl : 0, vy: fl ? (m.ty - y0) / fl : 0,
+      fly: fl, flightMax: fl || 1, dist: Math.hypot(m.tx - x0, m.ty - y0), fuse: gren.fuse, max: gren.fuse, stuck: null, R: gren.R, kind: gren.kind, item: m.item, remote: true,
+    });
   }
 
   updateRemoteBombs(dt) {
     this.remoteBombs = this.remoteBombs.filter((b) => {
+      if (b.fly > 0) {
+        const step = Math.min(dt, b.fly);
+        b.fly -= dt;
+        b.x += b.vx * step;
+        b.y += b.vy * step;
+        if (b.fly <= 0) {
+          b.x = b.tx;
+          b.y = b.ty;
+        }
+      }
       if ((b.fuse -= dt) > 0) return true;
       if (b.kind !== 'smoke') {
         this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R, ...(b.kind === 'stun' ? { tone: 'stun' } : {}) });
@@ -1318,6 +1336,14 @@ export class Combat {
           this.floaters.push({ x: s.x, y: s.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
         }
       }
+      // rival heroes in the circle are stunned too: they cannot move or fight for a moment (they are told, and their own game does it)
+      if (this.g.fight) {
+        for (const r of this.g.remotes.values()) {
+          if (r.hidden || r.bot || r.ai || this.g.sameTeam(r) || Math.hypot(r.x - b.x, r.y - 8 - b.y) > b.R) continue;
+          this.g.mp?.net.send({ t: 'hit', target: r.id, dmg: 0, stun: STUN_PLAYER });
+          this.floaters.push({ x: r.x, y: r.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
+        }
+      }
       return;
     }
     this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R });
@@ -1331,6 +1357,14 @@ export class Combat {
     for (const s of this.skeletons) {
       const d = Math.hypot(s.x - b.x, s.y - 8 - b.y);
       if (s.state !== 'dead' && d <= b.R) this.damageSkeleton(s, 9, b.x, b.y, 180 + 240 * (1 - d / b.R));
+    }
+    // ...and so are rival heroes in the circle (in a fight room): the closer, the harder, wherever they stand (water too)
+    if (this.g.fight) {
+      for (const r of this.g.remotes.values()) {
+        if (r.hidden || this.g.sameTeam(r)) continue;
+        const d = Math.hypot(r.x - b.x, r.y - 8 - b.y);
+        if (d <= b.R) this.hitRemote(r, Math.max(1, Math.round(1 + (1 - d / b.R))));
+      }
     }
     // and so are you: a grenade at your feet hurts, and sends you flying back the way you came from
     const p = this.g.player;
@@ -2698,7 +2732,8 @@ export class Combat {
 
   // someone else's sword or thrown item landed on us (relayed by the room server)
   hitByPlayer(m) {
-    this.hurtPlayer(m.dmg, m.fx, m.fy, { killer: m.from, invuln: 0.5, by: { kind: 'player', id: m.from } });
+    if (m.dmg > 0) this.hurtPlayer(m.dmg, m.fx, m.fy, { killer: m.from, invuln: 0.5, by: { kind: 'player', id: m.from } });
+    if (m.stun > 0) this.g.stunMe(m.stun); // a stun grenade
   }
 
   // fight-mode rooms only: damage another hero. They apply it to themselves when the server relays it.
