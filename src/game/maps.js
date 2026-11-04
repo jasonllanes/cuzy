@@ -47,6 +47,7 @@ export const SURVIVAL_BASE = 'cuzy-survival';
 
 // a friendly name for whatever world a seed makes
 export function mapNameOf(seed) {
+  if (isArenaSeed(seed)) return 'Colosseum';
   const { base, map } = splitSeed(seed);
   const free = FREE_MAPS.find((m) => m.seed === base);
   if (free) return free.name;
@@ -63,12 +64,35 @@ export const splitSeed = (seed) => {
   return { base, map: SURVIVAL_MAPS.some((m) => m.id === map) ? map : 'ruins' };
 };
 
+// The Duel colosseum: a small walled square of sand with crates and pillars to hide behind (Free Roam rooms with Duel on)
+export const ARENA_SEED = 'colosseum-1~arena';
+export const isArenaSeed = (s) => /~arena$/.test(String(s));
+export const stripArena = (s) => String(s).replace(/~arena$/, '');
+
 // Endless Survival (no waves) is a flag at the end of the seed: the same map, played differently
 export const ENDLESS_TAG = '~endless';
 export const isEndlessSeed = (s) => /~endless$/.test(String(s));
 export const stripEndless = (s) => String(s).replace(/~endless$/, '');
 
 export const joinSeed = (base, map) => (map && map !== 'ruins' ? `${base}~${map}` : base);
+
+// Which map a world is (its id in FREE_MAPS or SURVIVAL_MAPS), and the same world on another map (the layout roll and the V2 tag stay)
+export function mapIdOf(seed, mode) {
+  if (mode === 'survival') return splitSeed(seed).map;
+  const base = splitSeed(seed).base;
+  return FREE_MAPS.find((m) => m.seed === base)?.id || '';
+}
+
+export function seedWithMap(seed, mode, mapId) {
+  const roll = String(seed).split('~')[0].split('@')[1];
+  if (mode === 'survival') {
+    const map = SURVIVAL_MAPS.some((m) => m.id === mapId) ? mapId : 'ruins';
+    return joinSeed(roll ? `${SURVIVAL_BASE}@${roll}` : SURVIVAL_BASE, map);
+  }
+  const free = FREE_MAPS.find((m) => m.id === mapId);
+  if (!free) return seed;
+  return `${roll ? `${free.seed}@${roll}` : free.seed}${/~v2$/.test(String(seed)) ? '~v2' : ''}`;
+}
 
 // The host switched a room between Free Roam and Survival: the matching map (same name where both have one, otherwise
 // the first of the other mode), keeping a layout roll if there was one

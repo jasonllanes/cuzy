@@ -13,7 +13,8 @@ import { Streaks } from './streaks';
 import { sfx } from './sfx';
 import { TEAMS } from './teams';
 import { store } from './store';
-import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, WOOD_SHOP, emptyUpgrades, upgradeCost } from './upgrades';
+import { loadedThemes } from '../v2/assets';
+import { AIR_SUPPORT, REPAIR_HEAL, mendCost, repairKitCost, FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, WOOD_SHOP, emptyUpgrades, upgradeCost } from './upgrades';
 
 // how far above the feet a hero's name tag floats; the villager is shorter than the others
 const tagHeight = (hero) => (hero.kind === 'v2' ? 36 : hero.kind === 'retro' ? 26 : hero.kind === 'dev' ? 30 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
@@ -145,7 +146,7 @@ export class Game {
 
     // Local multiplayer: other heroes in the same room, and a shared day/night clock
     this.mp = !demo && net && session
-      ? { net, you: session.you, pvp: !!session.room.pvp, streakMonsters: !!session.room.streakMonsters, clockHour: session.clock.hour, clockDay: session.clock.day, clockAt: performance.now(), sendT: 0 }
+      ? { net, you: session.you, pvp: !!session.room.pvp, duel: !!session.room.duel, streakMonsters: !!session.room.streakMonsters, clockHour: session.clock.hour, clockDay: session.clock.day, clockAt: performance.now(), sendT: 0 }
       : null;
     // what the room allows (everything, when playing alone)
     this.rules = { melee: session?.room?.allowMelee !== false, throw: session?.room?.allowThrow !== false };
@@ -191,7 +192,7 @@ export class Game {
     this.allowVisit = !!session?.room?.allowVisit; // the room lets players teleport to each other
     this.aiSim = null; // in a fight room the host's game plays the room's computer players
     // in Free Roam rooms every player slot has its own house in a tight cluster
-    this.roomHomes = this.mp && mode === 'free' ? world.homeCluster(Math.max(session.room.max || 4, 2), hashString(session.room.code)) : null;
+    this.roomHomes = this.mp && mode === 'free' && !world.arena ? world.homeCluster(Math.max(session.room.max || 4, 2), hashString(session.room.code)) : null;
     this.faces = new Map();
 
     this.keys = new Set();
@@ -255,6 +256,20 @@ export class Game {
     this.coins = Math.max(0, Math.floor(Number(saved?.coins) || 0));
     this.wood = Math.max(0, Math.floor(Number(saved?.wood) || 0)); // wood for crafting weapons, in a purse like the coins
     if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
+    // a duel with a bet: the stake goes on the table now (what you cannot cover is not at risk); the host pays the pot out at the end
+    this.duelLeft = null; // seconds on the duel clock (the host sends it once the scene is over)
+    const duelRoom = this.mp?.duel ? session.room : null;
+    this.duelFighters = (duelRoom?.duelFighters || []).map(String); // the ones fighting (everyone else in the room watches)
+    this.duelFallen = new Set((duelRoom?.duelFallen || []).map(String)); // fighters who are out
+    this.duelUnits = duelRoom?.duelUnits || {}; // fighter id -> their side (a team, or themselves)
+    this.spectating = !!(duelRoom && this.duelFighters.length && !this.duelFighters.includes(String(session.you)));
+    this.duelStake = 0;
+    this.duelBet = this.mp?.duel ? Math.max(0, Math.round(Number(session.room.bet)) || 0) : 0;
+    if (this.mp?.duel && !this.spectating && this.duelBet > 0) {
+      this.duelStake = Math.min(Math.round(Number(session.room.bet)), this.coins);
+      this.coins -= this.duelStake;
+      this.mp.net.send({ t: 'stake', amount: this.duelStake });
+    }
     for (const k of saved?.felled || []) {
       this.world.felled.add(String(k)); // trees you cut down stay down... for a while
       this.world.regrow.set(String(k), 30 + Math.random() * 240);
@@ -310,7 +325,7 @@ export class Game {
     this.prompt = null;
 
     this.onKeyDown = (e) => {
-      if (this.frozen || this.cutscene || this.stunnedT > 0) return;
+      if (this.frozen || this.cutscene || this.stunnedT > 0 || this.spectating) return;
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
       // a HUD button that kept focus after a click would otherwise react to Space/Enter
@@ -377,7 +392,7 @@ export class Game {
     };
     this.onMouseDown = (e) => {
       if (this.touchMode) return; // taps are for the on-screen buttons
-      if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || this.cutscene || this.stunnedT > 0 || (e.button !== 0 && e.button !== 2)) return;
+      if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || this.cutscene || this.stunnedT > 0 || this.spectating || (e.button !== 0 && e.button !== 2)) return;
       this.onMouseMove(e);
       this.mouseHeld[e.button] = true;
       if (e.button === 0 && !this.dead) {
@@ -417,7 +432,7 @@ export class Game {
   // into the room) or to the shelter (Survival) by itself while the story is told. Returns false when there is nothing to show
   // (a game that is being resumed, for one).
   startCutscene() {
-    if (this.demo || this.cutscene || this.dead || this.resumed) return false;
+    if (this.demo || this.cutscene || this.dead || this.resumed || this.world.arena) return false; // (the colosseum has no house to walk to)
     const p = this.player;
     const apoc = this.world.apoc;
     if (this.inside) this.exitHouse(true);
@@ -568,6 +583,18 @@ export class Game {
   }
 
   chooseHome(saved, session) {
+    if (this.world.arena) {
+      // the colosseum: each side starts across the sand from the others (a team stands in a line); the ones who only watch wait outside the wall
+      const room = session?.room;
+      const fighters = (room?.duelFighters || []).map(String);
+      const me = String(session?.you);
+      if (!room?.duel || !fighters.length) return this.world.arenaSpawn(session?.slot || 0);
+      if (!fighters.includes(me)) return this.world.arenaSpectator(session?.slot || 0);
+      const unitOf = (id) => room.duelUnits?.[id] ?? id;
+      const units = [...new Set(fighters.map(unitOf))];
+      const mates = fighters.filter((id) => unitOf(id) === unitOf(me)).sort();
+      return this.world.arenaSpawn(Math.max(0, units.indexOf(unitOf(me))), Math.max(0, mates.indexOf(me)), mates.length || 1);
+    }
     if (this.wave) {
       // everybody starts together on the doorstep of the one house, spread out a little by slot
       const slot = session?.slot || 0;
@@ -674,9 +701,81 @@ export class Game {
   celebPoint() {
     const c = this.celeb;
     if (!c) return null;
+    if (c.key === 'draw') return { x: this.player.x, y: this.player.y };
     if (c.key === 'me' || (!!this.mp && String(c.key) === String(this.mp.you))) return { x: this.player.x, y: this.player.y }; // the one who scored
     const r = this.remotes.get(c.key) ?? this.remotes.get(Number(c.key));
     return r ? { x: r.x, y: r.y } : null;
+  }
+
+  // the duel bar: the clock, a health bar for each side (a fighter, or a team) and what is on the table
+  duelHud() {
+    if (!this.mp?.duel) return null;
+    const me = String(this.mp.you);
+    const info = (id) => {
+      if (id === me) return { id, name: this.name || 'You', hero: this.hero, hp: this.dead ? 0 : this.combat.hp, max: this.combat.maxHp };
+      const r = this.remotes.get(id);
+      return r ? { id, name: r.name, hero: r.hero, hp: this.duelFallen.has(id) ? 0 : Math.max(0, r.hp ?? 0), max: r.max || 6 } : { id, name: '…', hero: null, hp: 0, max: 6 };
+    };
+    const units = new Map();
+    for (const id of this.duelFighters) {
+      const key = this.duelUnits[id] ?? id;
+      if (!units.has(key)) units.set(key, { key, members: [] });
+      units.get(key).members.push({ ...info(id), out: this.duelFallen.has(id) || (id === me && !!this.dead) });
+    }
+    const list = [...units.values()].map((u) => {
+      const team = String(u.key).startsWith('t') && this.teamCount ? Number(String(u.key).slice(1)) : null;
+      return {
+        key: u.key,
+        name: team !== null && TEAMS[team] ? `${TEAMS[team].icon} ${TEAMS[team].name}` : u.members[0].name,
+        hero: team !== null ? null : u.members[0].hero,
+        color: team !== null && TEAMS[team] ? TEAMS[team].color : null,
+        hp: u.members.reduce((n, m) => n + m.hp, 0),
+        max: u.members.reduce((n, m) => n + m.max, 0),
+        members: u.members,
+        mine: u.members.some((m) => m.id === me),
+      };
+    });
+    return { left: this.duelLeft, bet: this.duelBet, stake: this.duelStake, units: list, watching: !!this.spectating, out: !!this.dead };
+  }
+
+  // where the camera goes in a duel when you are only watching: the middle of the fighters still standing
+  duelPoint() {
+    const me = String(this.mp.you);
+    const pts = [];
+    for (const id of this.duelFighters) {
+      if (this.duelFallen.has(id)) continue;
+      if (id === me) {
+        if (!this.dead && !this.spectating) pts.push(this.player);
+        continue;
+      }
+      const r = this.remotes.get(id);
+      if (r && r.hp > 0) pts.push(r);
+    }
+    if (!pts.length) return { x: -8, y: -8 };
+    return { x: pts.reduce((n, q) => n + q.x, 0) / pts.length, y: pts.reduce((n, q) => n + q.y, 0) / pts.length };
+  }
+
+  // the duel is decided (the last side standing, the clock, or the others walked out): pay the stakes and cheer, or shrug on a draw
+  duelOver(m) {
+    const me = String(this.mp.you);
+    const fighters = (m.fighters || []).map(String);
+    const winners = (m.winners || []).map(String);
+    const losers = (m.losers || []).map(String);
+    const stakes = m.stakes || {};
+    const eff = fighters.length > 1 ? Math.min(...fighters.map((id) => Number(stakes[id]) || 0)) : 0; // every loser puts up (at most) the smallest stake
+    const mine = Number(stakes[me]) || 0;
+    const fighter = fighters.includes(me);
+    const won = !m.draw && winners.includes(me);
+    const share = Math.floor((eff * losers.length) / Math.max(1, winners.length)); // the winners split what the losers lose
+    const back = !fighter ? 0 : m.draw ? mine : won ? mine + share : Math.max(0, mine - eff);
+    if (back > 0) this.giveCoins(back);
+    this.duelStake = 0;
+    const team = winners.length > 1;
+    const why = m.reason === 'time' ? (m.draw ? 'The bell: the same health, so it is a draw.' : 'The bell: the lowest health loses.') : m.reason === 'forfeit' ? 'The others left.' : m.draw ? 'Everybody went down together.' : team ? 'The last team standing!' : 'Knocked out!';
+    const money = !fighter || (!mine && !eff) ? '' : m.draw ? ` Draw: your ${mine} 🪙 comes back.` : won ? ` You win ${share} 🪙!` : eff ? ` You lose ${eff} 🪙.` : '';
+    sfx.play(won ? 'win' : 'wave');
+    this.celebrate(m.draw ? 'draw' : String(m.id), m.draw ? 'Nobody' : m.name, 6.9, `${why}${money}`);
+    if (this.celeb && m.draw) this.celeb.draw = true;
   }
 
   // Cheer the winner: the camera goes to them, they are lit up, and confetti rains for `dur` seconds. `after` runs at the end.
@@ -784,7 +883,7 @@ export class Game {
         ctx.fillRect(sx - zoom * 2, sy - zoom, zoom * 4, zoom * 2);
       }
       ctx.restore();
-      this.pill(`👑 ${c.name} wins!`, fx, fy - zoom * 38, zoom * 5.5, '#4b3000', 'rgba(255,214,74,0.97)');
+      this.pill(c.draw ? '🤝 A draw!' : `👑 ${c.name} wins!`, fx, fy - zoom * 38, zoom * 5.5, '#4b3000', 'rgba(255,214,74,0.97)');
     }
     for (const b of c.bits) {
       ctx.save();
@@ -1119,6 +1218,7 @@ export class Game {
   // A hero who is defeated by another loses a random share of their coins (never more than 70%) on the spot,
   // for anyone to pick up. Everybody in the room sees the same pieces, and the first to grab one takes it.
   dropCoinsOnDeath() {
+    if (this.mp?.duel) return; // (the stakes are settled by the host: nothing falls on the sand)
     const have = this.coinCount();
     const share = 0.08 + 0.62 * Math.random() ** 2.2; // usually around a quarter, sometimes much less or more, never past 70%
     const n = Math.min(Math.floor(have * 0.7), Math.floor(have * share));
@@ -1144,7 +1244,7 @@ export class Game {
     this.streaks.died(this.myKey());
     if (this.mp && by?.kind !== 'player') this.mp.net.send({ t: 'fell' });
     this.push = null;
-    this.dead = { t: 0, dur: RESPAWN_TIME, by, x: this.player.x, y: this.player.y, last: null };
+    this.dead = { t: 0, dur: this.mp?.duel ? 1e9 : RESPAWN_TIME, by, x: this.player.x, y: this.player.y, last: null }; // (out of a duel: no coming back, you watch the rest)
   }
 
   // where the one who killed you is right now (or was last seen)
@@ -1265,6 +1365,12 @@ export class Game {
       for (const l of ev.loot) {
         c.drops.push({ x: ev.x + (Math.random() - 0.5) * 16, y: ev.y + (Math.random() - 0.5) * 8, id: l.id, qty: l.qty, age: 0 });
       }
+    } else if (ev.type === 'mended') {
+      sfx.play('heal');
+      this.onToast?.(ev.what === 'heal' ? '🔧 The shelter was repaired!' : `🔧 Self-repair is now level ${ev.level}.`);
+    } else if (ev.type === 'air') {
+      sfx.play('wave');
+      this.onToast?.(ev.kind === 'carpet' ? '💣 Carpet bombing is on its way!' : '🚁 The gunship is here for a minute!');
     } else if (ev.type === 'boom') {
       c.blasts.push({ x: ev.x, y: ev.y, t: 0, R: ev.R || 30 }); // a grenadier's grenade
       sfx.play('boom', 0.6);
@@ -1297,6 +1403,9 @@ export class Game {
     } else if (d.op === 'upg' && !d.ok) {
       this.giveCoins(this.houseCostPaid || 0);
       this.onToast?.('The base is already as strong as it gets.');
+    } else if ((d.op === 'mendUp' || d.op === 'mendHeal' || d.op === 'air') && !d.ok) {
+      this.giveCoins(this.paidFor?.[d.op] || 0); // it did not happen: the coins come back
+      this.onToast?.(d.op === 'air' ? 'Air support is busy. Try again in a moment.' : 'The shelter is already in perfect shape.');
     }
   }
 
@@ -2021,6 +2130,51 @@ export class Game {
     else if (r === 'host-only') this.onToast?.('Only the host starts the next wave.');
   }
 
+  // Survival: shelter self-repair (no top level), a repair kit, and the air strikes
+  buyMend() {
+    if (!this.wave || !this.world.apoc) return;
+    const cost = mendCost(this.wave.mendLevel || 0);
+    if (!this.spendCoins(cost)) {
+      this.onToast?.(`Self-repair costs ${cost} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    (this.paidFor ||= {}).mendUp = cost;
+    if (this.wave.upgradeMend() === false) this.giveCoins(cost);
+  }
+
+  buyRepairKit() {
+    if (!this.wave || !this.world.apoc) return;
+    if (this.wave.baseHp >= this.wave.baseMax) {
+      this.onToast?.('The shelter is already in perfect shape.');
+      return;
+    }
+    const cost = repairKitCost(this.wave.baseLevel || 0);
+    if (!this.spendCoins(cost)) {
+      this.onToast?.(`A repair kit costs ${cost} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    (this.paidFor ||= {}).mendHeal = cost;
+    if (this.wave.repairShelter(REPAIR_HEAL) === false) this.giveCoins(cost);
+  }
+
+  buyAir(kind) {
+    const info = AIR_SUPPORT[kind];
+    if (!this.wave || !this.world.apoc || !info) return;
+    if (this.wave.air || this.wave.airCd > 0) {
+      this.onToast?.('Air support is busy. Try again in a moment.');
+      return;
+    }
+    if (!this.spendCoins(info.cost)) {
+      this.onToast?.(`${info.name} costs ${info.cost} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    (this.paidFor ||= {}).air = info.cost;
+    if (this.wave.callAir(kind) === false) {
+      this.giveCoins(info.cost);
+      this.onToast?.('Air support is busy. Try again in a moment.');
+    }
+  }
+
   // Survival's Shelter light is one level for the whole team: whoever buys it lights the lamps for everyone, and the level you see is the team's
   syncShelterLight() {
     const w = this.wave;
@@ -2587,6 +2741,65 @@ export class Game {
     }
   }
 
+  // a bomb from the air: the red circle on the ground fills up while it falls, and the bomb itself comes down from above
+  drawAirBomb(ctx, b) {
+    const f = 1 - Math.max(0, b.fall) / 0.9;
+    const flash = f > 0.7 && Math.sin(this.t * 40) > 0 ? 0.25 : 0;
+    ctx.save();
+    ctx.translate(Math.round(b.x), Math.round(b.y + 2));
+    ctx.fillStyle = `rgba(255,30,30,${0.1 + flash})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,40,40,${0.25 + 0.3 * f})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, b.R * f, b.R * 0.8 * f, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,70,70,0.95)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, b.R, b.R * 0.8, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    const h = Math.max(0, b.fall) * 150; // how high it still is
+    ctx.fillStyle = '#2c2f38';
+    ctx.fillRect(Math.round(b.x) - 2, Math.round(b.y - h) - 6, 4, 7);
+    ctx.fillStyle = '#c9ced6';
+    ctx.fillRect(Math.round(b.x) - 1, Math.round(b.y - h) - 6, 1, 4);
+  }
+
+  // the aircraft: a shadow on the ground and the helicopter high above it (the bomber's sweep, or the gunship's circle)
+  drawAir(ctx, air) {
+    const [theme, name, k] = air.kind === 'gunship' ? ['military', 'Helicopter', 0.55] : ['vehicles', 'Helicopter_2', 0.95];
+    const sp = loadedThemes.get(theme)?.byName.get(name);
+    const im = this.img[`v2/${theme}`];
+    if (!sp || !im) return;
+    const w = sp.w * k;
+    const h = sp.h * k;
+    const dirX = air.kind === 'gunship' ? -Math.sin(air.ang) : Math.cos(air.ang);
+    const flip = dirX < 0;
+    const alt = 64 + Math.sin(this.t * 3) * 1.5;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(Math.round(air.x), Math.round(air.y + 4), w * 0.38, h * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.translate(Math.round(air.x), Math.round(air.y - alt + Math.sin(this.t * 22) * 0.5));
+    if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(im, sp.x, sp.y, sp.w, sp.h, Math.round(-w / 2), Math.round(-h / 2), Math.round(w), Math.round(h));
+    ctx.globalAlpha = 0.22; // the turning rotor
+    ctx.fillStyle = '#e8eef5';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.06, -h * 0.28, w * 0.46, h * 0.045, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (air.firing && Math.sin(this.t * 60) > -0.2) {
+      ctx.fillStyle = '#ffe9a0'; // the muzzle flash at the nose
+      ctx.fillRect(Math.round(w * 0.42), Math.round(h * 0.1), 4, 3);
+    }
+    ctx.restore();
+  }
+
   // A hired helper: a hero-style character with a coloured ring and rank pips
   // a helper's bullet (k 1) or plasma bolt (k 2)
   drawAshot(ctx, s) {
@@ -2850,9 +3063,23 @@ export class Game {
       this.rules = { melee: m.room.allowMelee !== false, throw: m.room.allowThrow !== false };
       if (this.mp) this.mp.streakMonsters = !!m.room.streakMonsters;
       if (m.room.difficulty) this.wave?.setDifficulty(m.room.difficulty); // the host can change the difficulty mid-round
+      if (m.room.difficulty) {
+        this.difficultyId = m.room.difficulty;
+        this.aiSim?.setDifficulty?.(m.room.difficulty); // ...and how well the computer players fight
+        this.bots?.setDifficulty?.(m.room.difficulty);
+      }
       this.wave?.setStartMode(m.room.waveStart); // ...and what starts the next wave
       if (m.room.waves !== undefined) this.wave?.setWaves(m.room.waves); // ...and how many waves there are
       this.allowVisit = !!m.room.allowVisit;
+      if (this.mp) this.mp.pvp = !!m.room.pvp; // the host can switch player damage on or off mid-round
+      if (this.mp && !this.world.arena && m.room.mode === 'free' && m.room.winBy) this.winBy = m.room.winBy;
+    } else if (m.t === 'duelfall') {
+      this.duelFallen.add(String(m.id));
+    } else if (m.t === 'duel') {
+      if (this.duelLeft === null && this.mp?.duel) {
+        this.onToast?.(`⚔️ Duel! The first one down loses, and at the bell the lowest health loses.${this.duelStake ? ` Stake: ${this.duelStake} 🪙` : ''}`);
+      }
+      this.duelLeft = Math.max(0, Number(m.left) || 0);
     } else if (m.t === 'teams') {
       this.teamMap = { ...m.teams };
     } else if (m.t === 'state') {
@@ -2879,6 +3106,9 @@ export class Game {
       }
     } else if (m.t === 'fell') {
       this.streaks.died(String(m.id));
+    } else if (m.t === 'win' && m.duel) {
+      this.streaks.reset();
+      this.duelOver(m);
     } else if (m.t === 'win') {
       this.streaks.reset();
       sfx.play(m.id === this.mp.you ? 'win' : 'wave');
@@ -2900,6 +3130,8 @@ export class Game {
       if (ITEMS[m.item] || m.item === 'bullet' || m.item === 'plasma') {
         const gunShot = m.item === 'bullet' || m.item === 'plasma';
         this.combat.remoteShots.push({ x: m.x, y: m.y, vx: m.vx, vy: m.vy, id: gunShot ? 'bullet' : m.item, pl: m.item === 'plasma', rot: 0, life: gunShot ? 0.55 : throwStats(m.item).life });
+        const shooter = this.remotes.get(m.id);
+        if (shooter && gunShot && m.g) shooter.gunFx = { g: m.g, a: Math.atan2(m.vy, m.vx), t: 0 }; // their gun shows in their hands
       }
     } else if (m.t === 'w') {
       this.wave?.onMessage(m.k, m.d, m.from);
@@ -2909,6 +3141,12 @@ export class Game {
     } else if (m.t === 'fx' && m.kind === 'swing') {
       const r = this.remotes.get(m.id);
       if (r) r.swing = { t: 0, a: m.a, w: m.w, lv: r.lv };
+    } else if (m.t === 'fx' && m.kind === 'flame') {
+      this.combat.remoteFlame(m);
+      const burner = this.remotes.get(m.id);
+      if (burner) burner.gunFx = { g: 'fireplasma', a: m.a, t: 0 };
+    } else if (m.t === 'fx' && m.kind === 'zap') {
+      this.combat.remoteZap(m);
     } else if (m.t === 'fx' && m.kind === 'grapple') {
       this.combat.remoteGrapple(m);
     } else if (m.t === 'fx' && m.kind === 'bomb') {
@@ -2931,7 +3169,7 @@ export class Game {
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
       const at = this.inside ? this.inside.out : p; // indoors you are not in the world: friends just stop seeing you
-      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden, mt: this.mount?.type || '' });
+      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating, mt: this.mount?.type || '' });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -2947,6 +3185,7 @@ export class Game {
       r.animT += dt;
       if (r.bubble && (r.bubble.t += dt) > 5) r.bubble = null;
       if (r.swing && (r.swing.t += dt) > 0.24) r.swing = null;
+      if (r.gunFx && (r.gunFx.t += dt) > 0.7) r.gunFx = null;
       if (r.spin && (r.spin.t += dt) > r.spin.dur) r.spin = null;
       if (r.shield > 0) r.shield -= dt;
     }
@@ -2985,6 +3224,7 @@ export class Game {
 
   // 0 in full daylight, up to 1 in the dead of night
   darkness() {
+    if (this.world.arena) return 0; // the colosseum is always sunlit
     if (this.world.depot) return 0.5;
     if (this.dungeon) return 0.55;
     const g = skyTint(this.hour)[1];
@@ -3208,8 +3448,9 @@ export class Game {
       }
       // while downed, the camera drifts over to whoever did it
       // and when a round is won, over to the winner
-      const focus = this.dead ? this.killerPoint() || { x: p.x, y: p.y } : this.celeb ? this.celebPoint() || p : p;
-      const k = 1 - Math.exp(-dt * (this.dead || this.celeb ? 3.5 : 9));
+      const watching = this.mp?.duel && (this.spectating || this.dead) && !this.celeb; // in a duel the ones who watch (or are out) follow the fight
+      const focus = watching ? this.duelPoint() : this.dead ? this.killerPoint() || { x: p.x, y: p.y } : this.celeb ? this.celebPoint() || p : p;
+      const k = 1 - Math.exp(-dt * (this.dead || this.celeb || watching ? 3.5 : 9));
       this.cam.x += (focus.x - this.cam.x) * k;
       this.cam.y += (focus.y - 10 - this.cam.y) * k;
     }
@@ -3238,12 +3479,23 @@ export class Game {
       }
       this.wave?.update(dt);
       this.syncShelterLight();
+      if (this.wave?.air?.firing && this.t - (this.airSfxAt ?? -9) > 0.16) {
+        this.airSfxAt = this.t;
+        sfx.play('gun', 0.18); // the gunship's machine gun
+      }
       if (this.mp) {
         // everyone in the room reads the same clock
         const total = this.mp.clockHour + ((performance.now() - this.mp.clockAt) / 1000) * HOURS_PER_SECOND;
         this.hour = total % 24;
         this.skyTotal = this.wave && this.world.apoc ? total * SKY_PACE : total;
         this.day = this.mp.clockDay + Math.floor(total / 24) - Math.floor(this.mp.clockHour / 24);
+        if (this.world.arena) this.hour = 12;
+        if (this.spectating && !this.specZoom) {
+          this.specZoom = true;
+          this.zoomOffset = -1; // a little further out, to see the whole fight
+          this.resize();
+        }
+        if (this.duelLeft !== null && !this.celeb && !this.paused) this.duelLeft = Math.max(0, this.duelLeft - dt);
         this.updateMultiplayer(dt);
       } else {
         this.skyTotal = (this.skyTotal ?? (this.day - 1) * 24 + this.hour) + dt * HOURS_PER_SECOND * (this.wave && this.world.apoc ? SKY_PACE : 1);
@@ -3303,9 +3555,10 @@ export class Game {
       day: this.day,
       zoom: this.zoom,
       hidden: this.combat.hidden && !this.dead,
-      dead: this.dead ? { name: this.killerName(), left: Math.max(0, this.dead.dur - this.dead.t), total: this.dead.dur } : null,
+      dead: this.dead ? { name: this.killerName(), left: Math.max(0, this.dead.dur - this.dead.t), total: this.dead.dur, duel: !!this.mp?.duel } : null,
       wave: this.wave?.hudState() || null,
       fight: this.bots?.scoreboard() || null,
+      duel: this.duelHud(),
       upg: this.upgrades,
       dayMap: !!this.world.mapInfo?.day,
       stats: this.statsHud(),
@@ -3782,7 +4035,7 @@ export class Game {
   // ---------- your house, from the inside (Free Roam) ----------
 
   canHaveInterior() {
-    return !this.wave && !this.world.apoc && !this.demo;
+    return !this.wave && !this.world.apoc && !this.demo && !this.world.arena;
   }
 
   // a quick blink to black that hides the jump between outside and inside
@@ -4631,7 +4884,7 @@ export class Game {
     }
     for (const a of this.animals) drawList.push({ kind: 'animal', a, y: a.y });
     if (!this.demo) {
-      drawList.push({ kind: 'player', y: this.player.y + (this.mount ? 0.2 : 0) });
+      if (!this.spectating) drawList.push({ kind: 'player', y: this.player.y + (this.mount ? 0.2 : 0) });
       this.combat.collect(drawList);
       this.balls?.collect(drawList);
       for (const r of this.remotes.values()) if (!r.hidden) drawList.push({ kind: 'remote', r, y: r.y });
@@ -4643,6 +4896,8 @@ export class Game {
       // Survival shooters stand on the bus roof, so they are drawn in front of the bus
       for (const a of this.wave.allies) drawList.push({ kind: 'ally', a, y: a.y + (this.world.apoc && ALLIES[a.kind].ai === 'ranged' ? 90 : 0) });
       for (const s of this.wave.ashots) drawList.push({ kind: 'ashot', s, y: s.y + 6 });
+      for (const b of this.wave.airBombs || []) drawList.push({ kind: 'airbomb', b, y: b.y });
+      if (this.wave.air) drawList.push({ kind: 'air', y: 1e7 }); // (it flies above everything)
       if (this.houseHit && this.world.apoc) drawList.push({ kind: 'househit', y: this.wave.sprite.y + this.wave.sprite.h + 3 });
     }
     drawList.sort((a, b) => a.y - b.y);
@@ -4653,6 +4908,56 @@ export class Game {
           // (an animated prop plays its frames: o.anim = { frames, fps })
           if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.anim ? (Math.floor(this.t * o.anim.fps + o.x) % o.anim.frames) * o.sw : o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
           break;
+        case 'arenawall': {
+          // a block of the colosseum wall: pale stone with brick lines, and a darker front where the sand lies in front of it
+          const x0 = o.x - 8;
+          const y0 = o.y - 24;
+          ctx.fillStyle = '#a99d8b';
+          ctx.fillRect(x0, y0, 16, 24);
+          ctx.fillStyle = '#8f8372';
+          for (let r = 0; r < 4; r++) {
+            ctx.fillRect(x0, y0 + 5 + r * 6, 16, 1);
+            ctx.fillRect(x0 + ((r + o.tx) % 2 ? 4 : 11), y0 + r * 6, 1, 6);
+          }
+          ctx.fillStyle = '#cfc4b0';
+          ctx.fillRect(x0, y0, 16, 3);
+          if (o.faces) {
+            ctx.fillStyle = 'rgba(40,28,16,0.28)';
+            ctx.fillRect(x0, y0 + 14, 16, 10);
+          }
+          break;
+        }
+        case 'arenablock': {
+          if (o.style === 'pillar') {
+            // a stone column: 32 wide, with a lit cap and a shadowed side
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.fillRect(o.x - 15, o.y - 5, 32, 6);
+            ctx.fillStyle = '#b9ad9a';
+            ctx.fillRect(o.x - 14, o.y - 40, 28, 38);
+            ctx.fillStyle = '#9a8e7b';
+            ctx.fillRect(o.x + 4, o.y - 40, 10, 38);
+            ctx.fillStyle = '#d6cbb7';
+            ctx.fillRect(o.x - 16, o.y - 44, 32, 6);
+            ctx.fillRect(o.x - 16, o.y - 4, 32, 4);
+            ctx.fillStyle = '#8f8372';
+            for (let k = 0; k < 3; k++) ctx.fillRect(o.x - 14, o.y - 30 + k * 10, 28, 1);
+          } else {
+            // a wooden crate
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.fillRect(o.x - 8, o.y - 2, 17, 3);
+            ctx.fillStyle = '#b8803d';
+            ctx.fillRect(o.x - 8, o.y - 15, 16, 16);
+            ctx.fillStyle = '#d9a35c';
+            ctx.fillRect(o.x - 8, o.y - 15, 16, 4);
+            ctx.fillStyle = '#7a4f22';
+            ctx.fillRect(o.x - 8, o.y - 15, 16, 1);
+            ctx.fillRect(o.x - 8, o.y, 16, 1);
+            ctx.fillRect(o.x - 8, o.y - 15, 1, 16);
+            ctx.fillRect(o.x + 7, o.y - 15, 1, 16);
+            ctx.fillRect(o.x - 1, o.y - 15, 2, 16);
+          }
+          break;
+        }
         case 'house':
           // see-through while you are indoors, so you can still spot yourself
           if (this.combat?.insideId === o.id) ctx.globalAlpha = 0.4;
@@ -4726,6 +5031,7 @@ export class Game {
           if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, { ...o.r, y: o.r.y - lift, teamColor: this.teamCount ? this.peerColor(o.r) : null });
           if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y - lift, o.r.shield);
           if (o.r.swing) this.combat.drawSwingAt(ctx, o.r.x, o.r.y - lift - 8, o.r.swing);
+          if (o.r.gunFx) this.combat.drawGunAt(ctx, o.r.x, o.r.y - lift - 8, o.r.gunFx);
           if (o.r.spin) this.combat.drawSpinAt(ctx, o.r.x, o.r.y - lift - 8, o.r.spin);
           break;
         }
@@ -4747,6 +5053,12 @@ export class Game {
         case 'skeleton':
         case 'ashot':
           this.drawAshot(ctx, o.s);
+          break;
+        case 'airbomb':
+          this.drawAirBomb(ctx, o.b);
+          break;
+        case 'air':
+          this.drawAir(ctx, this.wave.air);
           break;
         case 'projectile':
         case 'drop':

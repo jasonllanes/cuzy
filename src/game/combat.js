@@ -121,13 +121,28 @@ export const GUNS = {
   pistol: { name: 'Pistol', icon: '🔫', len: 13, mag: 12, reload: 1.2, rate: 0.5, pellets: 1, spread: 0, dmg: 2, life: BULLET_LIFE, price: 0, blurb: 'Steady and accurate. 12 rounds.' },
   shotgun: { name: 'Shotgun', icon: '💥', len: 26, mag: 6, reload: 2, rate: 0.85, pellets: 5, spread: 0.36, dmg: 2.5, life: 0.3, price: 60, blurb: 'Five pellets. Point blank they all stack for huge damage, and every pellet one-shots a normal enemy. 6 shells.' },
   rifle: { name: 'Rifle', icon: '🎯', len: 25, mag: 60, reload: 2.4, rate: 0.11, pellets: 1, spread: 0.05, dmg: 1.4, life: 0.65, price: 90, blurb: 'A fast, accurate assault rifle that holds its aim at range. 60 rounds.' },
-  plasma: { name: 'Plasma gun', icon: '⚡', len: 26, mag: 20, reload: 2.4, rate: 0.42, pellets: 1, spread: 0.02, dmg: 4, life: 0.75, price: 160, plasma: true, blurb: 'Glowing bolts that burn straight through two enemies in a line. 20 charges.' },
+  sidearm: { name: 'Sidearm', icon: '🔫', len: 13, mag: 10, reload: 1.1, rate: 0.42, pellets: 1, spread: 0.02, dmg: 2.2, life: 0.55, price: 20,  blurb: 'A small, cheap spare. 10 rounds.' },
+  glock: { name: 'Glock 19', icon: '🔫', len: 14, mag: 17, reload: 1.3, rate: 0.3, pellets: 1, spread: 0.04, dmg: 1.6, life: 0.55, price: 35,  blurb: 'Light and quick, with a big magazine. 17 rounds.' },
+  m1911: { name: 'M1911', icon: '🔫', len: 16, mag: 8, reload: 1.2, rate: 0.4, pellets: 1, spread: 0.02, dmg: 3, life: 0.6, price: 45,  blurb: 'An old classic that hits harder. 8 rounds.' },
+  sawedoff: { name: 'Sawed-off', icon: '💥', len: 22, mag: 2, reload: 1.8, rate: 0.6, pellets: 7, spread: 0.55, dmg: 2.6, life: 0.22, price: 55,  blurb: 'Two barrels, seven pellets: terrible at range, a wall at point blank. 2 shells.' },
+  uzi: { name: 'Mini Uzi', icon: '🔫', len: 18, mag: 32, reload: 1.6, rate: 0.07, pellets: 1, spread: 0.14, dmg: 0.9, life: 0.45, price: 70,  blurb: 'A stream of small bullets. 32 rounds.' },
+  lever: { name: 'Lever rifle', icon: '🎯', len: 25, mag: 10, reload: 1.8, rate: 0.55, pellets: 1, spread: 0.01, dmg: 4, life: 0.9, price: 80,  blurb: 'Slow, accurate and long-ranged. 10 rounds.' },
+  magnum: { name: 'Magnum', icon: '🔫', len: 21, mag: 6, reload: 2, rate: 0.8, pellets: 1, spread: 0.01, dmg: 6, life: 0.7, price: 85, pierce: 1, blurb: 'A revolver that goes through one enemy and hits the next. 6 rounds.' },
+  pump: { name: 'Pump shotgun', icon: '💥', len: 29, mag: 8, reload: 2.2, rate: 0.75, pellets: 6, spread: 0.4, dmg: 2.5, life: 0.32, price: 95,  blurb: 'Six pellets and eight shells: the long, reliable shotgun.' },
+  deagle: { name: 'Desert Eagle', icon: '🔫', len: 19, mag: 7, reload: 2, rate: 0.7, pellets: 1, spread: 0.01, dmg: 5.5, life: 0.7, price: 110, pierce: 1, blurb: 'A handcannon that punches through. 7 rounds.' },
+  ak47: { name: 'AK-47', icon: '🎯', len: 25, mag: 30, reload: 2.4, rate: 0.12, pellets: 1, spread: 0.07, dmg: 1.8, life: 0.65, price: 130,  blurb: 'A tough automatic rifle. 30 rounds.' },
+  raygun: { name: 'Ray gun', icon: '⚡', len: 16, mag: 24, reload: 2.2, rate: 0.3, pellets: 1, spread: 0.02, dmg: 3, life: 0.7, price: 150, plasma: true, arc: 1, blurb: 'Electric zaps that burn through two enemies, and a bolt of lightning leaps to a nearby one. 24 charges.' },
+  sniper: { name: 'Sniper rifle', icon: '🎯', len: 26, mag: 5, reload: 2.6, rate: 1.1, pellets: 1, spread: 0, dmg: 12, life: 1.1, price: 200, pierce: 2, blurb: 'One slow, huge shot that goes through up to three zombies. 5 rounds.' },
+  laser: { name: 'Blue laser', icon: '⚡', len: 22, mag: 40, reload: 2.4, rate: 0.09, pellets: 1, spread: 0.03, dmg: 1.5, life: 0.7, price: 210, plasma: true, arc: 2, blurb: 'A rapid electric beam: every hit zaps lightning on to two more enemies nearby. 40 charges.' },
+  fireplasma: { name: 'Flamethrower', icon: '🔥', len: 18, mag: 120, reload: 2.8, rate: 0.07, pellets: 1, spread: 0, dmg: 0.55, life: 0.2, price: 230, flame: true, range: 74, blurb: 'Hold the trigger to spray fire in a cone. Everything in it burns, and keeps burning. 120 shots of fuel.' },
+  quantum: { name: 'Quantum plasma', icon: '⚡', len: 24, mag: 30, reload: 2.8, rate: 0.2, pellets: 1, spread: 0.02, dmg: 3.5, life: 0.8, price: 320, plasma: true, pierce: 2, arc: 3, blurb: 'The best gun there is: plasma through whole lines of zombies, and every hit throws lightning on to three more. 30 charges.' },
+  plasma: { name: 'Plasma gun', icon: '⚡', len: 26, mag: 20, reload: 2.4, rate: 0.42, pellets: 1, spread: 0.02, dmg: 4, life: 0.75, price: 160, plasma: true, arc: 1, blurb: 'Glowing bolts that burn through two enemies in a line, and a lightning arc leaps to one nearby. 20 charges.' },
 };
 export const POWERS = {
   slowmo: { name: 'Slow-mo', icon: '⏳', color: '#7ea8ff', blurb: 'Monsters crawl and strike slowly for a few seconds.' },
   blast: { name: 'Big Blast', icon: '💣', color: '#ff9a3c', blurb: 'Wipes out every ordinary monster at once.' },
 };
-export const GUN_ORDER = ['pistol', 'shotgun', 'rifle', 'plasma'];
+export const GUN_ORDER = ['pistol', 'sidearm', 'glock', 'm1911', 'sawedoff', 'shotgun', 'uzi', 'lever', 'magnum', 'rifle', 'pump', 'deagle', 'ak47', 'raygun', 'plasma', 'sniper', 'laser', 'fireplasma', 'quantum'];
 export const BOMB_R = 46; // blast radius in pixels
 export const GRENADE_REACH = 190; // how far a grenade can be thrown
 const BOMB_FUSE = 2.8; // seconds from the throw to the bang
@@ -216,6 +231,7 @@ export class Combat {
     this.swingCd = 0;
     this.dots = []; // burning targets
     this.bolts = []; // chain lightning arcs, for show
+    this.flames = []; // the flamethrower's fire, for show (yours and other players')
     this.throwCd = 0;
     this.gun = 'pistol';
     this.owned = { pistol: true }; // the others are bought in the shop
@@ -357,6 +373,7 @@ export class Combat {
 
   // Fighting is for outdoors: no swinging or throwing from inside a house (Wave Defense's base is exempt)
   canFight() {
+    if (this.g.spectating) return false; // (a duel you only watch)
     return !!this.g.wave || this.insideId === null || !!this.g.dead;
   }
 
@@ -1379,6 +1396,89 @@ export class Combat {
     this.chopTrees(b.x, b.y, b.R * 0.7, 6);
   }
 
+  // The flamethrower: a short cone of fire in front of you. Everything in it takes a little damage at once (without being knocked about)
+  // and is set alight, and a fire that is already burning is topped up.
+  flameBurst(a, gun) {
+    const [cx, cy] = this.center();
+    const range = gun.range || 70;
+    const dmg = this.gunDmg(this.gun) + this.throwBonus() * 0.25;
+    const inCone = (x, y, r) => {
+      const d = Math.hypot(x - cx, y - cy);
+      return d <= range + r && (d < 10 || Math.abs(wrapAngle(Math.atan2(y - cy, x - cx) - a)) <= 0.55);
+    };
+    const burn = (kind, t) => {
+      this.dotHit(kind, t, dmg);
+      const dot = this.dots.find((d) => d.t === t);
+      if (dot) dot.ticks = Math.max(dot.ticks, 6);
+      else this.dots.push({ kind, t, ticks: 6, wait: 0.3, dmg: 0.8 + 0.2 * this.gunLv(this.gun, 'dmg') });
+    };
+    for (const s of this.skeletons) if (s.state !== 'dead' && inCone(s.x, s.y - 8, 6)) burn('skel', s);
+    for (const m of [...(this.g.wave?.monsters || []), ...this.wilds]) {
+      if (m.state === 'dead') continue;
+      const sc = m.scale || MONSTERS[m.type].scale || 1;
+      if (inCone(m.x, bodyY(m), 6 * sc)) burn('mon', m);
+    }
+    if (this.g.fight) {
+      for (const r of this.g.remotes.values()) if (!r.hidden && !this.g.sameTeam(r) && inCone(r.x, r.y - 8, 6) && Math.random() < 0.3) this.hitRemote(r, 1);
+    }
+    this.chopTrees(cx + Math.cos(a) * 30, cy + Math.sin(a) * 30, 22, dmg * 0.4, a, 0.7);
+    this.spawnFlames(cx, cy, a, 3);
+    this.muzzleT = 0.07;
+    this.muzzleA = a;
+    sfx.play('gun', 0.12);
+    this.flameN = (this.flameN || 0) + 1;
+    if (this.flameN % 2 === 0) this.g.mp?.net.send({ t: 'fx', kind: 'flame', x: Math.round(cx), y: Math.round(cy), a: Math.round(a * 100) / 100 }); // the others see the fire (every other shot)
+  }
+
+  spawnFlames(cx, cy, a, n) {
+    for (let i = 0; i < n; i++) {
+      const spread = (Math.random() - 0.5) * 0.9;
+      const sp = 70 + Math.random() * 60;
+      this.flames.push({ x: cx + Math.cos(a) * 12, y: cy + Math.sin(a) * 12, vx: Math.cos(a + spread) * sp, vy: Math.sin(a + spread) * sp, t: 0, life: 0.38 + Math.random() * 0.14, r: 3 + Math.random() * 2 });
+    }
+  }
+
+  // another player's flamethrower: the fire is only for show here (their own game burns the monsters)
+  remoteFlame(m) {
+    if (!Number.isFinite(m.x) || !Number.isFinite(m.a)) return;
+    this.spawnFlames(m.x, m.y, m.a, 6);
+  }
+
+  // an electric gun's hit: lightning leaps from the enemy it struck to the nearest ones, up to `hops` of them, a little weaker each time
+  arcFrom(kind, t, dmg, hops) {
+    let cur = t;
+    let curKind = kind;
+    let d = dmg;
+    const done = new Set([t]);
+    for (let h = 0; h < hops; h++) {
+      const [ax, ay] = this.bodyOf(curKind, cur);
+      let best = null;
+      let bd = 74;
+      const consider = (k, o, bx, by) => {
+        if (done.has(o) || (o.state === 'dead')) return;
+        const dist = Math.hypot(bx - ax, by - ay);
+        if (dist < bd) {
+          bd = dist;
+          best = [k, o, bx, by];
+        }
+      };
+      for (const s of this.skeletons) consider('skel', s, s.x, s.y - 8);
+      for (const m of this.monstersNear(ax, ay, 90)) consider('mon', m, m.x, bodyY(m));
+      if (!best) break;
+      done.add(best[1]);
+      d = Math.max(0.6, d * 0.7);
+      this.applyHit(best[0], best[1], d, ax, ay, 60);
+      this.bolts.push({ x1: ax, y1: ay, x2: best[2], y2: best[3], t: 0, seed: Math.random() * 9 });
+      this.g.mp?.net.send({ t: 'fx', kind: 'zap', x1: Math.round(ax), y1: Math.round(ay), x2: Math.round(best[2]), y2: Math.round(best[3]) });
+      cur = best[1];
+      curKind = best[0];
+    }
+  }
+
+  remoteZap(m) {
+    if ([m.x1, m.y1, m.x2, m.y2].every(Number.isFinite)) this.bolts.push({ x1: m.x1, y1: m.y1, x2: m.x2, y2: m.y2, t: 0, seed: Math.random() * 9 });
+  }
+
   // Survival: the pistol. Bullets fly fast and straight, and hit like the throwing items do.
   shootGun() {
     if (this.throwCd > 0) return;
@@ -1394,6 +1494,12 @@ export class Combat {
     this.idleT = 0;
     if (this.ammo[this.gun] <= 0) this.reloadT = gun.reload; // empty: reloads on its own
     this.revealT = 1.5;
+    if (gun.flame) {
+      this.flameBurst(a, gun);
+      this.throwCd = gun.rate;
+      this.faceAim(a);
+      return;
+    }
     for (let i = 0; i < gun.pellets; i++) {
       // the shotgun fans its pellets out evenly with a little wobble; the machine gun just wanders
       const off = gun.pellets > 1 ? (i / (gun.pellets - 1) - 0.5) * gun.spread * 2 + (Math.random() - 0.5) * 0.06 : (Math.random() - 0.5) * gun.spread;
@@ -1402,11 +1508,12 @@ export class Combat {
         x: cx + Math.cos(b) * 12, y: cy + Math.sin(b) * 12,
         vx: Math.cos(b) * BULLET_SPEED, vy: Math.sin(b) * BULLET_SPEED,
         id: 'bullet', dmg: this.gunDmg(this.gun) + this.throwBonus(), life: gun.life, rot: 0, free: true,
-        plasma: !!gun.plasma, pierce: gun.plasma ? 1 : 0, // plasma bolts go through one enemy and hit the next
+        arc: gun.arc || 0, // (an electric gun: a hit throws lightning on to this many more enemies)
+        plasma: !!gun.plasma, pierce: gun.pierce ?? (gun.plasma ? 1 : 0), // plasma bolts go through one enemy and hit the next (a sniper round through three)
         pellet: gun.pellets > 1, ox: cx + Math.cos(b) * 12, oy: cy + Math.sin(b) * 12, // shotgun pellets remember where they started
       };
       this.projectiles.push(shot);
-      this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: gun.plasma ? 'plasma' : 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy });
+      this.g.mp?.net.send({ t: 'fx', kind: 'throw', item: gun.plasma ? 'plasma' : 'bullet', x: shot.x, y: shot.y, vx: shot.vx, vy: shot.vy, g: this.gun }); // (g: the others see the gun in your hands)
     }
     this.muzzleT = this.gun === 'shotgun' ? 0.11 : 0.07;
     this.muzzleA = a;
@@ -1473,6 +1580,32 @@ export class Combat {
       ctx.fillRect(Math.round(mx) - 2, Math.round(my) - 2, 4, 4);
       ctx.fillStyle = gun.plasma ? '#4aa8ff' : '#ffb62e';
       ctx.fillRect(Math.round(mx - Math.cos(this.muzzleA) * 2) - 3, Math.round(my - Math.sin(this.muzzleA) * 2) - 1, 6, 2);
+    }
+  }
+
+  // another player's gun: in their hands for a moment after each shot, with the flash at the muzzle
+  drawGunAt(ctx, cx, cy, fx) {
+    const gun = GUNS[fx.g];
+    const sheet = this.img[`guns/${fx.g}`];
+    if (!gun) return;
+    const a = fx.a;
+    if (sheet) {
+      const w = gun.len;
+      const h = (sheet.height / sheet.width) * w;
+      ctx.save();
+      ctx.translate(Math.round(cx + Math.cos(a) * 3), Math.round(cy + Math.sin(a) * 3 + 1));
+      ctx.rotate(a);
+      if (Math.cos(a) < 0) ctx.scale(1, -1);
+      ctx.drawImage(sheet, -w * 0.28, -h * 0.4, w, h);
+      ctx.restore();
+    }
+    if (fx.t < 0.08) {
+      const mx = cx + Math.cos(a) * (gun.len * 0.75 + 3);
+      const my = cy + Math.sin(a) * (gun.len * 0.75 + 3);
+      ctx.fillStyle = gun.plasma || gun.flame ? '#cdefff' : '#fff6c2';
+      ctx.fillRect(Math.round(mx) - 2, Math.round(my) - 2, 4, 4);
+      ctx.fillStyle = gun.plasma ? '#4aa8ff' : gun.flame ? '#ff8a2a' : '#ffb62e';
+      ctx.fillRect(Math.round(mx - Math.cos(a) * 2) - 3, Math.round(my - Math.sin(a) * 2) - 1, 6, 2);
     }
   }
 
@@ -1580,6 +1713,14 @@ export class Combat {
 
     this.updateDots(dt);
     this.bolts = this.bolts.filter((b) => (b.t += dt) < 0.22);
+    this.flames = this.flames.filter((f) => {
+      f.t += dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vx *= 0.94;
+      f.vy *= 0.94;
+      return f.t < f.life;
+    });
 
     if (!this.g.wave && !this.g.inside) {
       // skeletons roam the free world only (and never come into your house, or follow you underground)
@@ -1599,6 +1740,7 @@ export class Combat {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.rot += dt * 14;
+      if (p.id === 'bullet' && this.g.world.isBlocked(p.x - 1, p.y - 1, 2, 2, true, true, true)) return false; // a bullet stops at a wall, a crate or a pillar, for the ones watching too
       return (p.life -= dt) > 0;
     });
     this.drops = this.drops.filter((d) => this.updateDrop(d, dt));
@@ -1715,6 +1857,7 @@ export class Combat {
   // ---------- wild monsters ----------
 
   updateWilds(dt) {
+    if (this.g.world.arena) return; // nothing wild in the colosseum
     this.wildT -= dt;
     if (this.wildT <= 0) {
       this.wildT = 3 + Math.random() * 3;
@@ -2725,7 +2868,7 @@ export class Combat {
       }
     }
     if (this.hp <= 0) {
-      if (killer !== null) this.g.mp?.net.send({ t: 'died', killer });
+      if (killer !== null || this.g.mp?.duel) this.g.mp?.net.send({ t: 'died', killer: killer ?? '' }); // (a duel needs to hear about every fall)
       this.g.die(by || (killer !== null ? { kind: 'player', id: killer } : null));
     }
   }
@@ -2854,6 +2997,7 @@ export class Combat {
           this.hitColor = splatTone(p.id);
           this.damageSkeleton(s, this.pelletDmg(p, s.hp, !s.elite), px, py);
           this.hitColor = null;
+          if (p.arc) this.arcFrom('skel', s, p.dmg, p.arc);
           if (p.spell) this.spellHit(p, 'skel', s);
           if (p.pierce > 0) {
             p.pierce--;
@@ -2873,6 +3017,7 @@ export class Combat {
           this.hitColor = splatTone(p.id);
           this.hitMonster(m, this.pelletDmg(p, m.hp, this.isNormalFoe(m)), px, py, 90);
           this.hitColor = null;
+          if (p.arc) this.arcFrom('mon', m, p.dmg, p.arc);
           if (p.spell) this.spellHit(p, 'mon', m);
           if (p.pierce > 0) {
             p.pierce--;
@@ -3066,6 +3211,7 @@ export class Combat {
     for (const sm of this.smokes) list.push({ kind: 'projectile', p: { x: sm.x, y: sm.y, id: 'smoke', sm }, y: sm.y + 30 });
     for (const b of this.bombs) list.push({ kind: 'projectile', p: { x: b.x, y: b.y, id: 'bomb', b }, y: b.y + 6 });
     if (this.grapple) list.push({ kind: 'projectile', p: { id: 'grapple', gr: this.grapple }, y: this.g.player.y + 30 });
+    for (const f of this.flames) list.push({ kind: 'projectile', p: { id: 'flame', f }, y: f.y + 10 });
     for (const gr of this.remoteGrapples) list.push({ kind: 'projectile', p: { id: 'grapple', gr }, y: gr.oy + 30 });
     for (const b of this.remoteBombs) list.push({ kind: 'projectile', p: { x: b.x, y: b.y, id: 'bomb', b }, y: b.y + 6 });
     for (const bl of this.blasts) list.push({ kind: 'projectile', p: { x: bl.x, y: bl.y, id: 'blast', bl }, y: bl.y + 40 });
@@ -3214,6 +3360,18 @@ export class Combat {
         ctx.drawImage(this.img[`tiny/fx_${s.fx}`], f * 100, 0, 100, 100, Math.round(s.x - 50 * k), Math.round(s.y - 57 * k), 100 * k, 100 * k);
         ctx.restore();
       }
+    } else if (o.kind === 'projectile' && o.p.id === 'flame') {
+      // a lick of fire: white-hot at first, then yellow, orange and red as it dies away
+      const f = o.p.f;
+      const k = f.t / f.life;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, 0.85 * (1 - k));
+      ctx.fillStyle = k < 0.25 ? '#fff6c8' : k < 0.55 ? '#ffc23a' : '#ff6a1e';
+      ctx.beginPath();
+      ctx.arc(Math.round(f.x), Math.round(f.y), f.r * (0.7 + 0.9 * k), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     } else if (o.kind === 'projectile' && o.p.id === 'grapple') {
       this.drawGrappleRope(ctx, o.p.gr);
     } else if (o.kind === 'projectile' && o.p.id === 'trident') {

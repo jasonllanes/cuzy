@@ -313,7 +313,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [chatLog, setChatLog] = useState([]);
   const chatRef = useRef(false);
   const [scores, setScores] = useState(() => session?.scores || []);
-  const pvp = !!session?.room.pvp;
+  const pvp = !!(live || session?.room)?.pvp;
 
   const pushToast = (text) => {
     setToast(text);
@@ -761,10 +761,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             ))}
           </div>
         )}
-        {pvp && (
+        {pvp && !hud.duel && (
           <div className="scoreboard panel small">
-            <div className="score-title">{session.room.winBy === 'monsters' ? '👹' : '⚔️'} First to {(live || session.room).target} {session.room.winBy === 'monsters' ? 'monster ' : ''}kills</div>
-            {session.room.teams > 0 && TEAMS.slice(0, session.room.teams).map((t, i) => {
+            <div className="score-title">{(live || session.room).winBy === 'monsters' ? '👹' : '⚔️'} First to {(live || session.room).target} {(live || session.room).winBy === 'monsters' ? 'monster ' : ''}kills</div>
+            {(live || session.room).teams > 0 && TEAMS.slice(0, (live || session.room).teams).map((t, i) => {
               const total = scores.filter((s) => s.team === i).reduce((n, s) => n + s.kills, 0);
               return (
                 <div key={t.name} className="score-row team-row" style={{ '--team': t.color }}>
@@ -785,6 +785,26 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </div>
 
+      {hud.duel && (
+        <div className="duel-bar panel small">
+          <div className="duel-mid">
+            <b className={hud.duel.left !== null && hud.duel.left <= 10 ? 'low' : ''}>{hud.duel.left === null ? '⏱ …' : `⏱ ${Math.floor(hud.duel.left / 60)}:${String(Math.floor(hud.duel.left % 60)).padStart(2, '0')}`}</b>
+            <small>{hud.duel.watching ? '👁 You are watching' : hud.duel.out ? '☠ You are out: watching' : 'Duel'}{hud.duel.bet > 0 ? ` · 🪙 Bet ${hud.duel.stake}${hud.duel.stake !== hud.duel.bet ? `/${hud.duel.bet}` : ''} each` : ''}</small>
+          </div>
+          <div className="duel-sides">
+            {hud.duel.units.map((u) => (
+              <div key={u.key} className={`duel-side ${u.mine ? 'me' : 'foe'}`} style={u.color ? { '--team': u.color } : undefined}>
+                {u.hero ? <Avatar assets={assets} id={u.hero} /> : <span className="duel-team-dot" />}
+                <div>
+                  <b>{u.name}{u.mine ? ' (you)' : ''}</b>
+                  <span className="duel-hp"><i style={{ width: `${Math.max(0, Math.min(100, (u.hp / Math.max(1, u.max)) * 100))}%` }} /></span>
+                  <small>{Math.max(0, hp100(u.hp))} / {hp100(u.max)} ❤{u.members.length > 1 ? ` · ${u.members.filter((m) => !m.out).length}/${u.members.length} standing` : ''}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="hud hud-right">
         <canvas ref={miniRef} width={80} height={80} className="minimap" onClick={() => setMapOpen(true)} title="Click the map to see all of it (or press M)" />
         <div className="zoom-box panel small">
@@ -935,8 +955,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <div className="death-card panel">
             <div className="death-skull">💀</div>
             <h2>{hud.dead.name ? <>You were killed by <b>{hud.dead.name}</b></> : 'You were knocked out'}</h2>
-            <p>Respawning in <b>{Math.ceil(hud.dead.left)}</b>…</p>
-            <div className="death-track"><div className="death-fill" style={{ width: `${(1 - hud.dead.left / hud.dead.total) * 100}%` }} /></div>
+            {hud.dead.duel ? <p>You are out of the duel: watch the rest of the fight.</p> : <p>Respawning in <b>{Math.ceil(hud.dead.left)}</b>…</p>}
+            {!hud.dead.duel && <div className="death-track"><div className="death-fill" style={{ width: `${(1 - hud.dead.left / hud.dead.total) * 100}%` }} /></div>}
             {hud.dead.name && <small>The red marker shows where they are.</small>}
           </div>
         </div>
@@ -1050,7 +1070,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               <h2>⚙️ Room settings</h2>
               <button className="btn small-btn" onClick={() => setRoomSetOpen(false)} aria-label="Close">✕</button>
             </header>
-            <RoomSettings room={live} count={peers.length} editable={isHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+            <RoomSettings room={live} count={peers.length} players={peers} editable={isHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
           </div>
         </div>
       )}

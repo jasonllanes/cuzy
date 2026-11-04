@@ -8,7 +8,8 @@ export const MAX_ALLIES = 8;
 
 // How many helpers the base has room for, by base (house / bus) level: upgrading it makes space for more
 const TEAM_CAPS = [2, 3, 4, 5, 6, 8];
-export const teamCap = (level = 0) => TEAM_CAPS[Math.min(level, TEAM_CAPS.length - 1)];
+// (and there is no last level in Survival: every level of the shelter past the table makes room for two more)
+export const teamCap = (level = 0) => (level < TEAM_CAPS.length ? TEAM_CAPS[level] : TEAM_CAPS[TEAM_CAPS.length - 1] + 2 * (level - (TEAM_CAPS.length - 1)));
 
 export const ALLIES = {
   pistol: { name: 'Pistol Survivor', cost: 6, hero: 'alex', color: '#7cc5f2', pips: 1, ai: 'ranged', gun: 'pistol', range: 110, rate: 0.8, dmg: 1, shotSpeed: 190, blurb: 'Stands on the roof with a pistol and picks off anything that gets close.' },

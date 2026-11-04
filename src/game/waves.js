@@ -84,6 +84,10 @@ export class WaveSim {
     this.ashots = [];
     this.baseLevel = 0;
     this.lightLevel = 0; // the shelter's lamps (Survival): one level for the whole team
+    this.mendLevel = 0; // the shelter's self-repair (Survival): it heals this much more every second, for the whole team
+    this.airCd = 0; // seconds until another air strike can be called
+    this.air = null; // the air strike in the sky
+    this.airBombs = []; // bombs on their way down
     this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES; // how many waves the run lasts (the host picks it); 0 is endless
     this.endless = !!game.world.endless || game.waveCount === 0; // Endless Survival: no waves, the zombies just keep coming
     this.elapsed = 0; // seconds of the round so far
@@ -150,6 +154,9 @@ export class WaveSim {
       baseHp: Math.max(0, this.baseHp),
       baseMax: this.baseMax,
       baseLevel: this.baseLevel,
+      mendLevel: this.mendLevel || 0,
+      airCd: Math.max(0, Math.ceil(this.airCd || 0)),
+      air: this.air ? this.air.kind : null,
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       allies: this.allies.length,
@@ -211,6 +218,10 @@ export class WaveSim {
     if (this.slowT > 0) this.slowT -= dt;
     if (this.phase !== 'victory' && this.phase !== 'defeat') {
       this.elapsed += dt;
+      if (this.mendLevel > 0 && this.baseHp > 0 && this.baseHp < this.baseMax) this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.0025 * this.mendLevel * dt); // the shelter mends itself
+      this.airCd = Math.max(0, (this.airCd || 0) - dt);
+      this.updateAir(dt);
+      this.updateAirBombs(dt);
       this.updateFlow(dt);
       this.updateShots(dt);
       this.updateAllies(dt);
@@ -790,8 +801,8 @@ export class WaveSim {
     if (this.theme === 'apoc' && def.ai === 'ranged') {
       // Survival: the shooters stand on top of the bus and fire down from there
       const k = this.allies.filter((a) => ALLIES[a.kind].ai === 'ranged').length;
-      ax = px = this.sprite.x + Math.round(([30, 18, 42, 10, 50, 24, 36, 6][k % 8] * this.sprite.w) / 61);
-      ay = py = this.sprite.y + Math.round(this.sprite.h * 0.35);
+      ax = px = this.sprite.x + Math.round(([30, 18, 42, 10, 50, 24, 36, 6][k % 8] * this.sprite.w) / 61) + (Math.floor(k / 8) % 2 ? 3 : 0);
+      ay = py = this.sprite.y + Math.round(this.sprite.h * 0.35) - Math.floor(k / 8) * 6; // (a crowd of them stands in more rows along the roof)
     }
     this.allies.push({ id: this.nextId++, kind, x: px, y: py, ax, ay, dir: 0, aim: Math.PI / 2, cd: 0.8, anim: Math.random() * 3, moving: false, atk: 0 });
     this.emit({ type: 'recruit', kind, x: px, y: py });
@@ -938,6 +949,102 @@ export class WaveSim {
     if (this.endless && this.phase === 'fight' && !this.queue.length) this.fightT = Math.max(this.fightT, 0);
   }
 
+  // ---------- air support (bought in the shop) ----------
+
+  // 'carpet': a helicopter sweeps across the whole map and drops bombs along its path. 'gunship': a chopper circles the shelter
+  // for a minute, firing its machine gun at the zombies. One at a time, and a pause after each.
+  callAir(kind) {
+    if (this.phase === 'victory' || this.phase === 'defeat' || this.air || this.airCd > 0) return false;
+    const c = this.center;
+    if (kind === 'carpet') {
+      const ang = Math.random() * Math.PI * 2;
+      this.air = { kind, t: 0, dur: 5.6, ang, x: c.x - Math.cos(ang) * 460, y: c.y - Math.sin(ang) * 460, dropT: 0.4 };
+    } else if (kind === 'gunship') {
+      this.air = { kind, t: 0, dur: 60, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false };
+    } else return false;
+    this.airBombs = [];
+    this.emit({ type: 'air', kind });
+    return true;
+  }
+
+  updateAir(dt) {
+    const a = this.air;
+    if (!a) return;
+    a.t += dt;
+    const c = this.center;
+    if (a.kind === 'carpet') {
+      const sp = 920 / a.dur;
+      a.x += Math.cos(a.ang) * sp * dt;
+      a.y += Math.sin(a.ang) * sp * dt;
+      a.dropT -= dt;
+      while (a.dropT <= 0) {
+        // a bomb, a little to either side of the line, that lands a moment later
+        a.dropT += 0.14;
+        const side = (Math.random() - 0.5) * 120;
+        this.airBombs.push({ x: a.x + Math.cos(a.ang) * 60 - Math.sin(a.ang) * side, y: a.y + Math.sin(a.ang) * 60 + Math.cos(a.ang) * side, fall: 0.9, R: 34 });
+      }
+    } else {
+      // the gunship circles the shelter, a little wide, and shoots whatever walks into range
+      a.ang += 0.55 * dt;
+      a.x = c.x + Math.cos(a.ang) * 130;
+      a.y = c.y + Math.sin(a.ang) * 80;
+      a.fireT -= dt;
+      a.firing = false;
+      if (a.fireT <= 0) {
+        let target = null;
+        let td = 240;
+        for (const m of this.monsters) {
+          if (m.state === 'dead') continue;
+          const d = Math.hypot(m.x - a.x, m.y - a.y);
+          if (d < td) {
+            td = d;
+            target = m;
+          }
+        }
+        if (target) {
+          a.firing = true;
+          a.fireT = 0.09;
+          const ang = Math.atan2(target.y - 8 - a.y, target.x - a.x) + (Math.random() - 0.5) * 0.1;
+          this.ashots.push({ x: a.x, y: a.y, vx: Math.cos(ang) * 330, vy: Math.sin(ang) * 330, dmg: 1.3, life: td / 330 + 0.1, k: 1, pierce: 0, hit: [] });
+        } else a.fireT = 0.25;
+      }
+    }
+    if (a.t >= a.dur) {
+      this.air = null;
+      this.airCd = 20; // a pause before the next one
+    }
+  }
+
+  updateAirBombs(dt) {
+    if (!this.airBombs?.length) return;
+    this.airBombs = this.airBombs.filter((b) => {
+      b.fall -= dt;
+      if (b.fall > 0) return true;
+      for (const m of this.monsters) {
+        if (m.state === 'dead') continue;
+        const ox = (m.x - b.x) / (b.R + 6);
+        const oy = (m.y - 6 - b.y) / ((b.R + 6) * 0.8);
+        if (ox * ox + oy * oy <= 1) this.hitMonster(m.id, MONSTERS[m.type].boss ? 14 : 18, b.x, b.y, 180, true, 'ally');
+      }
+      this.emit({ type: 'boom', x: Math.round(b.x), y: Math.round(b.y), R: b.R });
+      return false;
+    });
+  }
+
+  // Survival's shelter: one more level of self-repair, or a repair kit that heals a chunk of it now (anyone can, everyone benefits)
+  upgradeMend() {
+    this.mendLevel = (this.mendLevel || 0) + 1;
+    this.emit({ type: 'mended', what: 'level', level: this.mendLevel });
+    return true;
+  }
+
+  repairShelter(share) {
+    if (this.baseHp >= this.baseMax) return false;
+    this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * share);
+    this.emit({ type: 'mended', what: 'heal' });
+    return true;
+  }
+
   // the base can be made tougher by anyone, and everyone benefits
   upgradeBase() {
     if (this.baseLevel >= MAX_LEVEL && this.theme !== 'apoc') return false; // (Survival's shelter can be upgraded for ever)
@@ -965,6 +1072,8 @@ export class WaveSim {
     else if (k === 'pick') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'pick', ok: this.pickBarricade(d.id) } });
     else if (k === 'recruit') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'recruit', ok: ALLY_KINDS.includes(d.kind) && this.recruit(d.kind), cost: ALLIES[d.kind]?.cost } });
     else if (k === 'upg') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'upg', ok: this.upgradeBase() } });
+    else if (k === 'mend') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: d.what === 'heal' ? 'mendHeal' : 'mendUp', ok: d.what === 'heal' ? this.repairShelter(0.3) : this.upgradeMend() } });
+    else if (k === 'air') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'air', ok: this.callAir(d.kind) } });
   }
 
   snapshot() {
@@ -985,6 +1094,10 @@ export class WaveSim {
       as: this.ashots.map((s) => [Math.round(s.x), Math.round(s.y), s.k || 0, Math.round(Math.atan2(s.vy, s.vx) * 100)]),
       bl: this.baseLevel,
       sl: this.lightLevel || 0,
+      ml: this.mendLevel || 0,
+      ac: Math.ceil(this.airCd || 0),
+      ar: this.air ? [this.air.kind === 'carpet' ? 1 : 2, Math.round(this.air.x * 10) / 10, Math.round(this.air.y * 10) / 10, Math.round(this.air.ang * 100) / 100, this.air.firing ? 1 : 0, Math.round(this.air.t * 10) / 10] : 0,
+      ab: (this.airBombs || []).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.fall * 100) / 100, b.R]),
       el: Math.round(this.elapsed),
       sm: this.startMode,
       tw: this.endless ? 0 : this.total,
@@ -1015,6 +1128,10 @@ export class WaveMirror {
     this.ashots = [];
     this.baseLevel = 0;
     this.lightLevel = 0;
+    this.mendLevel = 0;
+    this.airCd = 0;
+    this.air = null; // the air strike in the sky: { kind, x, y, tx, ty, ang, firing }
+    this.airBombs = [];
     this.endless = !!game.world.endless || game.waveCount === 0;
     this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES;
     this.elapsed = 0;
@@ -1061,6 +1178,9 @@ export class WaveMirror {
       baseLevel: this.baseLevel,
       allies: this.allies.length,
       teamCap: teamCap(this.baseLevel),
+      mendLevel: this.mendLevel || 0,
+      airCd: Math.max(0, Math.ceil(this.airCd || 0)),
+      air: this.air ? this.air.kind : null,
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       boss: boss ? { hp: boss.hp, max: boss.max, name: MONSTERS[boss.type].name } : null,
@@ -1072,6 +1192,11 @@ export class WaveMirror {
     const k = 1 - Math.exp(-dt * 14);
     this.timer -= dt;
     this.elapsed += dt;
+    if (this.air && this.air.tx !== undefined) {
+      this.air.x += (this.air.tx - this.air.x) * k;
+      this.air.y += (this.air.ty - this.air.y) * k;
+    }
+    for (const b of this.airBombs) b.fall -= dt;
     for (const m of this.monsters) {
       m.anim += dt;
       m.t += dt;
@@ -1116,6 +1241,14 @@ export class WaveMirror {
     this.ashots = (s.as || []).map(([x, y, k, ang]) => ({ x, y, k: k || 0, ang: (ang || 0) / 100 }));
     this.baseLevel = s.bl || 0;
     this.lightLevel = s.sl || 0;
+    this.mendLevel = s.ml || 0;
+    this.airCd = s.ac || 0;
+    if (s.ar) {
+      const [k, x, y, ang, firing] = s.ar;
+      if (!this.air) this.air = { kind: k === 1 ? 'carpet' : 'gunship', x, y };
+      Object.assign(this.air, { tx: x, ty: y, ang, firing: !!firing });
+    } else this.air = null;
+    this.airBombs = (s.ab || []).map(([x, y, fall, R]) => ({ x, y, fall, R }));
     this.elapsed = s.el || 0;
     this.startMode = s.sm || 'timer';
     if (s.tw !== undefined) {
@@ -1151,6 +1284,22 @@ export class WaveMirror {
 
   setStartMode(mode) {
     if (['timer', 'vote', 'manual', 'instant'].includes(mode)) this.startMode = mode; // (the host's sim is the one that acts on it)
+  }
+
+  // a guest asks the host for a repair or an air strike; the answer comes back as an ack
+  upgradeMend() {
+    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'mend', d: { what: 'level' } });
+    return 'pending';
+  }
+
+  repairShelter() {
+    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'mend', d: { what: 'heal' } });
+    return 'pending';
+  }
+
+  callAir(kind) {
+    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'air', d: { kind } });
+    return 'pending';
   }
 
   setWaves() {} // (the host's sim decides, and the snapshots say)

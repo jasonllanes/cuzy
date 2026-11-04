@@ -20,7 +20,7 @@ const NAMES = [
   ...['scout1', 'scout2', 'scout3', 'scout4', 'scout5', 'scout6', 'postman1', 'postman2', 'postman3'].map((n) => `v2/chars/${n}`),
   'interior/farm', 'interior/modern', 'interior/rb',
   'dev/chars',
-  'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/wood', 'guns/pistol', 'guns/shotgun', 'guns/rifle', 'guns/plasma', 'maps/asphalt', 'maps/mountain', 'props/beach_ball',
+  'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/wood', 'guns/pistol', 'guns/sidearm', 'guns/glock', 'guns/m1911', 'guns/sawedoff', 'guns/uzi', 'guns/lever', 'guns/magnum', 'guns/pump', 'guns/deagle', 'guns/ak47', 'guns/raygun', 'guns/sniper', 'guns/laser', 'guns/fireplasma', 'guns/quantum', 'guns/shotgun', 'guns/rifle', 'guns/plasma', 'maps/asphalt', 'maps/mountain', 'props/beach_ball',
   ...Array.from({ length: 40 }, (_, i) => `weapons/w${String(i + 1).padStart(2, '0')}`),
   ...MONSTER_SPRITES.map((n) => `monsters/${n}`),
   ...TINY_IMAGES,

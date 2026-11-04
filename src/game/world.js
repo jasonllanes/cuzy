@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { isEndlessSeed, mapInfo, splitSeed, stripEndless } from './maps';
+import { isArenaSeed, isEndlessSeed, mapInfo, splitSeed, stripArena, stripEndless } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -13,6 +13,12 @@ export const CHUNK_PX = T * CHUNK;
 export const WATER = 0;
 export const SAND = 1;
 export const GRASS = 2;
+
+// The Duel colosseum: sand tiles -ARENA_HALF .. ARENA_HALF-1 each way, a two-tile wall all round it, and things to hide behind
+export const ARENA_HALF = 15;
+const ARENA_PILLARS = [[-9, -8], [7, -8], [-9, 6], [7, 6], [-1, -1]]; // (2x2 tiles each, by their top-left tile)
+const ARENA_CRATES = [[-4, -10], [3, 9], [3, -10], [-4, 9], [-5, -3], [4, 2], [4, -3], [-5, 2], [-12, -7], [11, 6], [11, -7], [-12, 6]];
+const ARENA_STARTS = [[-13, 0], [12, 0], [-1, -12], [0, 11]]; // where the players stand (by slot): across the sand from each other
 
 // The Open World keeps its regions apart with a band of water (about 6 tiles wide, so crossing from one region to the next
 // means swimming), and draws a beach rim (about 2 more tiles) on each shore. These are the tiles to look at, round a tile, to
@@ -54,7 +60,8 @@ export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
     this.endless = theme === 'apoc' && isEndlessSeed(seedStr); // Survival without waves
-    this.seedStr = stripEndless(stripV2(stripEndless(seedStr)));
+    this.arena = theme !== 'apoc' && !waves && isArenaSeed(seedStr); // the Duel colosseum
+    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(seedStr))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
     this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw); // Free Roam V2: the same world with the Modern Exteriors props on top
@@ -160,6 +167,7 @@ export class World {
 
   type(x, y) {
     if (x >= ZONE_TILE0 && x < ZONE_TILE1 && y >= ZONE_TILE0 && y < ZONE_TILE1) return GRASS; // inside a dungeon
+    if (this.arena) return x >= -ARENA_HALF && x < ARENA_HALF && y >= -ARENA_HALF && y < ARENA_HALF ? SAND : GRASS;
     const key = (x + 32768) * 65536 + (y + 32768);
     let t = this.typeCache.get(key);
     if (t === undefined) {
@@ -185,7 +193,7 @@ export class World {
     const key = `${drx},${dry}`;
     if (this.dsites.has(key)) return this.dsites.get(key);
     let site = null;
-    if (!this.apoc && !this.waveMode && hash2(drx, dry, this.seed + 8800) < 0.55) {
+    if (!this.apoc && !this.waveMode && !this.arena && hash2(drx, dry, this.seed + 8800) < 0.55) {
       const kr = hash2(drx, dry, this.seed + 8801);
       const base = kr < 0.4 ? 'crypt' : kr < 0.75 ? 'cave' : 'ruin';
       const portal = hash2(drx, dry, this.seed + 8804) < 0.35; // now and then it is a portal instead
@@ -313,7 +321,8 @@ export class World {
     const key = `${rx},${ry}`;
     if (this.siteCache.has(key)) return this.siteCache.get(key);
     let site = null;
-    if (this.waveMode) {
+    if (this.arena) site = null;
+    else if (this.waveMode) {
       const b = this.waveBase();
       if (Math.floor(b.x / REGION) === rx && Math.floor(b.y / REGION) === ry) site = b;
     } else if (hash2(rx, ry, this.seed + 5) < 0.8) {
@@ -346,6 +355,7 @@ export class World {
 
   // Trees live on a 2x2 tile grid so their bases never overlap.
   treeAt(bx, by) {
+    if (this.arena) return null;
     if (this.tileset === 'wood') return null; // (no trees growing through the floorboards)
     const key = `${bx},${by}`;
     if (this.treeCache.has(key)) return this.treeCache.get(key);
@@ -544,6 +554,7 @@ export class World {
   buildChunk(cx, cy) {
     const zone = zoneOf(cx, cy);
     if (zone) return this.buildZoneChunk(cx, cy, zone);
+    if (this.arena) return this.buildArenaChunk(cx, cy);
     const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
     const x0 = cx * CHUNK;
     const y0 = cy * CHUNK;
@@ -676,8 +687,57 @@ export class World {
     return chunk;
   }
 
+  // where a player stands at the start of a duel
+  // (`k` of `n` is the place among the others on the same side: a team stands in a short line)
+  arenaSpawn(slot = 0, k = 0, n = 1) {
+    const i = Math.abs(slot | 0) % ARENA_STARTS.length;
+    const [tx, ty] = ARENA_STARTS[i];
+    const off = (k - (n - 1) / 2) * 20;
+    return i < 2 ? { x: tx * T + 8, y: ty * T + 12 + off } : { x: tx * T + 8 + off, y: ty * T + 12 };
+  }
+
+  // the ones who only watch a duel wait outside the wall (their view follows the fighters)
+  arenaSpectator(k = 0) {
+    return { x: (k % 6) * 16 - 40, y: -(ARENA_HALF + 6) * T };
+  }
+
+  // the colosseum: wall tiles all round, pillars and crates inside (the same for everyone: no randomness)
+  buildArenaChunk(cx, cy) {
+    const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
+    const inChunk = (tx, ty) => Math.floor(tx / CHUNK) === cx && Math.floor(ty / CHUNK) === cy;
+    const lo = -ARENA_HALF - 2;
+    const hi = ARENA_HALF + 1;
+    for (let ty = lo; ty <= hi; ty++) {
+      for (let tx = lo; tx <= hi; tx++) {
+        if (tx >= -ARENA_HALF && tx < ARENA_HALF && ty >= -ARENA_HALF && ty < ARENA_HALF) continue;
+        if (!inChunk(tx, ty)) continue;
+        chunk.rects.push({ x: tx * T, y: ty * T, w: T, h: T });
+        const faces = ty + 1 >= -ARENA_HALF && ty + 1 < ARENA_HALF && tx >= -ARENA_HALF && tx < ARENA_HALF; // the sand lies just south of it: its front face shows
+        chunk.objects.push({ kind: 'arenawall', x: tx * T + 8, y: ty * T + T, tx, ty, faces });
+      }
+    }
+    for (const [tx, ty] of ARENA_PILLARS) {
+      if (!inChunk(tx, ty)) continue;
+      chunk.rects.push({ x: tx * T + 1, y: ty * T + 10, w: 30, h: 22 });
+      chunk.objects.push({ kind: 'arenablock', style: 'pillar', x: tx * T + 16, y: (ty + 2) * T - 1 });
+    }
+    for (const [tx, ty] of ARENA_CRATES) {
+      if (!inChunk(tx, ty)) continue;
+      chunk.rects.push({ x: tx * T + 1, y: ty * T + 6, w: 14, h: 9 });
+      chunk.objects.push({ kind: 'arenablock', style: 'crate', x: tx * T + 8, y: ty * T + 15 });
+    }
+    // a few pebbles on the sand
+    for (let ty = Math.max(cy * CHUNK, -ARENA_HALF); ty < Math.min((cy + 1) * CHUNK, ARENA_HALF); ty++) {
+      for (let tx = Math.max(cx * CHUNK, -ARENA_HALF); tx < Math.min((cx + 1) * CHUNK, ARENA_HALF); tx++) {
+        if (hash2(tx, ty, this.seed + 25) < 0.04) chunk.decor.push({ kind: 'pebble', x: tx * T + Math.floor(hash2(tx, ty, this.seed + 26) * 11) + 2, y: ty * T + Math.floor(hash2(tx, ty, this.seed + 27) * 11) + 2 });
+      }
+    }
+    return chunk;
+  }
+
   animalSpawns(cx, cy) {
     const out = [];
+    if (this.arena) return out;
     if (zoneOf(cx, cy)) return out; // none underground
     if (this.apoc) return out; // no friendly farm animals in the apocalypse
     if (hash2(cx, cy, this.seed + 51) > 0.45) return out;
@@ -805,6 +865,7 @@ export class World {
   }
 
   findSpawn() {
+    if (this.arena) return this.arenaSpawn(0);
     for (let radius = 0; radius < 300; radius++) {
       for (let dy = -radius; dy <= radius; dy++) {
         for (let dx = -radius; dx <= radius; dx++) {
@@ -825,7 +886,7 @@ export class World {
     const key = `${brx},${bry}`;
     if (this.bsites.has(key)) return this.bsites.get(key);
     let site = null;
-    if (!this.apoc && !this.waveMode && !this.depot && hash2(brx, bry, this.seed + 9100) < 0.62) {
+    if (!this.apoc && !this.waveMode && !this.depot && !this.arena && hash2(brx, bry, this.seed + 9100) < 0.62) {
       const kind = hash2(brx, bry, this.seed + 9101) < 0.34 ? 'boss' : 'mini';
       const r = kind === 'boss' ? 18 : 11;
       const far = kind === 'boss' ? 120 : 80; // tiles from the middle of the world, where the houses are
@@ -861,6 +922,7 @@ export class World {
   // A skeleton camp, if this chunk has one: three of them stand guard on an open patch of meadow.
   // The same chunk always gives the same answer for a seed.
   campAt(cx, cy) {
+    if (this.arena) return null;
     if (hash2(cx, cy, this.seed + 71) > 0.2) return null;
     const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 72) * (CHUNK - 8));
     const ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 73) * (CHUNK - 8));
@@ -871,6 +933,7 @@ export class World {
 
   // A different open meadow spot every time, within a couple hundred tiles of the world's centre
   randomSpawn() {
+    if (this.arena) return this.arenaSpawn(0);
     for (let i = 0; i < 400; i++) {
       const ang = Math.random() * Math.PI * 2;
       const dist = 6 + Math.random() * 150;

@@ -1672,3 +1672,21 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .bestiary-card small { font: 600 0.75rem var(--body); color: var(--ink-soft); }
 .bestiary-more { font: 600 0.8rem var(--body); line-height: 1.35; text-align: left; margin-top: 4px; }
 .bestiary-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font: 600 0.88rem var(--body); line-height: 1.4; }
+
+/* the colosseum duel bar: the clock on top, a health bar for each side (a fighter, or a team) */
+.duel-bar { position: fixed; top: 62px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 14px; background: var(--paper); pointer-events: none; max-width: calc(100vw - 24px); }
+.duel-sides { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; justify-content: center; }
+.duel-side { display: flex; align-items: center; gap: 6px; min-width: 120px; border-left: 4px solid transparent; padding-left: 6px; }
+.duel-side[style] { border-left-color: var(--team); }
+.duel-team-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--team, #999); display: inline-block; }
+.duel-side b { display: block; font-size: 13px; }
+.duel-side small { font-size: 11px; opacity: 0.8; }
+.duel-hp { display: block; width: 110px; height: 9px; border-radius: 5px; background: rgba(0, 0, 0, 0.22); overflow: hidden; margin: 2px 0; }
+.duel-hp i { display: block; height: 100%; background: #e8546c; transition: width 0.15s; }
+.duel-side.me .duel-hp i { background: #4ec27a; }
+.duel-mid { text-align: center; line-height: 1.15; }
+.duel-mid b { font-size: 19px; display: block; }
+.duel-mid b.low { color: #d6293e; animation: duel-pulse 0.6s infinite alternate; }
+.duel-mid small { font-size: 11px; }
+@keyframes duel-pulse { to { transform: scale(1.12); } }
+@media (max-width: 640px) { .duel-hp { width: 64px; } .duel-side { min-width: 80px; } .duel-sides { gap: 8px; } }

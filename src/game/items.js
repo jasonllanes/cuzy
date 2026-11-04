@@ -144,6 +144,21 @@ for (const [id, def] of Object.entries(ITEMS)) {
 ITEMS.gun_pistol = gunItem('pistol', 'Pistol', 55, 41, 'Select it, then right-click to shoot. Steady and accurate. 12 rounds, and it reloads by itself.');
 ITEMS.gun_shotgun = gunItem('shotgun', 'Shotgun', 117, 32, 'Select it, then right-click to shoot. Five pellets that stack up at point blank. 6 shells.');
 ITEMS.gun_rifle = gunItem('rifle', 'Rifle', 107, 50, 'Select it, then right-click to shoot. A fast, accurate assault rifle. 60 rounds.');
+ITEMS.gun_sidearm = gunItem('sidearm', 'Sidearm', 28, 20, 'Select it, then right-click to shoot. A small, cheap spare. 10 rounds.');
+ITEMS.gun_glock = gunItem('glock', 'Glock 19', 30, 23, 'Select it, then right-click to shoot. Light and quick, with a big magazine. 17 rounds.');
+ITEMS.gun_m1911 = gunItem('m1911', 'M1911', 36, 22, 'Select it, then right-click to shoot. An old classic that hits harder. 8 rounds.');
+ITEMS.gun_sawedoff = gunItem('sawedoff', 'Sawed-off', 50, 20, 'Select it, then right-click to shoot. Two barrels, seven pellets: terrible at range, a wall at point blank. 2 shells.');
+ITEMS.gun_uzi = gunItem('uzi', 'Mini Uzi', 41, 28, 'Select it, then right-click to shoot. A stream of small bullets. 32 rounds.');
+ITEMS.gun_lever = gunItem('lever', 'Lever rifle', 56, 19, 'Select it, then right-click to shoot. Slow, accurate and long-ranged. 10 rounds.');
+ITEMS.gun_magnum = gunItem('magnum', 'Magnum', 46, 21, 'Select it, then right-click to shoot. A revolver that goes through one enemy and hits the next. 6 rounds.');
+ITEMS.gun_pump = gunItem('pump', 'Pump shotgun', 64, 16, 'Select it, then right-click to shoot. Six pellets and eight shells: the long, reliable shotgun.');
+ITEMS.gun_deagle = gunItem('deagle', 'Desert Eagle', 43, 26, 'Select it, then right-click to shoot. A handcannon that punches through. 7 rounds.');
+ITEMS.gun_ak47 = gunItem('ak47', 'AK-47', 56, 21, 'Select it, then right-click to shoot. A tough automatic rifle. 30 rounds.');
+ITEMS.gun_raygun = gunItem('raygun', 'Ray gun', 35, 21, 'Select it, then right-click to shoot. Zaps that burn through two enemies. 24 charges.');
+ITEMS.gun_sniper = gunItem('sniper', 'Sniper rifle', 58, 17, 'Select it, then right-click to shoot. One slow, huge shot that goes through up to three zombies. 5 rounds.');
+ITEMS.gun_laser = gunItem('laser', 'Blue laser', 50, 21, 'Select it, then right-click to shoot. A rapid beam of blue bolts. 40 charges.');
+ITEMS.gun_fireplasma = gunItem('fireplasma', 'Flamethrower', 41, 22, 'Select it, then hold right-click to spray fire. Everything in the cone burns. 120 shots of fuel.');
+ITEMS.gun_quantum = gunItem('quantum', 'Quantum plasma', 53, 21, 'Select it, then right-click to shoot. The best gun there is: a fast stream of plasma through whole lines of zombies. 30 charges.');
 ITEMS.gun_plasma = gunItem('plasma', 'Plasma gun', 111, 35, 'Select it, then right-click to shoot. Glowing bolts that burn through two enemies. 20 charges.');
 
 // Rarity: the colour of the frame around an item, in the backpack, the shop and on the ground.
@@ -163,6 +178,21 @@ export const rarityOf = (id) => RARITY_OF[id] || 'common';
 RARITY_OF.gun_shotgun = 'uncommon';
 RARITY_OF.gun_rifle = 'rare';
 RARITY_OF.gun_plasma = 'epic';
+RARITY_OF.gun_sidearm = 'common';
+RARITY_OF.gun_glock = 'common';
+RARITY_OF.gun_m1911 = 'uncommon';
+RARITY_OF.gun_sawedoff = 'uncommon';
+RARITY_OF.gun_uzi = 'uncommon';
+RARITY_OF.gun_lever = 'uncommon';
+RARITY_OF.gun_magnum = 'rare';
+RARITY_OF.gun_pump = 'rare';
+RARITY_OF.gun_deagle = 'rare';
+RARITY_OF.gun_ak47 = 'rare';
+RARITY_OF.gun_raygun = 'epic';
+RARITY_OF.gun_sniper = 'epic';
+RARITY_OF.gun_laser = 'epic';
+RARITY_OF.gun_fireplasma = 'epic';
+RARITY_OF.gun_quantum = 'legendary';
 // swords, staffs and the rest: the dearer, the rarer
 export const rarityByCost = (cost) => (cost <= 14 ? 'common' : cost <= 28 ? 'uncommon' : cost <= 40 ? 'rare' : cost <= 52 ? 'epic' : 'legendary');
 

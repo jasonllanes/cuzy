@@ -94,6 +94,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
     if (free >= 0) seats[free] = p;
   }
   const hostName = ordered.find((p) => p.id === host)?.name || 'the host';
+  const duelHumans = ordered.filter((p) => !p.ai);
+  const duelReady = !room.duel || (room.teams ? new Set(duelHumans.map((p) => teams[p.id]).filter((t) => t !== undefined && t !== null)).size >= 2 : duelHumans.length >= 2);
 
   // a computer player takes a seat: a hero nobody else is using, and a name from the list
   const addAi = (slot) => {
@@ -120,7 +122,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         </header>
         <p className="tagline">
           {MODE_LABEL[room.mode] || MODE_LABEL.free}
-          {room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''} · 👥 {ordered.length}/{room.max}
+          {room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ` · 🪙 ${room.bet} bet` : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''} · 👥 {ordered.length}/{room.max}
         </p>
 
         <div className="room-code-row">
@@ -217,7 +219,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <button type="button" className="btn small-btn add-ai" onClick={() => addAi()}>🤖 Add a computer player</button>
         )}
 
-        <RoomSettings room={room} count={ordered.length} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+        <RoomSettings room={room} count={ordered.length} players={ordered} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
 
           </div>
           <aside className="wait-side">
@@ -231,8 +233,8 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         <div className="nav-row">
           <button type="button" className="btn ghost" onClick={onLeave}>← Leave room</button>
           {imHost ? (
-            <button type="button" className="btn go" onClick={() => net.send({ t: 'start' })}>
-              {ordered.length > 1 ? `Start with ${ordered.length} players ➜` : 'Start alone ➜'}
+            <button type="button" className="btn go" disabled={!duelReady} onClick={() => net.send({ t: 'start' })}>
+              {room.duel ? (duelReady ? 'Start the duel ➜' : room.teams ? 'A duel needs two teams with players' : 'A duel needs two players') : ordered.length > 1 ? `Start with ${ordered.length} players ➜` : 'Start alone ➜'}
             </button>
           ) : (
             <span className="wait-note">⏳ Waiting for {hostName} to start…</span>

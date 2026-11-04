@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { ALLIES, ALLY_KINDS, MAX_ALLIES, teamCap } from '../game/allies';
+import { ALLIES, ALLY_KINDS, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
-import { MAX_LEVEL, UPGRADES, upgradeCost } from '../game/upgrades';
+import { AIR_SUPPORT, MAX_LEVEL, REPAIR_HEAL, UPGRADES, mendCost, repairKitCost, upgradeCost } from '../game/upgrades';
 import { ITEMS, RARITIES, rarityByCost, rarityOf, sellPrice } from '../game/items';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
 import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
@@ -15,7 +15,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
   const cap = hud.wave?.teamCap ?? teamCap(hud.wave?.baseLevel || 0);
   const [tab, setTab] = useState('shelter');
   const tabs = survival
-    ? [['shelter', '🏚️ Shelter & Stats'], ['defense', '🧱 Barricades & Grenades'], ['melee', '⚔️ Weapons'], ['guns', '🔫 Guns'], ['people', '🧑‍🤝‍🧑 Backup'], ['sell', '💰 Sell']]
+    ? [['shelter', '🏚️ Shelter & Stats'], ['defense', '🧱 Barricades & Grenades'], ['melee', '⚔️ Weapons'], ['guns', '🔫 Guns'], ['people', '🧑‍🤝‍🧑 Backup'], ['air', '✈️ Air support'], ['sell', '💰 Sell']]
     : [['shelter', '📊 Upgrades'], ['defense', '🧱 Barricades & Grenades'], ['people', '🪙 Helpers'], ['sell', '💰 Sell']];
   const levelOf = (id) => (id === 'house' ? hud.wave?.baseLevel || 0 : hud.upg?.[id] || 0);
 
@@ -63,6 +63,48 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
             );
           })}
         </div>}
+
+        {tab === 'shelter' && survival && (
+          <div className="upg-list">
+            <div className="upg-row">
+              <div className="upg-icon">🔧</div>
+              <div className="upg-info">
+                <h3>Repair kit</h3>
+                <p>Restores {Math.round(REPAIR_HEAL * 100)}% of the shelter's health right now. Shared by everyone.</p>
+                <p className="upg-now">Shelter health <b>{Math.ceil(hud.wave?.baseHp || 0)}</b> / {hud.wave?.baseMax}</p>
+              </div>
+              <button className="btn go small-btn" disabled={(hud.wave?.baseHp || 0) >= (hud.wave?.baseMax || 1) || hud.coins < repairKitCost(hud.wave?.baseLevel || 0)} onClick={() => game.buyRepairKit()}>
+                🪙 {repairKitCost(hud.wave?.baseLevel || 0)}
+              </button>
+            </div>
+            <div className="upg-row">
+              <div className="upg-icon">🛠️</div>
+              <div className="upg-info">
+                <h3>Self-repair</h3>
+                <p>The shelter slowly mends itself, a little faster with every level (+0.25% of its health every second per level). There is no last level.</p>
+                <p className="upg-now">Level <b>{hud.wave?.mendLevel || 0}</b> · heals <b>{((hud.wave?.mendLevel || 0) * 0.25).toFixed(2)}%</b> a second</p>
+              </div>
+              <button className="btn go small-btn" disabled={hud.coins < mendCost(hud.wave?.mendLevel || 0)} onClick={() => game.buyMend()}>
+                🪙 {mendCost(hud.wave?.mendLevel || 0)}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {tab === 'air' && survival && (
+          <div className="recruit-note">
+            <b>✈️ Air support</b> (one at a time, with a short pause after each)
+            {(hud.wave?.air || hud.wave?.airCd > 0) && <p className="sell-empty">{hud.wave.air ? 'An air strike is in the sky right now.' : `Ready again in ${hud.wave.airCd}s.`}</p>}
+            <div className="recruit-list">
+              {Object.entries(AIR_SUPPORT).map(([kind, a]) => (
+                <div key={kind} className="recruit-chip hire rar rar-epic">
+                  <span><b>{a.icon} {a.name}</b><small>{a.blurb}</small></span>
+                  <button className="btn go small-btn" disabled={!!hud.wave?.air || hud.wave?.airCd > 0 || hud.coins < a.cost} onClick={() => game.buyAir(kind)}>🪙 {a.cost}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {tab === 'defense' && <div className="recruit-note">
           <b>🧱 Barricades</b> (a barricade you set down stays put until zombies destroy it)
@@ -162,7 +204,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
         )}
 
         {tab === 'people' && <div className="recruit-note">
-          <b>🪙 {survival ? 'Backup' : 'Helpers'}</b> ({team}/{cap}, up to {MAX_ALLIES}). Upgrade the {survival ? 'shelter' : 'base'} to make room for more.
+          <b>🪙 {survival ? 'Backup' : 'Helpers'}</b> ({team}/{cap}: every level of the {survival ? 'shelter' : 'base'} makes room for more). Upgrade the {survival ? 'shelter' : 'base'} to make room for more.
           <div className="recruit-list">
             {ALLY_KINDS.map((k) => (
               <div key={k} className="recruit-chip hire" style={{ borderColor: ALLIES[k].color }}>

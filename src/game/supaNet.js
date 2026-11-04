@@ -10,7 +10,7 @@
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
 import { TEAMS, TEAM_COUNTS } from './teams.js';
-import { seedForMode } from './maps.js';
+import { ARENA_SEED, seedForMode, seedWithMap } from './maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -28,10 +28,12 @@ const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim
 const num = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : 0);
 const defaultTarget = (winBy) => (winBy === 'monsters' ? MONSTER_TARGET : KILL_TARGET);
 const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(99, Math.max(1, Math.round(Number(v)))) : fallback);
+const cleanBet = (v) => Math.min(99999, Math.max(0, Math.round(Number(v)) || 0));
+const cleanMins = (v) => (Number.isFinite(Number(v)) ? Math.min(10, Math.max(1, Math.round(Number(v)))) : 3);
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'waveStart', 'allowVisit', 'waves'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -99,7 +101,9 @@ export class SupaNet {
     this.identity = { name: 'Friend', hero: 'adam' };
     this.lobbyCh = null;
     this.lobbyReady = false;
-    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0 };
+    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0, duel: 0 };
+    this.stakes = new Map(); // what each player put on the table in a duel with a bet
+    this.resetDuel();
     this.resetRoom();
     this.connect();
   }
@@ -306,7 +310,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, streakMonsters, teams, target, startMoney, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, bet, duelMins, streakMonsters, teams, target, startMoney, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -332,8 +336,15 @@ export class SupaNet {
       waves: Number.isInteger(Number(waves)) && Number(waves) >= 0 && Number(waves) <= 99 ? Number(waves) : 10, // how many waves a Survival run lasts (0 = endless)
       waveStart: 'timer', // what starts the next wave in Survival: timer | vote | manual | instant (kept in the channel, not in the rooms table)
       allowCheats: allowCheats === true, // chat commands like -gold 100 (kept in the channel, not in the rooms table)
+      duel: false, // a Free Roam 1v1 in the colosseum, against the clock (kept in the channel)
+      bet: cleanBet(bet), // coins each player stakes in a duel: the winner takes the pot, a draw gives them back (0 = no bet)
+      duelMins: cleanMins(duelMins),
     };
     cfg.target = clampTarget(target, defaultTarget(cfg.winBy));
+    if (free && duel === true) {
+      this.preDuel = { seed: cfg.seed, max: cfg.max, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams };
+      Object.assign(cfg, { duel: true, seed: ARENA_SEED, pvp: true, winBy: 'duel', target: 1 });
+    }
     const startHour = mode === 'survival' ? 17.3 : START_HOUR; // Survival begins at dusk
     const t0 = Date.now();
 
@@ -611,7 +622,22 @@ export class SupaNet {
       count: this.members.size,
       started: this.started,
       host: this.members.get(this.hostId)?.name || '?',
+      ...(this.cfg.duel && this.started ? { duelFighters: [...this.fighters], duelFallen: [...this.fallen], duelUnits: Object.fromEntries(this.fighterUnit) } : {}),
     };
+  }
+
+  resetDuel() {
+    this.fighters = new Set(); // who is fighting in the duel (everyone else watches)
+    this.fighterUnit = new Map(); // fighter id -> what they fight for: their team, or themselves
+    this.fallen = new Set(); // fighters who are out
+  }
+
+  // every game keeps the duel's list of fighters (a new host carries on from it)
+  takeDuel(room) {
+    if (!room?.duelFighters) return;
+    this.fighters = new Set(room.duelFighters.map(String));
+    this.fallen = new Set((room.duelFallen || []).map(String));
+    this.fighterUnit = new Map(Object.entries(room.duelUnits || {}));
   }
 
   // everyone works out the same host: the member who has been here longest
@@ -656,6 +682,7 @@ export class SupaNet {
       this.emit({ t: 'peer_leave', id: m.id, name: m.name, host: this.hostId });
       if (this.isHost) {
         if (wasHost) this.takeOver();
+        if (this.cfg.duel && this.started && !this.winning && this.fighters.has(m.id)) this.duelFall(m.id, null, 'forfeit'); // a fighter walked out: they are out
         this.checkIntro(); // the one who left might have been the last we were waiting for
         this.sendScores();
         this.touchRow();
@@ -745,6 +772,12 @@ export class SupaNet {
         break;
       case 'hit': {
         if (!this.cfg.pvp || String(m.target) === this.me) return;
+        if (this.cfg.duel) {
+          // only the fighters still standing can hurt each other (the ones who watch cannot, and cannot be hurt)
+          const t = String(m.target);
+          if (!this.fighters.has(this.me) || !this.fighters.has(t) || this.fallen.has(this.me) || this.fallen.has(t)) return;
+          if (this.fighterUnit.get(this.me) === this.fighterUnit.get(t)) return;
+        }
         if (this.cfg.teams && this.teamMap[String(m.target)] === this.teamMap[this.me]) return; // no friendly fire
         const stun = Math.min(4, Math.max(0, Number(m.stun) || 0)); // a stun grenade (no damage)
         const dmg = stun ? 0 : Math.max(1, Math.min(4, Math.round(Number(m.dmg) || 1)));
@@ -799,7 +832,10 @@ export class SupaNet {
         if (this.isHost && this.members.get(String(m.ai))?.ai) this.hKill(String(m.killer), String(m.ai));
         break;
       case 'died':
-        this.request('died', { killer: String(m.killer) });
+        this.request('died', { killer: String(m.killer ?? '') });
+        break;
+      case 'stake':
+        this.request('stake', { amount: Math.max(0, Math.min(99999, Math.round(Number(m.amount)) || 0)) });
         break;
       case 'start':
       case 'ready':
@@ -834,6 +870,8 @@ export class SupaNet {
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
+        else if (m.kind === 'flame') this.bcast({ t: 'fx', id: this.me, kind: 'flame', x: num(m.x), y: num(m.y), a: num(m.a) });
+        else if (m.kind === 'zap') this.bcast({ t: 'fx', id: this.me, kind: 'zap', x1: num(m.x1), y1: num(m.y1), x2: num(m.x2), y2: num(m.y2) });
         else if (m.kind === 'grapple') this.bcast({ t: 'fx', id: this.me, kind: 'grapple', a: num(m.a), len: num(m.len), hit: m.hit ? 1 : 0 });
         else if (m.kind === 'bomb') this.bcast({ t: 'fx', id: this.me, kind: 'bomb', item: clean(m.item, 20), tx: num(m.tx), ty: num(m.ty), x0: num(m.x0), y0: num(m.y0), fl: num(m.fl) });
         else if (m.kind === 'fan') this.bcast({ t: 'fx', id: this.me, kind: 'fan', x: num(m.x), y: num(m.y), a: num(m.a), L: num(m.L), T: num(m.T), side: m.side < 0 ? -1 : 1, w: clean(m.w, 20) });
@@ -841,7 +879,7 @@ export class SupaNet {
         else if (m.kind === 'cast') this.bcast({ t: 'fx', id: this.me, kind: 'cast', x: num(m.x), y: num(m.y), r: num(m.r), fx: clean(m.fx, 24), hue: num(m.hue), color: clean(m.color, 12) });
         else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
         else if (m.kind === 'ball') this.bcast({ t: 'fx', id: this.me, kind: 'ball', i: Math.max(0, Math.min(7, Math.round(Number(m.i)) || 0)), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), z: num(m.z), vz: num(m.vz) });
-        else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy) });
+        else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), ...(m.g ? { g: clean(m.g, 12) } : {}) });
         break;
       case 'leave':
         this.leave();
@@ -905,13 +943,21 @@ export class SupaNet {
         this.winning = false;
         this.t0 = Date.now();
         this.cfg = pickCfg(msg.room);
+        this.takeDuel(msg.room);
+        this.resetDuel();
+        this.takeDuel(msg.room);
         if (msg.teams) this.teamMap = { ...msg.teams };
         this.emit({ ...msg, players: msg.players.filter((p) => p.id !== this.me) });
         return;
+      case 'duelfall':
+        this.fallen.add(String(msg.id));
+        break;
       case 'lobby':
         this.started = false;
         this.winning = false;
+        this.resetDuel();
         this.cfg = pickCfg(msg.room);
+        this.takeDuel(msg.room);
         if (msg.teams) this.teamMap = { ...msg.teams };
         break;
       case 'teams':
@@ -947,6 +993,7 @@ export class SupaNet {
         break;
       case 'settings':
         this.cfg = pickCfg(msg.room);
+        this.takeDuel(msg.room);
         break;
       case 'scores':
         this.lastScores = msg.scores;
@@ -985,6 +1032,9 @@ export class SupaNet {
         return this.hDied(from, m);
       case 'mkill':
         return this.hMkill(from);
+      case 'stake':
+        if (this.cfg.duel && this.started && !this.winning && this.fighters.has(from)) this.stakes.set(from, Math.min(this.cfg.bet || 0, Math.max(0, Math.round(Number(m.amount)) || 0)));
+        return;
       case 'team':
         return this.hTeam(from, m);
       case 'pause':
@@ -1085,6 +1135,7 @@ export class SupaNet {
     this.introOpen = false;
     clearTimeout(this.timers.intro);
     this.out({ t: 'go' });
+    if (this.cfg.duel) this.startDuelClock();
     // say it again a few times, in case it got lost on the way (extra ones are harmless)
     for (const ms of [800, 2000, 4000]) {
       setTimeout(() => {
@@ -1100,6 +1151,7 @@ export class SupaNet {
 
   hStart(from) {
     if (this.started || from !== this.hostId) return;
+    if (this.cfg.duel && !this.pickFighters()) return; // a duel needs two sides
     this.started = true;
     this.winning = false;
     this.paused = false;
@@ -1107,6 +1159,7 @@ export class SupaNet {
     this.openIntro();
     this.t0 = Date.now();
     this.kills = new Map();
+    this.stakes = new Map();
     this.firstDone = false; // has anyone been taken down yet this round (for First Blood)
     this.out({
       t: 'start',
@@ -1135,12 +1188,13 @@ export class SupaNet {
     if (typeof m.streakMonsters === 'boolean') cfg.streakMonsters = m.streakMonsters;
     if (m.startMoney !== undefined && !this.started) cfg.startMoney = Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0));
     if (['easy', 'medium', 'hard'].includes(m.difficulty)) cfg.difficulty = m.difficulty;
-    if (Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
-    if (free && m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
+    if (!cfg.duel && Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
     // the rest is decided before the round
     if (!this.started) {
+      if (typeof m.map === 'string' && !cfg.duel) cfg.seed = seedWithMap(cfg.seed, cfg.mode, m.map); // another map (the same mode, and the same layout roll)
       // Free Roam <-> Survival: the map, the start of the day and the fighting rules follow the mode
       if (['free', 'survival'].includes(m.mode) && m.mode !== cfg.mode) {
+        if (cfg.duel) this.setDuel(false);
         cfg.mode = m.mode;
         cfg.seed = seedForMode(cfg.seed, m.mode);
         this.startHour = m.mode === 'survival' ? 17.3 : START_HOUR;
@@ -1154,21 +1208,139 @@ export class SupaNet {
         }
         this.reassignAll();
       }
-      if (cfg.mode === 'free') {
+      if (cfg.mode === 'free' && typeof m.duel === 'boolean' && m.duel !== !!cfg.duel) this.setDuel(m.duel);
+      if (cfg.duel) {
+        if (m.bet !== undefined) cfg.bet = cleanBet(m.bet);
+        if (m.duelMins !== undefined) cfg.duelMins = cleanMins(m.duelMins);
+        // who fights in a one-against-one duel (the others watch)
+        if (Array.isArray(m.fighters) && m.fighters.length === 2 && m.fighters[0] !== m.fighters[1] && m.fighters.every((id) => this.members.get(String(id)) && !this.members.get(String(id)).ai)) cfg.fighters = m.fighters.map(String);
         if (m.shuffleTeams === true) this.shuffleTeams();
         if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
           cfg.teams = Number(m.teams);
           this.reassignAll();
         }
-        if (typeof m.pvp === 'boolean') cfg.pvp = m.pvp;
-        if (m.winBy === 'duel' || m.winBy === 'monsters') cfg.winBy = m.winBy;
-        if (m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
-        if (!cfg.pvp) cfg.winBy = 'monsters'; // with no player damage, the only way to win is monsters
+      }
+    }
+    // the fighting rules can change in the middle of a round too: every game picks them up from the settings message
+    if (cfg.mode === 'free' && !cfg.duel) {
+      const wasWinBy = cfg.winBy;
+      if (m.shuffleTeams === true) this.shuffleTeams();
+      if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
+        cfg.teams = Number(m.teams);
+        this.reassignAll();
+      }
+      if (typeof m.pvp === 'boolean') cfg.pvp = m.pvp;
+      if (m.winBy === 'duel' || m.winBy === 'monsters') cfg.winBy = m.winBy;
+      if (m.target !== undefined) cfg.target = clampTarget(m.target, cfg.target);
+      if (!cfg.pvp) cfg.winBy = 'monsters'; // with no player damage, the only way to win is monsters
+      if (this.started && !this.winning) {
+        if (cfg.winBy !== wasWinBy) this.kills = new Map(); // player kills and monster kills are different races: start the count again
+        this.out({ t: 'settings', room: this.summary() });
+        this.sendScores();
+        const lead = [...this.members.keys()].find((id) => this.scoreOf(id) > 0 && this.scoreOf(id) >= cfg.target); // (a lower target may already be reached)
+        if (lead) return this.finishRound(lead);
       }
     }
     this.out({ t: 'settings', room: this.summary() });
     this.sendTeams();
     this.touchRow({ ...cfgToRow(cfg), start_hour: this.startHour });
+  }
+
+  // switch the colosseum duel on or off: it takes the world, the fighting rules and the number of seats with it
+  setDuel(on) {
+    const cfg = this.cfg;
+    if (on) {
+      this.preDuel = { seed: cfg.seed, max: cfg.max, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams };
+      Object.assign(cfg, { duel: true, seed: ARENA_SEED, pvp: true, winBy: 'duel', target: 1 });
+    } else {
+      const p = this.preDuel || {};
+      Object.assign(cfg, { duel: false, seed: p.seed && p.seed !== ARENA_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel') });
+    }
+  }
+
+  // the duel is against the clock: when it runs out, whoever has the lowest health loses (the same health is a draw)
+  startDuelClock() {
+    clearInterval(this.timers.duel);
+    this.stakes = this.stakes || new Map();
+    let left = Math.max(1, Number(this.cfg.duelMins) || 3) * 60;
+    let n = 0;
+    const tick = () => {
+      if (!this.channel || !this.started || this.winning || !this.isHost) return clearInterval(this.timers.duel);
+      if (!this.paused) left -= 1;
+      if (n++ % 2 === 0 || left <= 10) this.out({ t: 'duel', left: Math.max(0, left) });
+      if (left <= 0) {
+        clearInterval(this.timers.duel);
+        this.duelTimeUp();
+      }
+    };
+    this.timers.duel = setInterval(tick, 1000);
+    this.out({ t: 'duel', left });
+  }
+
+  // who fights: with teams, everybody (the teams fight each other); without, two players (the host's pick, or the first two in the room)
+  // and everybody else watches. Returns false when there are not two sides.
+  pickFighters() {
+    const cfg = this.cfg;
+    if (cfg.teams) for (const id of this.members.keys()) if (this.teamMap[id] === undefined) this.assignTeam(id);
+    const hs = this.humans().sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+    let ids;
+    if (cfg.teams) ids = hs.map((h) => h.id);
+    else {
+      const pick = (cfg.fighters || []).filter((id) => this.members.get(id) && !this.members.get(id).ai);
+      ids = pick.length === 2 ? pick : hs.slice(0, 2).map((h) => h.id);
+    }
+    const unit = (id) => (cfg.teams ? `t${this.teamMap[id]}` : id);
+    if (new Set(ids.map(unit)).size < 2) return false;
+    this.fighters = new Set(ids);
+    this.fighterUnit = new Map(ids.map((id) => [id, unit(id)]));
+    this.fallen = new Set();
+    return true;
+  }
+
+  // a fighter is out (knocked out, or walked away): when only one side is left standing, it wins
+  duelFall(victimId, killerId, reason = 'ko') {
+    if (!this.cfg.duel || !this.started || this.winning || !this.fighters.has(victimId) || this.fallen.has(victimId)) return;
+    this.fallen.add(victimId);
+    this.out({ t: 'duelfall', id: victimId });
+    const killer = this.members.get(killerId);
+    const victim = this.members.get(victimId);
+    if (killer && victim && this.fighters.has(killerId) && killerId !== victimId) {
+      const first = !this.firstDone;
+      this.firstDone = true;
+      this.out({ t: 'kill', killer: killer.name, victim: victim.name, killerId, victimId, first });
+    }
+    const standing = new Set([...this.fighters].filter((id) => !this.fallen.has(id)).map((id) => this.fighterUnit.get(id)));
+    if (standing.size >= 2) return;
+    this.finishDuel(standing.size === 1 ? [...standing][0] : null, reason);
+  }
+
+  // the bell: the side with the most health left wins (the same health is a draw)
+  duelTimeUp() {
+    if (!this.started || this.winning) return;
+    const hp = (id) => (id === this.me ? this.pos?.hp : this.posOf.get(id)?.hp) ?? 0;
+    const hearts = {};
+    const sums = new Map();
+    for (const id of this.fighters) {
+      hearts[id] = this.fallen.has(id) ? 0 : hp(id);
+      sums.set(this.fighterUnit.get(id), (sums.get(this.fighterUnit.get(id)) || 0) + hearts[id]);
+    }
+    const ranked = [...sums.entries()].sort((a, b) => b[1] - a[1]);
+    if (!ranked.length || (ranked.length > 1 && Math.abs(ranked[0][1] - ranked[1][1]) < 0.05)) this.finishDuel(null, 'time', hearts);
+    else this.finishDuel(ranked[0][0], 'time', hearts);
+  }
+
+  // `unit`: the side that won (null: a draw)
+  finishDuel(unit, reason, hearts = null) {
+    this.winning = true;
+    clearInterval(this.timers.duel);
+    const ids = [...this.fighters];
+    const winners = unit ? ids.filter((id) => this.fighterUnit.get(id) === unit) : [];
+    const losers = unit ? ids.filter((id) => this.fighterUnit.get(id) !== unit) : [];
+    const team = unit && this.cfg.teams ? this.teamMap[winners[0]] ?? Number(String(unit).slice(1)) : null;
+    const name = !unit ? 'Nobody' : team !== null && this.cfg.teams ? `${TEAMS[team]?.name || 'A'} team` : this.members.get(winners[0])?.name || 'Someone';
+    this.out({ t: 'win', id: winners[0] ?? null, name, team: team ?? null, target: 1, duel: true, draw: !unit, reason, winners, losers, fighters: ids, stakes: Object.fromEntries(this.stakes), hearts });
+    clearTimeout(this.timers.back);
+    this.timers.back = setTimeout(() => this.returnToLobby(), CELEBRATE_MS);
   }
 
   // (a player who is still waiting asks again every couple of seconds; once the scene is over they are told to go)
@@ -1185,7 +1357,7 @@ export class SupaNet {
   // the host puts a computer player in a seat (its name and look come from the host's game)
   hAddAi(from, m) {
     const cfg = this.cfg;
-    if (from !== this.hostId || this.started || cfg.mode !== 'free' || this.members.size >= cfg.max) return;
+    if (from !== this.hostId || this.started || cfg.mode !== 'free' || cfg.duel || this.members.size >= cfg.max) return;
     let slot = Math.round(Number(m.slot));
     const taken = new Set([...this.members.values()].map((x) => x.slot));
     if (!Number.isInteger(slot) || slot < 0 || slot >= cfg.max || taken.has(slot)) {
@@ -1213,6 +1385,7 @@ export class SupaNet {
 
   // the victim reports its own defeat so the right player gets the point
   hDied(from, m) {
+    if (this.cfg.duel) return this.duelFall(from, String(m.killer || ''));
     this.hKill(String(m.killer), from);
   }
 
@@ -1246,10 +1419,11 @@ export class SupaNet {
   }
 
   // a player reached the target: cheer them, then send everyone back to the waiting room
-  finishRound(id) {
+  finishRound(id, info = {}) {
     this.winning = true;
-    const team = this.cfg.teams ? this.teamMap[id] ?? null : null;
-    this.out({ t: 'win', id, name: team !== null ? `${TEAMS[team].name} team` : this.members.get(id)?.name || 'Someone', team, target: this.cfg.target });
+    clearInterval(this.timers.duel);
+    const team = this.cfg.teams && id ? this.teamMap[id] ?? null : null;
+    this.out({ t: 'win', id, name: !id ? 'Nobody' : team !== null ? `${TEAMS[team].name} team` : this.members.get(id)?.name || 'Someone', team, target: this.cfg.target });
     clearTimeout(this.timers.back);
     this.timers.back = setTimeout(() => this.returnToLobby(), CELEBRATE_MS);
   }
@@ -1260,6 +1434,9 @@ export class SupaNet {
     this.winning = false;
     this.paused = false;
     this.introOpen = false;
+    clearInterval(this.timers.duel);
+    this.stakes = new Map();
+    this.resetDuel();
     this.kills = new Map();
     this.firstDone = false; // has anyone been taken down yet this round (for First Blood)
     this.out({ t: 'lobby', room: this.summary(), teams: { ...this.teamMap }, host: this.hostId, players: [...this.members.values()].map((m) => this.publicPlayer(m)), scores: this.scoreList() });

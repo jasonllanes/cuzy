@@ -18,6 +18,16 @@ export const upgradeCost = (id, level) => {
   return level < list.length ? list[level] : Math.round(list[list.length - 1] * 1.35 ** (level - list.length + 1));
 };
 
+// Survival's shelter can mend itself: each level of "Self-repair" heals a little more every second (it has no top level), and a repair
+// kit heals a big chunk at once
+export const mendCost = (level) => Math.round(14 * 1.3 ** level);
+export const AIR_SUPPORT = {
+  carpet: { name: 'Carpet bombing', icon: '💣', cost: 70, blurb: 'A helicopter sweeps right across the map and drops bombs all along its path. Red circles show where they land: they wipe out the zombies inside, and nothing of yours is hurt.' },
+  gunship: { name: 'Gunship', icon: '🚁', cost: 140, blurb: 'A gunship circles the shelter for a whole minute, firing its machine gun at every zombie that comes near.' },
+};
+export const REPAIR_HEAL = 0.3; // the share of the shelter's health a repair kit restores
+export const repairKitCost = (baseLevel) => 10 + 4 * baseLevel;
+
 // ---------- Free Roam shop (press U): coins from chests and skeletons ----------
 
 // Levelled upgrades. `per` is what each level adds, shown next to the current value in the shop.

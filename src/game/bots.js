@@ -79,6 +79,11 @@ export class Bots {
     }
   }
 
+  // the host changed the difficulty in the middle of a round: the rivals play to it from now on
+  setDifficulty(id) {
+    this.skill = SKILL[id] || SKILL.medium;
+  }
+
   scoreboard() {
     return {
       target: this.target,
