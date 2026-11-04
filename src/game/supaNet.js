@@ -31,7 +31,7 @@ const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'waveStart', 'allowVisit'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -306,7 +306,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, streakMonsters, teams, target, startMoney, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, streakMonsters, teams, target, startMoney, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -328,6 +328,8 @@ export class SupaNet {
       teams: free && [2, 3, 4].includes(Number(teams)) ? Number(teams) : 0, // 0 = free for all
       allowLate: allowLate !== false,
       startMoney: Math.min(99999, Math.max(0, Math.round(Number(startMoney)) || 0)), // coins everyone starts a round with
+      allowVisit: allowVisit === undefined ? !free : allowVisit === true, // may players teleport to each other? (on by default in co-op Survival, off in Free Roam fights)
+      waveStart: 'timer', // what starts the next wave in Survival: timer | vote | manual | instant (kept in the channel, not in the rooms table)
       allowCheats: allowCheats === true, // chat commands like -gold 100 (kept in the channel, not in the rooms table)
     };
     cfg.target = clampTarget(target, defaultTarget(cfg.winBy));
@@ -830,6 +832,9 @@ export class SupaNet {
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
+        else if (m.kind === 'grapple') this.bcast({ t: 'fx', id: this.me, kind: 'grapple', a: num(m.a), len: num(m.len), hit: m.hit ? 1 : 0 });
+        else if (m.kind === 'bomb') this.bcast({ t: 'fx', id: this.me, kind: 'bomb', item: clean(m.item, 20), tx: num(m.tx), ty: num(m.ty) });
+        else if (m.kind === 'fan') this.bcast({ t: 'fx', id: this.me, kind: 'fan', x: num(m.x), y: num(m.y), a: num(m.a), L: num(m.L), T: num(m.T), side: m.side < 0 ? -1 : 1, w: clean(m.w, 20) });
         else if (m.kind === 'trident') this.bcast({ t: 'fx', id: this.me, kind: 'trident', x: num(m.x), y: num(m.y), a: num(m.a), range: num(m.range), speed: num(m.speed), w: clean(m.w, 20) });
         else if (m.kind === 'cast') this.bcast({ t: 'fx', id: this.me, kind: 'cast', x: num(m.x), y: num(m.y), r: num(m.r), fx: clean(m.fx, 24), hue: num(m.hue), color: clean(m.color, 12) });
         else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
@@ -1012,6 +1017,23 @@ export class SupaNet {
     for (const id of this.members.keys()) this.teamMap[id] = i++ % this.cfg.teams;
   }
 
+  // the host's "shuffle" button: everybody (computer players too) is dealt out again at random, as evenly as it goes;
+  // the extra player lands on a random team
+  shuffleTeams() {
+    const n = this.cfg.teams;
+    if (!n) return;
+    const ids = [...this.members.keys()];
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    const off = Math.floor(Math.random() * n);
+    this.teamMap = {};
+    ids.forEach((id, i) => {
+      this.teamMap[id] = (i + off) % n;
+    });
+  }
+
   // what a win is counted on: your own kills, or your whole team's
   scoreOf(id) {
     const t = this.teamMap[id];
@@ -1096,6 +1118,8 @@ export class SupaNet {
     const free = cfg.mode === 'free';
     if (typeof m.allowLate === 'boolean') cfg.allowLate = m.allowLate;
     if (typeof m.allowCheats === 'boolean') cfg.allowCheats = m.allowCheats;
+    if (typeof m.allowVisit === 'boolean') cfg.allowVisit = m.allowVisit;
+    if (['timer', 'vote', 'manual', 'instant'].includes(m.waveStart)) cfg.waveStart = m.waveStart;
     // these can be changed at any time, even in the middle of a round
     if (typeof m.allowThrow === 'boolean') cfg.allowThrow = m.allowThrow;
     if (typeof m.allowMelee === 'boolean') cfg.allowMelee = m.allowMelee;
@@ -1122,6 +1146,7 @@ export class SupaNet {
         this.reassignAll();
       }
       if (cfg.mode === 'free') {
+        if (m.shuffleTeams === true) this.shuffleTeams();
         if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
           cfg.teams = Number(m.teams);
           this.reassignAll();

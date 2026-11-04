@@ -36,21 +36,25 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
         </div>
 
         {tab === 'shelter' && <div className="upg-list">
-          {UPGRADES.map((u) => {
+          {UPGRADES.filter((u) => !(u.id === 'light' && survival && hud.dayMap)).map((u) => { // (no lamps needed in daylight)
             const level = levelOf(u.id);
-            const maxed = level >= MAX_LEVEL;
-            const cost = maxed ? 0 : upgradeCost(u.id, level);
             const bus = u.id === 'house' && survival;
+            const maxed = level >= MAX_LEVEL && !bus; // (the shelter has no top level)
+            const cost = maxed ? 0 : upgradeCost(u.id, level);
             return (
               <div className="upg-row" key={u.id}>
                 <div className="upg-icon">{bus ? '🏚️' : survival && u.survIcon ? u.survIcon : u.icon}</div>
                 <div className="upg-info">
                   <h3>{bus ? 'Upgrade the shelter' : survival && u.survName ? u.survName : u.name}</h3>
-                  <p>{bus ? '+30% shelter health per level (arriving already repaired) and room for more backup to defend it. Shared by everyone.' : survival && u.survDesc ? u.survDesc : u.desc}</p>
+                  <p>{bus ? '+30% shelter health per level (arriving already repaired) and room for more backup to defend it. Shared by everyone, and there is no last level: it only gets dearer.' : survival && u.survDesc ? u.survDesc : u.desc}</p>
                   {u.id === 'house' && <p className="upg-now">Team room: <b>{teamCap(level)}</b>{!maxed && <> → <b>{teamCap(level + 1)}</b></>} {survival ? 'backup' : 'helpers'}</p>}
-                  <div className="pips" aria-label={`Level ${level} of ${MAX_LEVEL}`}>
-                    {Array.from({ length: MAX_LEVEL }, (_, i) => <i key={i} className={i < level ? 'on' : ''} />)}
-                  </div>
+                  {bus
+                    ? <div className="upg-now">Shelter level <b>{level + 1}</b> · health <b>{Math.round((hud.wave?.baseMax || 0))}</b></div>
+                    : (
+                      <div className="pips" aria-label={`Level ${level} of ${MAX_LEVEL}`}>
+                        {Array.from({ length: MAX_LEVEL }, (_, i) => <i key={i} className={i < level ? 'on' : ''} />)}
+                      </div>
+                    )}
                 </div>
                 <button className="btn go small-btn" disabled={maxed || hud.coins < cost} onClick={() => game.buyUpgrade(u.id)}>
                   {maxed ? 'Maxed' : `🪙 ${cost}`}
@@ -118,7 +122,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
 
         {tab === 'guns' && survival && hud.gunsOwned && (
           <div className="recruit-note">
-            <b>🔫 Guns</b> (the pistol is free; switch with R or the slot beside the hotbar)
+            <b>🔫 Guns</b> (the pistol is free; switch with R or the slot beside the hotbar). Every gun you own can be upgraded: a bigger magazine and more firepower.
             <div className="recruit-list">
               {GUN_ORDER.map((id) => {
                 const g = GUNS[id];
@@ -126,7 +130,24 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
                 const on = hud.gun === id;
                 return (
                   <div key={id} className={`recruit-chip hire rar rar-${rarityByCost(g.price)}`}>
-                    <span><b><img className="gun-img small" src={`${import.meta.env.BASE_URL}assets/guns/${id}.png`} alt="" /> {g.name}</b><small>{g.blurb}</small></span>
+                    <span>
+                      <b><img className="gun-img small" src={`${import.meta.env.BASE_URL}assets/guns/${id}.png`} alt="" /> {g.name}</b>
+                      <small>{g.blurb}</small>
+                      {have && (
+                        <span className="gun-upgs">
+                          {[['mag', '🔋 Magazine', (l) => `${Math.round(g.mag * (1 + 0.25 * l))} rounds`], ['dmg', '💥 Firepower', (l) => `+${20 * l}% damage`]].map(([stat, label, show]) => {
+                            const lv = hud.gunUp?.[id]?.[stat] || 0;
+                            const cost = game.gunUpgradeCost(id, stat, lv);
+                            const top = lv >= MAX_LEVEL;
+                            return (
+                              <button key={stat} type="button" className="btn small-btn gun-upg" disabled={top || hud.coins < cost} onClick={() => game.upgradeGun(id, stat)} title={`${label}: now ${show(lv)}${top ? '' : `, next ${show(lv + 1)}`}`}>
+                                {label} <b>Lv {lv}/{MAX_LEVEL}</b> · {show(lv)} {top ? '' : `→ ${show(lv + 1)} · 🪙 ${cost}`}
+                              </button>
+                            );
+                          })}
+                        </span>
+                      )}
+                    </span>
                     <span className="row-btns">
                       <button className="btn go small-btn" disabled={on || (!have && hud.coins < g.price)} onClick={() => game.buyGun(id)}>
                         {on ? 'Equipped' : have ? 'Equip' : `Buy 🪙 ${g.price}`}

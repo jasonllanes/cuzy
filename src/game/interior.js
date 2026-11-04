@@ -169,7 +169,11 @@ const sky = (hour, weather) => {
 };
 
 // the whole room. The hero is drawn in between the furniture so walking behind the table looks right.
-export function drawRoom(g, { img, t, hour, weather, storageOpen, drawMe, meY }) {
+export function drawRoom(g, { img, t, hour, weather, storageOpen, drawMe, meY, design }) {
+  if (design && DESIGNS[design]) {
+    drawDesign(g, design, { img, t, hour, weather, drawMe, meY, storageOpen });
+    return;
+  }
   backdrop ||= paintBackdrop(img);
   g.fillStyle = '#17110d';
   g.fillRect(-400, -400, ROOM.w + 800, ROOM.h + 800);
@@ -218,10 +222,240 @@ export function drawRoom(g, { img, t, hour, weather, storageOpen, drawMe, meY })
 }
 
 // is a pair of feet at (x, y) in the way of a wall or a piece of furniture?
-export function roomBlocked(x, y, footW, footH) {
+export function roomBlocked(x, y, footW, footH, design) {
   const l = x - footW / 2;
   const t = y - footH;
   if (l < WALK.l || l + footW > WALK.r || y < WALK.top || y > WALK.bottom) return true;
-  for (const s of SOLIDS) if (l < s.x + s.w && l + footW > s.x && t < s.y + s.h && t + footH > s.y) return true;
+  for (const s of DESIGNS[design] ? solidsOf(design) : SOLIDS) if (l < s.x + s.w && l + footW > s.x && t < s.y + s.h && t + footH > s.y) return true;
   return false;
+}
+
+// ------------------------------------------------------------------------------------------
+// More rooms. Every enterable building gets a design of its own (picked by the building, so it is always the same one): the
+// cottage above, a lounge, a bedroom, a kitchen and a little store. Floors and walls are cut from the Room Builder sheet, the
+// furniture from the Modern Interiors sheet. The room is always the same size, with the door mat in the same place.
+// ------------------------------------------------------------------------------------------
+
+Object.assign(PIECES, {
+  tableBig: ['modern', 12, 159, 42, 40],
+  tableLight: ['modern', 93, 160, 38, 40],
+  stool: ['modern', 96, 207, 16, 18],
+  benchLong: ['modern', 116, 215, 40, 20],
+  bookshelf1: ['modern', 80, 225, 31, 31],
+  bookshelf2: ['modern', 80, 256, 31, 32],
+  kitchenWhite: ['modern', 16, 253, 64, 28],
+  fridge1: ['modern', 32, 295, 16, 32],
+  fridge2: ['modern', 49, 295, 16, 32],
+  fridge3: ['modern', 64, 295, 30, 33],
+  foodShelf: ['modern', 102, 297, 22, 32],
+  rugBlueV: ['modern', 211, 176, 42, 62],
+  rugRedV: ['modern', 211, 257, 42, 62],
+  rugGreenS: ['modern', 180, 286, 24, 18],
+  rugGreenL: ['modern', 162, 452, 28, 28],
+  picFish: ['modern', 6, 328, 22, 17],
+  picSky: ['modern', 3, 234, 27, 20],
+  cabKitchen: ['modern', 79, 415, 67, 34],
+  windowWhite: ['modern', 147, 391, 26, 22],
+  wardrobe1: ['modern', 114, 772, 28, 40],
+  wardrobe2: ['modern', 146, 782, 28, 30],
+  wardrobeBig: ['modern', 143, 819, 36, 42],
+  dresserMirA: ['modern', 32, 777, 32, 34],
+  dresserMirB: ['modern', 65, 777, 30, 34],
+  plantTall: ['modern', 167, 713, 18, 34],
+  plantPot: ['modern', 193, 723, 16, 24],
+  palm: ['modern', 212, 713, 24, 24],
+  lampRed: ['modern', 176, 855, 16, 26],
+  lampBlue: ['modern', 192, 855, 18, 30],
+  wine1: ['modern', 160, 1094, 32, 34],
+  wine2: ['modern', 192, 1094, 32, 34],
+  wine3: ['modern', 224, 1094, 32, 34],
+  sofaGrey: ['modern', 16, 1156, 48, 30],
+  sofaGrey2: ['modern', 64, 1156, 48, 30],
+  sofaBrown: ['modern', 112, 1157, 48, 30],
+  fire2: ['modern', 64, 1087, 32, 42],
+  mirrorStand: ['modern', 101, 1080, 24, 34],
+  stoveRed: ['modern', 144, 1340, 32, 30],
+  counterGrey: ['modern', 192, 1262, 32, 26],
+});
+
+// floors and walls from the Room Builder sheet: a floor is a 3x2 block of 16px tiles, a wall a 48x32 strip (cap and body)
+const FLOORS = { brick: [176, 80], tile: [176, 112], teal: [176, 144], grey: [176, 176], herring: [176, 208], planks: [64, 176] };
+const WALL_Y = [80, 112, 144, 176, 208, 240, 272, 304]; // salmon, yellow, mint, pale wood, brown wood, rust wood, blue-grey, beige
+const WALL_SIDE = ['#a55c4a', '#b8a050', '#6fa899', '#8a6a3c', '#5e4630', '#7a3a24', '#5f6a85', '#8d8570'];
+
+// where the chest stands in each design: the loot, with nothing guarding it (top-left of its 32x16 picture)
+// stuff: [piece, x (middle), y (feet), solid?]   walls: [piece, x, y (top-left)]   rugs: [piece, x, y (top-left)]
+export const DESIGNS = {
+  lounge: {
+    floor: 'planks', wall: 6, windows: [[30, 14, 26, 22], [190, 14, 26, 22]], fire: { x: 120, y: 44 },
+    chest: { x: 196, y: 74 },
+    walls: [['windowWhite', 30, 14], ['windowWhite', 190, 14], ['picSky', 70, 14], ['picFish', 158, 16]],
+    rugs: [['rugRedV', 92, 78]],
+    stuff: [
+      ['fire2', 120, 62, false], ['bookshelf1', 26, 88], ['bookshelf2', 58, 88], ['sofaGrey', 113, 112], ['benchLong', 113, 138],
+      ['plantTall', 224, 160], ['plantPot', 16, 160], ['stool', 168, 140], ['lampBlue', 172, 96],
+    ],
+  },
+  bedroom: {
+    floor: 'planks', wall: 0, windows: [[34, 12, 26, 22], [196, 12, 26, 22]],
+    chest: { x: 190, y: 74 }, bed: { x: 44, y: 102 },
+    walls: [['windowWhite', 34, 12], ['windowWhite', 196, 12], ['picSky', 100, 16], ['picFish', 134, 18]],
+    rugs: [['rugGreenL', 70, 112], ['rugGreenS', 150, 128]],
+    stuff: [
+      ['bed', 32, 92], ['lampRed', 62, 90], ['dresserMirA', 90, 88], ['wardrobeBig', 142, 88], ['wardrobe1', 176, 88],
+      ['plantPot', 214, 160], ['stool', 124, 134],
+    ],
+  },
+  kitchen: {
+    floor: 'tile', wall: 2, windows: [[100, 12, 26, 22]],
+    chest: { x: 14, y: 100 },
+    walls: [['windowWhite', 100, 12], ['picFish', 20, 18], ['picSky', 150, 16]],
+    rugs: [['rugBlueV', 84, 92]],
+    stuff: [
+      ['kitchenWhite', 52, 66], ['stoveRed', 140, 64], ['cabKitchen', 180, 66], ['fridge1', 222, 66], ['fridge2', 207, 66],
+      ['tableBig', 108, 124], ['stool', 80, 136], ['stool', 138, 136], ['plantTall', 226, 158],
+    ],
+  },
+  store: {
+    floor: 'grey', wall: 7, windows: [],
+    chest: { x: 200, y: 108 },
+    walls: [['picFish', 150, 22], ['picSky', 36, 22]],
+    rugs: [['rugRedV', 92, 100]],
+    stuff: [
+      ['wine1', 36, 66], ['wine2', 70, 66], ['wine3', 104, 66], ['fridge3', 150, 66], ['foodShelf', 184, 66], ['fridge1', 210, 66],
+      ['tableLight', 100, 130], ['stool', 70, 138], ['counterGrey', 210, 150, true], ['plantPot', 20, 160],
+    ],
+  },
+};
+
+// which design a building has: the same one every time
+export function designFor(b) {
+  if (!b) return 'cottage';
+  let h = 0;
+  for (const ch of String(b.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const pick = (list) => list[h % list.length];
+  switch (b.type) {
+    case 'shop':
+    case 'kiosk': return 'store';
+    case 'cabin': return pick(['bedroom', 'kitchen']);
+    case 'civic': return pick(['lounge', 'store']);
+    default: return pick(['lounge', 'bedroom', 'kitchen', 'cottage']);
+  }
+}
+
+// the chest's solid box and the spot you stand on to open it
+const chestSolid = (c) => ({ x: c.x - 1, y: c.y + 2, w: 34, h: 16 });
+
+// the boxes the hero cannot walk through, one per piece of standing furniture (feet-level), and the chest
+const solidCache = new Map();
+function solidsOf(name) {
+  let s = solidCache.get(name);
+  if (s) return s;
+  const D = DESIGNS[name];
+  s = [chestSolid(D.chest)];
+  for (const [p, x, y, solid] of D.stuff) {
+    if (solid === false) continue;
+    const w = Math.round(PIECES[p][3] * 0.86);
+    s.push({ x: Math.round(x - w / 2), y: y - 8, w, h: 8 });
+  }
+  solidCache.set(name, s);
+  return s;
+}
+
+// what you can use in a room, and where you stand to do it
+export function spotsOf(name) {
+  const D = DESIGNS[name];
+  if (!D) return SPOTS;
+  const out = { chest: { x: D.chest.x + 16, y: D.chest.y + 30, label: 'Space · open the chest' } };
+  if (D.bed) out.bed = { x: D.bed.x, y: D.bed.y, label: 'Space · rest in bed' };
+  return out;
+}
+
+const designBackdrops = new Map();
+function paintDesign(img, name) {
+  const D = DESIGNS[name];
+  const rb = img['interior/rb'];
+  const c = document.createElement('canvas');
+  c.width = ROOM.w;
+  c.height = ROOM.h;
+  const g = c.getContext('2d');
+  const [fx, fy] = FLOORS[D.floor];
+  for (let ty = ROOM.wall >> 4; ty < ROOM.h >> 4; ty++) {
+    for (let tx = 0; tx < ROOM.w >> 4; tx++) {
+      const sx = D.floor === 'planks' ? fx + 16 : fx + 16 * (tx % 3); // (planks: the middle of the swatch, which has no edge lines)
+      const sy = D.floor === 'planks' ? fy : fy + 16 * (ty % 2);
+      g.drawImage(rb, sx, sy, 16, 16, tx * 16, ty * 16, 16, 16);
+    }
+  }
+  // the back wall: the strip (cap and body) repeated, then more body down to the floor
+  const wy = WALL_Y[D.wall];
+  for (let y = 0; y < ROOM.wall; y += 16) for (let x = 0; x < ROOM.w; x += 16) g.drawImage(rb, 80, wy, 16, 16, x, y, 16, Math.min(16, ROOM.wall - y)); // the middle of the plain wall swatch, with no edge lines
+  g.fillStyle = '#f6f1e6';
+  g.fillRect(0, 0, ROOM.w, 4); // the cap along the top
+  g.fillStyle = 'rgba(40,24,12,0.45)';
+  g.fillRect(0, 4, ROOM.w, 1);
+  g.fillRect(0, ROOM.wall - 2, ROOM.w, 2);
+  // side and bottom walls
+  g.fillStyle = WALL_SIDE[D.wall];
+  g.fillRect(0, 0, 10, ROOM.h);
+  g.fillRect(ROOM.w - 10, 0, 10, ROOM.h);
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.fillRect(10, ROOM.wall, 2, ROOM.h - ROOM.wall);
+  g.fillRect(ROOM.w - 12, ROOM.wall, 2, ROOM.h - ROOM.wall);
+  g.fillStyle = WALL_SIDE[D.wall];
+  g.fillRect(0, ROOM.h - 6, DOOR.x0, 6);
+  g.fillRect(DOOR.x1, ROOM.h - 6, ROOM.w - DOOR.x1, 6);
+  for (const [p, x, y] of D.rugs) putTop(g, img, p, x, y);
+  // the door mat and the light from outside
+  g.fillStyle = '#9b7a52';
+  g.fillRect(DOOR.x0 + 4, ROOM.h - 14, DOOR.x1 - DOOR.x0 - 8, 8);
+  g.fillStyle = '#7a5d3c';
+  g.fillRect(DOOR.x0 + 6, ROOM.h - 12, DOOR.x1 - DOOR.x0 - 12, 1);
+  g.fillStyle = 'rgba(255,245,200,0.3)';
+  g.fillRect(DOOR.x0, ROOM.h - 36, DOOR.x1 - DOOR.x0, 30);
+  for (const [p, x, y] of D.walls) putTop(g, img, p, x, y);
+  return g.canvas;
+}
+
+function drawDesign(g, name, { img, t, hour, weather, drawMe, meY, storageOpen }) {
+  const D = DESIGNS[name];
+  let back = designBackdrops.get(name);
+  if (!back) {
+    back = paintDesign(img, name);
+    designBackdrops.set(name, back);
+  }
+  g.fillStyle = '#17110d';
+  g.fillRect(-400, -400, ROOM.w + 800, ROOM.h + 800);
+  g.drawImage(back, 0, 0);
+  // the weather and the hour, through the windows
+  for (const [x, y, w, h] of D.windows) {
+    g.fillStyle = sky(hour, weather);
+    g.globalAlpha = 0.5;
+    g.fillRect(x + 3, y + 3, w - 6, h - 7);
+    g.globalAlpha = 1;
+    if (weather === 'rain') {
+      g.fillStyle = 'rgba(255,255,255,0.7)';
+      for (let i = 0; i < 5; i++) g.fillRect(x + 4 + ((i * 7 + Math.floor(t * 20)) % (w - 8)), y + 3 + ((i * 5 + Math.floor(t * 30)) % (h - 8)), 1, 3);
+    }
+  }
+  if (D.fire) {
+    const fl = Math.sin(t * 9) * 0.5 + 0.5;
+    g.fillStyle = `rgba(255,170,60,${0.12 + 0.1 * fl})`;
+    g.beginPath();
+    g.ellipse(D.fire.x, D.fire.y + 20, 40, 26, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  const things = D.stuff.map(([p, x, y]) => ({ y, draw: () => putFeet(g, img, p, x, y, !/^(fire2|lamp)/.test(p)) }));
+  const ch = D.chest;
+  things.push({
+    y: ch.y + 18,
+    draw: () => {
+      g.fillStyle = 'rgba(60,40,30,0.25)';
+      g.fillRect(ch.x - 2, ch.y + 14, 36, 4);
+      g.drawImage(img.chest, 0, storageOpen ? 16 : 0, 32, 16, ch.x, ch.y, 32, 16);
+    },
+  });
+  things.push({ y: meY, draw: drawMe });
+  things.sort((a, b) => a.y - b.y);
+  for (const th of things) th.draw();
 }

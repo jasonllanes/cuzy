@@ -1,6 +1,14 @@
 import { TEAMS, TEAM_COUNTS } from '../game/teams';
 import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
 
+// What starts the next wave in Survival (also used by the solo rules panel)
+export const WAVE_START = [
+  ['timer', '⏱️ Countdown', 'A countdown between waves.'],
+  ['vote', '🗳️ Vote', 'Everyone presses V: when more than half agree, the wave starts. No countdown.'],
+  ['manual', '🎮 Host starts', 'The host presses V (or Start) when the team is ready. No countdown.'],
+  ['instant', '⚡ Non-stop', 'No breaks: the next wave comes as soon as the last zombie falls.'],
+];
+
 // One on/off setting, drawn as a switch
 export function Switch({ label, hint, on, disabled, onChange }) {
   return (
@@ -53,19 +61,34 @@ export default function RoomSettings({ room, count, editable, onChange }) {
             </div>
           </div>
         )}
+        {!free && (
+          <div className="set-row">
+            <div className="set-label"><b>Next wave</b><small>{WAVE_START.find(([id]) => id === (room.waveStart || 'timer'))?.[2]} The host can change it at any time.</small></div>
+            <select value={room.waveStart || 'timer'} disabled={!editable} onChange={(e) => onChange({ waveStart: e.target.value })}>
+              {WAVE_START.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </div>
+        )}
         <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too, and everyone sees them' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />
         <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
+        <Switch label="Allow visit" hint="Players can teleport straight to another player in the room (the Room button, then Visit next to their name)" on={!!room.allowVisit} disabled={!editable} onChange={(v) => onChange({ allowVisit: v })} />
         <Switch label="Allow cheats?" hint="Players can type commands like -gold 100 or -level 5 in the chat (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />
         {free && (
           <>
             <div className="set-row">
-              <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score. Tap a free slot under a team to join it.' : 'Free for all: everyone for themselves'}</small></div>
+              <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score and one camp (a house they all go into). Tap a free slot under a team to join it, or use Shuffle.' : 'Free for all: everyone for themselves'}</small></div>
               <select value={room.teams || 0} disabled={locked} onChange={(e) => onChange({ teams: Number(e.target.value) })}>
                 {TEAM_COUNTS.map((n) => <option key={n} value={n}>{n ? `${n} teams` : 'Free for all'}</option>)}
               </select>
             </div>
+            {room.teams > 0 && (
+              <div className="set-row">
+                <div className="set-label"><b>Shuffle teams</b><small>Deals everyone (computer players too) out to the teams at random, as evenly as it goes. Tap it again for another draw.</small></div>
+                <button type="button" className="btn go small-btn" disabled={locked} onClick={() => onChange({ shuffleTeams: true })}>🎲 Shuffle</button>
+              </div>
+            )}
             <Switch label="Player damage" hint="Heroes can hurt each other" on={!!room.pvp} disabled={locked} onChange={(v) => onChange({ pvp: v })} />
-            <Switch label="Allow melee" hint="Sword, dash and spiral" on={room.allowMelee !== false} disabled={!editable} onChange={(v) => onChange({ allowMelee: v })} />
+            <Switch label="Allow melee" hint="Sword, axe, dash" on={room.allowMelee !== false} disabled={!editable} onChange={(v) => onChange({ allowMelee: v })} />
             <Switch label="Allow throwing" hint="Right-click throws" on={room.allowThrow !== false} disabled={!editable} onChange={(v) => onChange({ allowThrow: v })} />
             <div className="set-row">
               <div className="set-label"><b>Win by</b><small>{room.pvp ? 'What counts towards the win' : 'Player damage is off, so monsters it is'}</small></div>

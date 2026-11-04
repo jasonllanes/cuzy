@@ -19,7 +19,7 @@ import ShopPanel from './ShopPanel';
 import StoragePanel from './StoragePanel';
 import UnlockCards from './UnlockCards';
 import QtyPicker from './QtyPicker';
-import RoomSettings, { Switch } from './RoomSettings';
+import RoomSettings, { Switch, WAVE_START } from './RoomSettings';
 import TouchControls from './TouchControls';
 import { getControls, useControls } from '../game/controls';
 import { COMMANDS } from '../game/commands';
@@ -53,6 +53,49 @@ function dayIcon(hour) {
   return '🌙';
 }
 
+// Which key or mouse button does what: a short list on the right, under the map (it can be folded away)
+const KEYS_WAVES = [
+  [['W', 'A', 'S', 'D'], 'Move'], [['Shift'], 'Sprint'], [['L-Click'], 'Slash'], [['R-Click'], 'Shoot / throw'], [['Space'], 'Dash'], [['R'], 'Shield'],
+  [['F'], 'Pick up'], [['Q'], 'Health pack'], [['E'], 'Stamina'], [['T'], 'Turn wall'], [['1-9'], 'Pick item'], [['V'], 'Start wave'], [['B'], 'Buy'], [['M'], 'Map'],
+];
+const KEYS_FREE = [
+  [['W', 'A', 'S', 'D'], 'Move'], [['Shift'], 'Sprint'], [['L-Click'], 'Attack'], [['R-Click'], 'Throw'], [['Space'], 'Dash'], [['R'], 'Shield'],
+  [['F'], 'Pick up / open'], [['Q'], 'Health'], [['E'], 'Stamina'], [['1-9'], 'Pick item'], [['B'], 'Shop'], [['M'], 'Map'],
+];
+function KeyHints({ waves }) {
+  const [open, setOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cuzy-keyhints');
+      return saved ? saved === 'open' : window.innerHeight >= 820; // a short window starts with it folded
+    } catch {
+      return true;
+    }
+  });
+  const toggle = () => setOpen((o) => {
+    try {
+      localStorage.setItem('cuzy-keyhints', o ? 'closed' : 'open');
+    } catch {
+      /* private window */
+    }
+    return !o;
+  });
+  return (
+    <div className={`key-hints panel small ${open ? '' : 'folded'}`}>
+      <button type="button" className="key-hints-head" onClick={toggle} aria-expanded={open}>⌨️ Controls <span>{open ? '▴' : '▾'}</span></button>
+      {open && (
+        <ul>
+          {(waves ? KEYS_WAVES : KEYS_FREE).map(([keys, what]) => (
+            <li key={what}>
+              <span className="kh-keys">{keys.map((k) => <kbd key={k}>{k}</kbd>)}</span>
+              <span className="kh-what">{what}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // 3:07 (or 1:03:07) for the Endless clock
 function formatSurvived(secs) {
   const s = Math.max(0, Math.floor(secs || 0));
@@ -62,7 +105,7 @@ function formatSurvived(secs) {
 }
 
 // Top-of-screen status for Wave Defense: which wave, how many monsters, the base's health, the boss
-function WaveHud({ w, difficulty, withRoom, survival }) {
+function WaveHud({ w, difficulty, withRoom, survival, isHost, onStart }) {
   const prep = w.phase === 'prep';
   const [open, setOpen] = useState(() => {
     try {
@@ -89,8 +132,15 @@ function WaveHud({ w, difficulty, withRoom, survival }) {
         <button type="button" className="wave-fold" onClick={toggle} aria-label={open ? 'Fold the wave panel' : 'Open the wave panel'} title={open ? 'Fold' : 'Open'}>{open ? '▴' : '▾'}</button>
       </div>
       <div className="wave-sub">
-        {prep ? <>{w.endless ? 'The zombies come in' : 'Next wave in'} <b>{Math.ceil(w.timer)}s</b> · build and prepare!</> : w.endless ? <><b>{w.left}</b> zombies around · batch <b>{Math.max(1, w.wave)}</b></> : <><b>{w.left}</b> monsters left</>}
+        {prep && !w.endless && w.startMode === 'vote' ? <>🗳️ Vote to start the next wave: <b>{w.votes}/{w.votesNeeded}</b></>
+          : prep && !w.endless && w.startMode === 'manual' ? <>{isHost ? 'Build and prepare, then start the wave' : 'Waiting for the host to start the wave'}</>
+          : prep ? <>{w.endless ? 'The zombies come in' : 'Next wave in'} <b>{Math.ceil(w.timer)}s</b> · build and prepare!</> : w.endless ? <><b>{w.left}</b> zombies around · batch <b>{Math.max(1, w.wave)}</b></> : <><b>{w.left}</b> monsters left</>}
       </div>
+      {prep && !w.endless && (w.startMode === 'vote' || (w.startMode === 'manual' && isHost)) && (
+        <button type="button" className="btn go small-btn wave-start" onClick={onStart}>
+          {w.startMode === 'vote' ? (w.voted ? '✓ Voted (take it back)' : '🗳️ Vote to start') : '▶ Start the wave'} <kbd>V</kbd>
+        </button>
+      )}
       {open && prep && w.coming && (
         <div className="wave-forecast">
           <div className="wave-forecast-h">Wave {w.wave + 1} brings {w.coming.reduce((n, [, c]) => n + c, 0)}:</div>
@@ -160,7 +210,7 @@ function Stats({ s, upg }) {
   return (
     <div className="hud-stats">
       {cell('🗡️', 'Melee damage per swing', s.melee.toFixed(1), u.melee > 0)}
-      {cell(s.skill === 'spiral' ? '🌀' : '💨', s.skill === 'spiral' ? 'Spiral: radius in tiles, and its damage at full charge' : 'Dash: distance in tiles at full charge, and its damage', s.skillText, s.skill === 'spiral' ? u.spinrad > 0 || u.spindmg > 0 : u.dash > 0 || u.dashdmg > 0)}
+      {cell(s.skill === 'grapple' ? '🪝' : '💨', s.skill === 'grapple' ? 'Grapple hook: how far it reaches at full charge' : 'Dash: distance in tiles at full charge, and its damage', s.skillText, s.skill === 'grapple' ? u.grange > 0 : u.dash > 0 || u.dashdmg > 0)}
       {cell('💥', 'Bonus damage on every throw', `+${s.throwBonus.toFixed(1)}`, u.throw > 0)}
       {cell('🎯', 'Seconds between throws', `${s.throwCd.toFixed(2)}s`, u.rapid > 0)}
     </div>
@@ -223,7 +273,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     gameRef.current.touchMode = mobile;
     if (!mobile) gameRef.current.setTouchMove(0, 0);
   }, [mobile]);
-  const [solo, setSolo] = useState(() => ({ allowMelee: true, allowThrow: true, target: 10, cheats: true })); // the rules of a game against computer rivals
+  const [solo, setSolo] = useState(() => ({ allowMelee: true, allowThrow: true, target: 10, cheats: true, waveStart: 'timer' })); // the rules of a game against computer rivals
   const [onlineOpen, setOnlineOpen] = useState(false); // the "players online" list
   const [onlineCount, setOnlineCount] = useState(() => net.online?.length || 0);
   const [muted, setMuted] = useState(sfx.muted);
@@ -373,8 +423,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     if (training) {
       game.cheats = true; // (God mode starts off, so lava, monsters and grenades can actually hurt you; switch it on in the training panel)
     }
-    game.frozen = introRef.current === 'play' || introRef.current === 'wait';
+    game.frozen = introRef.current === 'wait';
     game.start();
+    // the story plays out on the real map: the hero walks to the door by itself (a resumed game has no story: straight in)
+    if (introRef.current === 'play' && !game.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0);
     };
     // a V2 world draws sprites from the Modern Exteriors atlases: they are loaded before the game begins
     if (isV2Seed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
@@ -428,7 +480,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     const g = gameRef.current;
     if (g) {
       const wasFrozen = g.frozen;
-      g.frozen = intro === 'play' || intro === 'wait';
+      g.frozen = intro === 'wait';
+      if (intro !== 'play') g.endCutscene();
       // the room's day clock starts when the scene ends, together for everyone
       if (wasFrozen && !g.frozen && g.mp) g.mp.clockAt = performance.now();
     }
@@ -464,6 +517,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const pauseRef = useRef(togglePause);
   pauseRef.current = togglePause;
 
+  const finishIntroRef = useRef(null);
   const finishIntro = () => {
     if (session) {
       net.send({ t: 'ready' });
@@ -472,6 +526,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       setIntro('out');
     }
   };
+  finishIntroRef.current = finishIntro;
 
   useEffect(() => {
     if (gameRef.current) gameRef.current.paused = paused || mapOpen || guideOpen || upgOpen || storeOpen || !!qty || onlineOpen || aboutOpen;
@@ -581,7 +636,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const hints = chatOpen && cheatsOn && (chatText === '' || chatText.startsWith('-')) ? COMMANDS.filter((c) => `-${c.name}`.startsWith(typed) || chatText === '') : [];
 
   return (
-    <div className={`game ${mobile ? 'mobile' : ''}`}>
+    <div className={`game ${mobile ? 'mobile' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
       <div className="game-canvas">
         <canvas ref={canvasRef} />
       </div>
@@ -589,10 +644,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
 
       {session && (
         <RoomPanel
-          room={session.room}
+          room={live || session.room}
           peers={peers}
           myId={session.you}
           lan={net.lan}
+          onVisit={(id) => gameRef.current?.visitPlayer(id)}
         />
       )}
       <div className={`hud chat-log ${chatOpen ? 'open' : ''}`}>
@@ -742,6 +798,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu <kbd>Esc</kbd></button>
           </>
         )}
+        {!mobile && <KeyHints waves={waves} />}
       </div>
 
       <div className={`hud stamina ${hud.exhausted ? 'tired' : ''} ${hud.stamina < 0.995 ? 'show' : ''}`}>
@@ -815,16 +872,16 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       </div>
       <div className="hud skills right">
         <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? (waves ? 'Press Space (hold it to charge) to dash' : 'Press Space (hold it to charge) or hold left click, then release, to use your sword skill') : 'Sword skill: Dash unlocks at level 6, Spiral Sword at level 8'}>
-          <span className="skill-icon">{hud.activeSkill === 'spiral' ? '🌀' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
+          <span className="skill-icon">{hud.activeSkill === 'grapple' ? '🪝' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? (waves ? 'hold click' : 'Space') : 'locked'}</small>
-          <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'spiral' ? 1.4 : 1.2)) * 100)}%` }} />
+          <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'grapple' ? 1.5 : 1.2)) * 100)}%` }} />
         </div>
       </div>
       {waves && (
         <div className={`hud throw-meter ${survival ? (hud.reloading ? 'locked' : '') : hud.tLocked ? 'locked' : ''}`}>
-          <span>{survival ? (hud.reloading ? '🔄 Reloading…' : `${GUNS[hud.gun]?.icon || '🔫'} ${hud.ammo ?? 0} / ${GUNS[hud.gun]?.mag || 12}`) : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
+          <span>{survival ? (hud.reloading ? '🔄 Reloading…' : `${GUNS[hud.gun]?.icon || '🔫'} ${hud.ammo ?? 0} / ${hud.gunMag || GUNS[hud.gun]?.mag || 12}`) : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
           <div className="throw-track">
-            <div className="throw-fill" style={{ width: `${survival ? (hud.reloading ? hud.reload : (hud.ammo ?? 0) / (GUNS[hud.gun]?.mag || 12)) * 100 : hud.tEnergy * 100}%` }} />
+            <div className="throw-fill" style={{ width: `${survival ? (hud.reloading ? hud.reload : (hud.ammo ?? 0) / (hud.gunMag || GUNS[hud.gun]?.mag || 12)) * 100 : hud.tEnergy * 100}%` }} />
           </div>
         </div>
       )}
@@ -837,7 +894,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <small>Day {hud.day}</small>
       </div>
       {waves && hud.wave && <ShelterBar w={hud.wave} survival={survival} withRoom={!!session} />}
-      {waves && hud.wave && <WaveHud w={hud.wave} difficulty={live?.difficulty || difficulty} withRoom={!!session} survival={survival} />}
+      {waves && hud.wave && <WaveHud w={hud.wave} difficulty={live?.difficulty || difficulty} withRoom={!!session} survival={survival} isHost={session ? isHost : true} onStart={() => gameRef.current?.pressStartWave()} />}
       {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && (
         <EndingScene
           kind={hud.wave.phase}
@@ -949,7 +1006,15 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <section className="settings-panel">
               <div className="set-grid">
                 <Switch label="Allow cheats?" hint="Chat commands like -gold 100 or -level 5 (press Enter for the list)" on={solo.cheats} onChange={(v) => { setSolo((s) => ({ ...s, cheats: v })); if (gameRef.current) gameRef.current.cheats = v; }} />
-                {mode === 'free' && <Switch label="Allow melee" hint="Sword, dash and spiral" on={solo.allowMelee} onChange={(v) => { setSolo((s) => ({ ...s, allowMelee: v })); if (gameRef.current) gameRef.current.rules = { ...gameRef.current.rules, melee: v }; }} />}
+                {waves && (
+                  <div className="set-row">
+                    <div className="set-label"><b>Next wave</b><small>{WAVE_START.find(([id]) => id === solo.waveStart)?.[2]}</small></div>
+                    <select value={solo.waveStart} onChange={(e) => { const v = e.target.value; setSolo((s) => ({ ...s, waveStart: v })); gameRef.current?.wave?.setStartMode(v); }}>
+                      {WAVE_START.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                    </select>
+                  </div>
+                )}
+                {mode === 'free' && <Switch label="Allow melee" hint="Sword, axe, dash" on={solo.allowMelee} onChange={(v) => { setSolo((s) => ({ ...s, allowMelee: v })); if (gameRef.current) gameRef.current.rules = { ...gameRef.current.rules, melee: v }; }} />}
                 {mode === 'free' && <Switch label="Allow throwing" hint="Right-click throws" on={solo.allowThrow} onChange={(v) => { setSolo((s) => ({ ...s, allowThrow: v })); if (gameRef.current) gameRef.current.rules = { ...gameRef.current.rules, throw: v }; }} />}
                 {!!profile.bots && (
                   <div className="set-row wide">

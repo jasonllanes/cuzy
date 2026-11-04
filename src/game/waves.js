@@ -86,6 +86,8 @@ export class WaveSim {
     this.lightLevel = 0; // the shelter's lamps (Survival): one level for the whole team
     this.endless = !!game.world.endless; // Endless Survival: no waves, the zombies just keep coming
     this.elapsed = 0; // seconds of the round so far
+    this.startMode = 'timer'; // what starts the next wave: timer | vote | manual (the host) | instant (as soon as the last zombie falls)
+    this.votes = new Set(); // who voted to start the next wave
     this.nextId = 1;
     this.wave = 0;
     this.phase = 'prep'; // prep | fight | victory | defeat
@@ -137,6 +139,10 @@ export class WaveSim {
       total: this.endless ? Infinity : TOTAL_WAVES,
       endless: this.endless,
       elapsed: Math.floor(this.elapsed),
+      startMode: this.endless ? 'timer' : this.startMode,
+      votes: this.votes.size,
+      votesNeeded: this.votesNeeded(),
+      voted: this.votes.has(this.g.mp?.you ?? 0),
       phase: this.phase,
       timer: Math.max(0, this.timer),
       left: alive,
@@ -163,7 +169,7 @@ export class WaveSim {
   forecast(queued, waveTotal, queuedBy) {
     const nextWave = this.wave + 1;
     return {
-      coming: this.phase === 'prep' && nextWave <= TOTAL_WAVES && !this.endless ? waveCounts(nextWave, this.diff, this.theme) : null,
+      coming: this.phase === 'prep' && nextWave <= TOTAL_WAVES && !this.endless ? waveCounts(nextWave, this.diff, this.theme, this.g.waveTargets().length) : null,
       queued,
       waveTotal,
       queuedBy: this.phase === 'fight' ? queuedBy : null,
@@ -224,8 +230,14 @@ export class WaveSim {
 
   updateFlow(dt) {
     if (this.phase === 'prep') {
-      this.timer -= dt;
-      if (this.timer <= 0) this.startWave();
+      const mode = this.endless ? 'timer' : this.startMode;
+      if (mode === 'vote') {
+        // more than half of the people in the room have to agree (alone: you decide)
+        if (this.votes.size >= this.votesNeeded()) this.startWave();
+      } else if (mode !== 'manual') {
+        this.timer -= dt;
+        if (this.timer <= 0) this.startWave();
+      }
       return;
     }
     // fight: trickle monsters in, then wait for the last one to fall
@@ -244,7 +256,9 @@ export class WaveSim {
 
   startWave() {
     this.wave++;
-    this.queue = this.endless ? endlessList(this.wave, this.diff) : waveList(this.wave, this.diff, this.theme);
+    const players = this.g.waveTargets().length; // (the Colossus bosses are scaled to the size of the team)
+    this.queue = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players);
+    this.votes.clear();
     this.waveTotal = this.queue.length;
     if (this.endless && this.wave > 1) {
       // every new batch, the builders patch things up a little
@@ -275,7 +289,7 @@ export class WaveSim {
       return;
     }
     this.phase = 'prep';
-    this.timer = this.theme === 'apoc' ? PREP_BETWEEN_APOC : PREP_BETWEEN;
+    this.timer = this.startMode === 'instant' ? 2 : this.theme === 'apoc' ? PREP_BETWEEN_APOC : PREP_BETWEEN;
     // the builders patch things up between waves
     for (const b of this.barricades) b.hp = Math.min(b.max, b.hp + b.max * 0.35);
     this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.1);
@@ -301,12 +315,13 @@ export class WaveSim {
   spawnMonster(type, angle = null, extra = false) {
     const def = MONSTERS[type];
     const flyer = def.kind === 'fly' || def.fly;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 30; i++) {
       const ang = angle ?? Math.random() * Math.PI * 2;
-      const r = 210 + Math.random() * 50;
+      const r = 210 + Math.random() * 50 + (i > 14 ? (i - 14) * 6 : 0); // (a little further out each time it is turned down)
       const x = this.center.x + Math.cos(ang) * r;
       const y = this.center.y + Math.sin(ang) * r;
       if (!flyer && this.world.isBlocked(x - 4, y - 3, 8, 3)) continue;
+      if (this.g.seenFrom(x, y)) continue; // zombies come in from outside the screen, never on it
       // in Survival every wave is a little tougher and quicker than the last
       const apoc = this.theme === 'apoc';
       const lv = def.boss ? 1 : rollMonsterLevel(this.wave);
@@ -805,9 +820,35 @@ export class WaveSim {
     });
   }
 
+  // ---------- starting the next wave ----------
+
+  setStartMode(mode) {
+    if (['timer', 'vote', 'manual', 'instant'].includes(mode)) this.startMode = mode;
+  }
+
+  votesNeeded() {
+    return Math.floor(this.g.waveTargets().length / 2) + 1;
+  }
+
+  // The V key (or the Start button). Vote: it toggles your vote. Manual: the host starts the wave. Returns what happened.
+  pressStart(id) {
+    if (this.phase !== 'prep' || this.endless) return null;
+    if (this.startMode === 'vote') {
+      if (this.votes.has(id)) this.votes.delete(id);
+      else this.votes.add(id);
+      return 'voted';
+    }
+    if (this.startMode === 'manual' && id === (this.g.mp?.you ?? 0) && (!this.g.mp || this.g.hostId === this.g.mp.you)) {
+      this.startWave();
+      return 'started';
+    }
+    if (this.startMode === 'manual') return 'host-only';
+    return null;
+  }
+
   // the base can be made tougher by anyone, and everyone benefits
   upgradeBase() {
-    if (this.baseLevel >= MAX_LEVEL) return false;
+    if (this.baseLevel >= MAX_LEVEL && this.theme !== 'apoc') return false; // (Survival's shelter can be upgraded for ever)
     this.baseLevel++;
     const before = this.baseMax;
     this.baseMax = Math.round(this.diff.baseHp * (1 + 0.3 * this.baseLevel));
@@ -826,6 +867,7 @@ export class WaveSim {
     if (k === 'hit') this.hitMonster(d.id, d.dmg, d.fx, d.fy, d.kb, false, from);
     else if (k === 'power') this.power(d.kind, from);
     else if (k === 'light') this.setLight(d.lvl);
+    else if (k === 'vote') this.pressStart(from);
     else if (k === 'repair') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'repair', placed: this.repairAll(), asked: Math.max(0, Math.min(200, Number(d.n) || 0)) } });
     else if (k === 'place') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'place', ok: this.placeBarricade(d.x, d.y, d.v) } });
     else if (k === 'pick') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'pick', ok: this.pickBarricade(d.id) } });
@@ -852,6 +894,9 @@ export class WaveSim {
       bl: this.baseLevel,
       sl: this.lightLevel || 0,
       el: Math.round(this.elapsed),
+      sm: this.startMode,
+      vl: [...this.votes],
+      vn: this.votesNeeded(),
       k: Object.entries(this.kills),
       wk: this.wrecks.map((r) => [r.x, r.y, r.v ? 1 : 0]),
     };
@@ -879,6 +924,9 @@ export class WaveMirror {
     this.lightLevel = 0;
     this.endless = !!game.world.endless;
     this.elapsed = 0;
+    this.startMode = 'timer';
+    this.voteList = [];
+    this.votesNeeded = 1;
     this.wave = 0;
     this.phase = 'prep';
     this.timer = PREP_FIRST;
@@ -893,7 +941,7 @@ export class WaveMirror {
   forecast(queued, waveTotal, queuedBy) {
     const nextWave = this.wave + 1;
     return {
-      coming: this.phase === 'prep' && nextWave <= TOTAL_WAVES && !this.endless ? waveCounts(nextWave, this.diff, this.theme) : null,
+      coming: this.phase === 'prep' && nextWave <= TOTAL_WAVES && !this.endless ? waveCounts(nextWave, this.diff, this.theme, 1 + this.g.remotes.size) : null,
       queued,
       waveTotal,
       queuedBy: this.phase === 'fight' ? queuedBy : null,
@@ -907,6 +955,10 @@ export class WaveMirror {
       total: this.endless ? Infinity : TOTAL_WAVES,
       endless: this.endless,
       elapsed: Math.floor(this.elapsed),
+      startMode: this.endless ? 'timer' : this.startMode,
+      votes: this.voteList.length,
+      votesNeeded: this.votesNeeded,
+      voted: this.voteList.includes(this.g.mp?.you),
       phase: this.phase,
       timer: Math.max(0, this.timer),
       left: this.left,
@@ -971,6 +1023,9 @@ export class WaveMirror {
     this.baseLevel = s.bl || 0;
     this.lightLevel = s.sl || 0;
     this.elapsed = s.el || 0;
+    this.startMode = s.sm || 'timer';
+    this.voteList = s.vl || [];
+    this.votesNeeded = s.vn || 1;
     this.kills = Object.fromEntries(s.k || []);
     this.wrecks = (s.wk || []).map(([x, y, v]) => ({ x, y, v: !!v }));
     this.syncRects();
@@ -994,6 +1049,20 @@ export class WaveMirror {
 
   setDifficulty(id) {
     if (DIFFICULTY[id]) this.diff = DIFFICULTY[id];
+  }
+
+  setStartMode(mode) {
+    if (['timer', 'vote', 'manual', 'instant'].includes(mode)) this.startMode = mode; // (the host's sim is the one that acts on it)
+  }
+
+  // V: vote for the next wave (the host decides when it is "manual")
+  pressStart() {
+    if (this.phase !== 'prep' || this.endless) return null;
+    if (this.startMode === 'vote') {
+      this.g.mp?.net.send({ t: 'w', to: 'host', k: 'vote', d: {} });
+      return 'voted';
+    }
+    return this.startMode === 'manual' ? 'host-only' : null;
   }
 
   // a level of the shelter's lamps bought here: tell the host once, and it tells everyone

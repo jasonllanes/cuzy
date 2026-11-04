@@ -13,13 +13,13 @@ export const SURVIVAL_MAPS = [
   { id: 'depot', icon: '🏭', name: 'Cargo Depot', blurb: 'Indoors: a huge warehouse floor packed with crates, containers and wrecks.', ground: 'concrete', trees: null, climate: 'none', indoor: true },
   // the island maps: the same ruined world, on the Free Roam tilesets (water, or lava, where there is no ground)
   { id: 'tidal', icon: '🌊', name: 'Tidal Isles', blurb: 'Survive on brown islands in glittering teal water.', ground: 'bg', trees: null, climate: 'wet', tileset: 'tidal' },
-  { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Lush flowered islands ringed by earthen cliffs and deep sea.', ground: 'bg', trees: null, climate: 'mild', tileset: 'emerald' },
-  { id: 'crystal', icon: '💎', name: 'Crystal Lakes', blurb: 'Dirt fields around glimmering crystal-blue lakes.', ground: 'bg', trees: null, climate: 'mild', tileset: 'crystal' },
+  { id: 'emerald', icon: '🌴', name: 'Emerald Isles', blurb: 'Daylight survival: lush flowered islands ringed by earthen cliffs and deep sea, under the sun.', ground: 'bg', trees: null, climate: 'mild', tileset: 'emerald', day: true },
+  { id: 'crystal', icon: '💎', name: 'Crystal Lakes', blurb: 'Daylight survival: dirt fields around glimmering crystal-blue lakes, in the bright of day.', ground: 'bg', trees: null, climate: 'mild', tileset: 'crystal', day: true },
   { id: 'marsh', icon: '🐸', name: 'Mossy Marsh', blurb: 'Murky green ponds and mushy banks. It rains a lot.', ground: 'bg', trees: null, climate: 'wet', tileset: 'marsh' },
   { id: 'lava', icon: '🌋', name: 'Magma Fields', blurb: 'Cracked stone between rivers of lava. Wade in and it burns you.', ground: 'bg', trees: null, climate: 'dry', tileset: 'lava' },
-  { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Golden sand and glowing turquoise sea.', ground: 'bg', trees: null, climate: 'dry', tileset: 'beach' },
+  { id: 'beach', icon: '🏖️', name: 'Sunny Shores', blurb: 'Daylight survival: golden sand and glowing turquoise sea, bright and hot.', ground: 'bg', trees: null, climate: 'dry', tileset: 'beach', day: true },
   { id: 'asphalt', icon: '🛣️', name: 'Cracked Roads', blurb: 'Cracked asphalt roads winding through a dark wasteland.', ground: 'bg', trees: null, climate: 'mild', tileset: 'asphalt' },
-  { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Green meadows crossed by old rock roads.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain' },
+  { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Sunny meadows crossed by old rock roads, until a Colossus shows up: then the sky goes black and thunder rolls.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain', bossStorm: true },
   { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'Survive on an endless wooden floor of pale and dark boards.', ground: 'bg', trees: null, climate: 'mild', tileset: 'wood' },
   { id: 'mixed', icon: '🌍', name: 'Open World', blurb: 'Every biome in one endless world: islands, lakes, marsh, lava, beach, roads and mountains, each with its own monsters.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
   // Halloween: graveyards, pumpkin patches and dead trees from the Graveyard pack, under a purple dusk

@@ -106,7 +106,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
 
         {tab === 'skills' && (
           <div>
-            <p className="hint">Skills unlock with your level (Dash 6, Spiral 8, Shield 10, Invisibility 15). Equip one sword skill (Space) and one utility skill (R), and upgrade them here.</p>
+            <p className="hint">Skills unlock with your level (Dash 6, Grapple Hook 8, Shield 10, Invisibility 15). Equip one sword skill (Space) and one utility skill (R), and upgrade them here. The whirlwind spin is on the axes.</p>
             <div className="upg-list skill-grid">
               {SKILL_SHOP.map((s) => {
                 const have = !!skills[s.id];

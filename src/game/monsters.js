@@ -89,7 +89,7 @@ export const WAVES_APOC = [
 
 // Endless Survival: no waves to wait for. Zombies keep coming in batches (a "stage" is only how hard the batch is), and every
 // stage is a little harder than the last, for as long as the shelter stands. A Colossus turns up every 5th stage.
-export function endlessList(stage, diff) {
+export function endlessList(stage, diff, players = 1) {
   const table = WAVES_APOC[Math.min(stage, 10) - 1];
   const grow = stage > 10 ? 1 + 0.12 * (stage - 10) : 1;
   const list = [];
@@ -97,7 +97,7 @@ export function endlessList(stage, diff) {
     const count = Math.max(1, Math.round(n * diff.count * 0.55 * grow));
     for (let i = 0; i < count; i++) list.push(type);
   }
-  for (let i = 0; i < endlessBosses(stage, diff); i++) list.push('z_boss');
+  for (let i = 0; i < endlessBosses(stage, diff, players); i++) list.push('z_boss');
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [list[i], list[j]] = [list[j], list[i]];
@@ -105,10 +105,15 @@ export function endlessList(stage, diff) {
   return list;
 }
 
-export const endlessBosses = (stage, diff) => (stage % 5 === 0 ? (stage % 10 === 0 ? diff.boss10 : diff.boss5) + Math.floor(stage / 20) : 0);
+export const endlessBosses = (stage, diff, players = 1) => (stage % 5 === 0 ? Math.max(1, Math.round(((stage % 10 === 0 ? diff.boss10 : diff.boss5) + Math.floor(stage / 20)) * bossScale(players))) : 0);
 
 // Survival's Colossus bosses come on wave 5 and wave 10, and how many depends on the difficulty
-export const bossesFor = (wave, diff) => (wave === 5 ? diff.boss5 : wave === 10 ? diff.boss10 : 0) || 0;
+// ...scaled by how many people are defending: alone you face half (but never fewer than one), with three it is the full number, and a bigger team meets more
+export const bossScale = (players = 1) => Math.min(1.5, 0.5 + 0.25 * (Math.max(1, players) - 1));
+export const bossesFor = (wave, diff, players = 1) => {
+  const base = (wave === 5 ? diff.boss5 : wave === 10 ? diff.boss10 : 0) || 0;
+  return base ? Math.max(1, Math.round(base * bossScale(players))) : 0;
+};
 
 export const DIFFICULTY = {
   easy: { name: 'Easy', blurb: 'Fewer, softer monsters and a sturdy base.', boss5: 1, boss10: 2, hp: 0.8, count: 0.7, dmg: 0.7, baseHp: 120, barricadeHp: 30, heal: 0.4 },
@@ -119,20 +124,20 @@ export const DIFFICULTY = {
 export const DIFFICULTY_IDS = Object.keys(DIFFICULTY);
 
 // How many of each type a wave brings, as [[type, count], ...] (the same numbers waveList deals out)
-export function waveCounts(wave, diff, theme = 'cozy') {
+export function waveCounts(wave, diff, theme = 'cozy', players = 1) {
   const table = (theme === 'apoc' ? WAVES_APOC : WAVES)[wave - 1] || [];
   const out = table.map(([type, n]) => [type, Math.max(1, Math.round(n * diff.count))]);
-  const bosses = theme === 'apoc' ? bossesFor(wave, diff) : 0;
+  const bosses = theme === 'apoc' ? bossesFor(wave, diff, players) : 0;
   return bosses ? [['z_boss', bosses], ...out] : out;
 }
 
-export function waveList(wave, diff, theme = 'cozy') {
+export function waveList(wave, diff, theme = 'cozy', players = 1) {
   const list = [];
   for (const [type, n] of (theme === 'apoc' ? WAVES_APOC : WAVES)[wave - 1]) {
     const count = Math.max(1, Math.round(n * diff.count)); // never fewer than one, so bosses always show up
     for (let i = 0; i < count; i++) list.push(type);
   }
-  if (theme === 'apoc') for (let i = 0; i < bossesFor(wave, diff); i++) list.push('z_boss');
+  if (theme === 'apoc') for (let i = 0; i < bossesFor(wave, diff, players); i++) list.push('z_boss');
   // shuffle so the strong ones are mixed in with the weak
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));

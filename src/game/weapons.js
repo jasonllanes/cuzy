@@ -30,16 +30,21 @@ export const EFFECTS = {
   scatter: { name: 'Scatter shot', desc: 'Hold left click and release to fire a fan of five stones like a shotgun (hold longer for more reach). Brutal up close. A tap bashes.' },
   pierce: { name: 'Piercing stone', desc: 'Hold left click and release to fire a stone that punches through up to four enemies (hold longer for more reach). A tap bashes.' },
   rapid: { name: 'Quick draw', desc: 'Hold left click and release to fire fast, small stones (hold longer for more reach). A tap bashes.' },
+  // axes: heavy chops, and the whirlwind (the spiral spin) on a held left click
+  whirl: { name: 'Whirlwind', desc: 'A heavy chop on a tap. Hold left click and let go to spin: the blade sweeps a full circle around you (the ring shows how far it reaches).' },
+  // fans
+  glide: { name: 'Glider', desc: 'A quick flick on a tap. Hold left click and let go to open the fan and throw it: it glides out in a curve, slicing everything on the way, and sweeps back round to you.' },
   // tridents
   skewer: { name: 'Skewer', desc: 'Tap left click to slash. Hold left click and let go to hurl it: the longer you hold, the farther it flies. It always comes back.' },
   tide: { name: 'Tidecaller', desc: 'Tap to slash, or hold left click to hurl it far. It slows whatever it hits and returns quickly.' },
 };
 
 // what the weapon does with a left click
-export const KINDS = { sword: 'Sword', staff: 'Staff', sling: 'Slingshot', trident: 'Trident' };
+export const KINDS = { sword: 'Sword', staff: 'Staff', sling: 'Slingshot', trident: 'Trident', axe: 'Axe', fan: 'Fan' };
 
 // cost: coins   wood: logs to craft it (chop trees)   dmg: extra damage per swing   reach: px   cd: seconds between swings   slash/color: which flash it leaves
 // kind: sword (default), staff (spell: the effect strip it uses), sling (shots: how many stones, spread, pierce) or trident (a tap slashes, a held left click throws).
+// axe: a tap chops, a held left click spins (spin: the radius in px and a damage multiplier). fan: a tap flicks, a held left click throws it on a curve (throw: how far) and it comes back.
 // Right click always throws what is selected in the backpack.
 export const WEAPONS = [
   { id: 'trusty', name: 'Trusty Sword', icon: 1, cost: 0, wood: 0, dmg: 0, reach: 32, cd: 0.42, slash: 1, color: 'g', effect: 'none', tint: '#aeb2bd', blurb: 'The one you started with.' },
@@ -65,6 +70,17 @@ export const WEAPONS = [
   // tridents: slash with left click, hurl with right click
   { id: 'tr_iron', kind: 'trident', name: 'Iron Trident', file: 'x_121', cost: 26, wood: 4, dmg: 0.4, reach: 38, cd: 0.5, slash: 2, color: 1, effect: 'skewer', throw: { min: 50, max: 170, speed: 260 }, tint: '#d49a5a', blurb: 'Three prongs on a long wooden shaft.' },
   { id: 'tr_silver', kind: 'trident', name: 'Silver Trident', file: 'x_117', cost: 44, wood: 6, dmg: 0.9, reach: 40, cd: 0.46, slash: 3, color: 2, effect: 'skewer', throw: { min: 55, max: 200, speed: 290 }, tint: '#cfe3ec', blurb: 'Light as a feather and just as quick.' },
+  // axes: slow, heavy, and a whirlwind of their own (art: the V2 weapon icons)
+  { id: 'ax_iron', kind: 'axe', name: 'Iron Axe', file: 'x_89', cost: 30, wood: 5, dmg: 1.1, reach: 34, cd: 0.56, slash: 2, color: 1, effect: 'whirl', spin: { r: 40, mul: 1 }, tint: '#9fb4c8', blurb: 'Plain, heavy iron. It spins well.' },
+  { id: 'ax_jade', kind: 'axe', name: 'Jade Axe', file: 'x_90', cost: 38, wood: 6, dmg: 1.3, reach: 34, cd: 0.54, slash: 2, color: 1, effect: 'whirl', spin: { r: 43, mul: 1.1 }, tint: '#7fd48f', blurb: 'Green stone, sharp as glass.' },
+  { id: 'ax_bronze', kind: 'axe', name: 'Bronze Battleaxe', file: 'x_94', cost: 48, wood: 8, dmg: 1.7, reach: 36, cd: 0.6, slash: 2, color: 2, effect: 'whirl', spin: { r: 47, mul: 1.25 }, tint: '#d49a5a', blurb: 'Two broad blades: a wide, wide circle.' },
+  { id: 'ax_crimson', kind: 'axe', name: 'Crimson Axe', file: 'x_99', cost: 58, wood: 10, dmg: 2.1, reach: 36, cd: 0.56, slash: 3, color: 2, effect: 'whirl', spin: { r: 50, mul: 1.4 }, tint: '#e8506a', blurb: 'It has been through a lot, and it shows.' },
+  { id: 'ax_frost', kind: 'axe', name: 'Frostwing Axe', file: 'x_101', cost: 70, wood: 12, dmg: 2.6, reach: 38, cd: 0.5, slash: 3, color: 3, effect: 'whirl', spin: { r: 55, mul: 1.6 }, tint: '#8fd6ff', blurb: 'Winged blades that leave a chill behind.' },
+  // fans: light, and thrown like a glider
+  { id: 'fn_ruby', kind: 'fan', name: 'Ruby Fan', file: 'x_109', cost: 30, wood: 5, dmg: 0.5, reach: 30, cd: 0.36, slash: 3, color: 2, effect: 'glide', throw: { min: 70, max: 180 }, tint: '#ff5a5a', blurb: 'Bright red silk on steel ribs.' },
+  { id: 'fn_violet', kind: 'fan', name: 'Violet Fan', file: 'x_110', cost: 40, wood: 6, dmg: 0.8, reach: 30, cd: 0.34, slash: 3, color: 3, effect: 'glide', throw: { min: 80, max: 200 }, tint: '#b78cff', blurb: 'Quiet, quick and a little bit magic.' },
+  { id: 'fn_sun', kind: 'fan', name: 'Sun Fan', file: 'x_113', cost: 52, wood: 8, dmg: 1.1, reach: 32, cd: 0.34, slash: 1, color: 3, effect: 'glide', throw: { min: 90, max: 220 }, tint: '#ffd24a', blurb: 'Golden panels that catch the light.' },
+  { id: 'fn_sapphire', kind: 'fan', name: 'Sapphire Fan', file: 'x_115', cost: 64, wood: 10, dmg: 1.5, reach: 32, cd: 0.32, slash: 3, color: 3, effect: 'glide', throw: { min: 100, max: 240 }, tint: '#4a7bff', blurb: 'The deep blue one, with the longest glide.' },
   { id: 'tr_tide', kind: 'trident', name: 'Tide Trident', file: 'x_125', cost: 60, wood: 8, dmg: 1.4, reach: 42, cd: 0.44, slash: 3, color: 3, effect: 'tide', throw: { min: 60, max: 230, speed: 320 }, tint: '#4fa8ff', blurb: 'It remembers the sea, and brings it back to you.' },
 ];
 

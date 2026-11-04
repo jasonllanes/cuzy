@@ -60,6 +60,7 @@ export function attachRoomServer(httpServer) {
     winBy: r.winBy,
     allowLate: r.allowLate,
     allowCheats: r.allowCheats,
+    allowVisit: r.allowVisit,
     allowThrow: r.allowThrow,
     allowMelee: r.allowMelee,
     streakMonsters: r.streakMonsters,
@@ -88,6 +89,19 @@ export function attachRoomServer(httpServer) {
   const reassignAll = (room) => {
     let i = 0;
     for (const p of everyone(room)) p.team = room.teams ? i++ % room.teams : null;
+  };
+  // the host's "shuffle" button: everybody is dealt out again at random, as evenly as it goes (the extra player lands on a random team)
+  const shuffleTeams = (room) => {
+    if (!room.teams) return;
+    const list = everyone(room);
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    const off = Math.floor(Math.random() * room.teams);
+    list.forEach((p, i) => {
+      p.team = (i + off) % room.teams;
+    });
   };
   // what a win is counted on: your own kills, or your whole team's
   const scoreOf = (room, p) =>
@@ -275,6 +289,7 @@ export function attachRoomServer(httpServer) {
         startMoney: Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0)), // coins everyone starts a round with
         allowLate: m.allowLate !== false, // may people join once the round is under way?
         allowCheats: m.allowCheats === true, // may players type chat commands like -gold 100?
+        allowVisit: m.allowVisit === undefined ? ['waves', 'survival'].includes(m.mode) : m.allowVisit === true, // may players teleport to each other? (on by default in co-op Survival)
         started: false, // a new room waits for its host to press Start
         winning: false,
         t0: Date.now(),
@@ -474,6 +489,7 @@ export function attachRoomServer(httpServer) {
       const free = room.mode === 'free';
       if (typeof m.allowLate === 'boolean') room.allowLate = m.allowLate;
       if (typeof m.allowCheats === 'boolean') room.allowCheats = m.allowCheats;
+      if (typeof m.allowVisit === 'boolean') room.allowVisit = m.allowVisit;
       // these can be changed at any time, even in the middle of a round
       if (typeof m.allowThrow === 'boolean') room.allowThrow = m.allowThrow;
       if (typeof m.allowMelee === 'boolean') room.allowMelee = m.allowMelee;
@@ -500,6 +516,7 @@ export function attachRoomServer(httpServer) {
           reassignAll(room);
         }
         if (room.mode === 'free') {
+          if (m.shuffleTeams === true) shuffleTeams(room);
           if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== room.teams) {
             room.teams = Number(m.teams);
             reassignAll(room);

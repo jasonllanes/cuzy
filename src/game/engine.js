@@ -20,7 +20,7 @@ const tagHeight = (hero) => (hero.kind === 'v2' ? 36 : hero.kind === 'retro' ? 2
 
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
-import { DOOR, ROOM, SPOTS, drawRoom, roomBlocked } from './interior';
+import { DOOR, ROOM, SPOTS, designFor, drawRoom, roomBlocked, spotsOf } from './interior';
 import { WEAPONS, emptyWeapons, sanitizeWeapons, weaponById } from './weapons';
 import { hash2, hashString } from './rng';
 import { renderChunk } from './render';
@@ -45,6 +45,7 @@ const SPEED = 62;
 const SPRINT_MULT = 1.75;
 const RESPAWN_TIME = 5; // seconds spent downed
 export const GRENADE_COST = 8;
+const SURVIVAL_DAY_HOUR = 12; // ...except on the sunny maps
 const SURVIVAL_HOUR = 23; // Survival never leaves the night...
 const DAWN_LEFT = 10; // ...until the last wave is nearly beaten: with this many enemies left the sun starts to rise
 const DAWN_SECONDS = 40; // and it takes this long to come up
@@ -185,6 +186,8 @@ export class Game {
     this.wave = (mode === 'waves' || mode === 'survival') && !demo ? (isHost ? new WaveSim(this, difficulty) : new WaveMirror(this, difficulty)) : null;
     this.hostId = session?.host ?? null;
     this.difficultyId = difficulty;
+    this.wave?.setStartMode(session?.room?.waveStart);
+    this.allowVisit = !!session?.room?.allowVisit; // the room lets players teleport to each other
     this.aiSim = null; // in a fight room the host's game plays the room's computer players
     // in Free Roam rooms every player slot has its own house in a tight cluster
     this.roomHomes = this.mp && mode === 'free' ? world.homeCluster(Math.max(session.room.max || 4, 2), hashString(session.room.code)) : null;
@@ -243,7 +246,8 @@ export class Game {
     const hourParam = Number(new URLSearchParams(window.location.search).get('hour'));
     this.hour = demo ? 10 : Number.isFinite(saved?.hour) ? saved.hour : 8;
     if (!demo && hourParam > 0) this.hour = hourParam;
-    else if (this.wave && this.theme === 'apoc') this.hour = SURVIVAL_HOUR; // Survival is always night
+    else if (this.wave && this.theme === 'apoc') this.hour = world.mapInfo?.day || world.mapInfo?.bossStorm ? SURVIVAL_DAY_HOUR : SURVIVAL_HOUR; // Survival is night (the sunny maps start in daylight)
+    this.nightK = world.apoc && !world.mapInfo?.day && !world.mapInfo?.bossStorm ? 1 : 0; // how dark Survival is right now: 1 at night, 0 in daylight (a storm map goes dark when a boss is out)
     this.day = saved?.day || 1;
     this.inventory = sanitize(saved?.inventory);
     // coins live in a purse, not in the backpack (older saves had them as items: move them over)
@@ -296,7 +300,7 @@ export class Game {
     }
     this.absorbConsumables(); // (older saves kept them in the backpack)
     // skills are bought once in the shop; Dash and Spiral are the two hold-to-charge sword skills, one equipped at a time
-    this.skills = { shield: false, invis: false, dash: false, spiral: false, equipped: 'dash', equippedUtil: null, ...saved?.skills };
+    this.skills = { shield: false, invis: false, dash: false, grapple: false, equipped: 'dash', equippedUtil: null, ...saved?.skills };
     this.syncSkills();
     this.combat?.refreshMaxHp(true);
     this.treasures = saved?.treasures || 0;
@@ -305,7 +309,7 @@ export class Game {
     this.prompt = null;
 
     this.onKeyDown = (e) => {
-      if (this.frozen) return;
+      if (this.frozen || this.cutscene) return;
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
       // a HUD button that kept focus after a click would otherwise react to Space/Enter
@@ -337,6 +341,8 @@ export class Game {
         this.combat?.activateUtil(); // your Shield (in Survival always), or Invisibility in Free Roam
       } else if (e.code === 'KeyT' && !e.repeat && this.wave) {
         this.rotateWall(1); // turn the barricade you are about to place
+      } else if (e.code === 'KeyV' && !e.repeat && this.wave) {
+        this.pressStartWave(); // vote for (or, as the host, start) the next wave
       }
     };
     this.onKeyUp = (e) => {
@@ -370,7 +376,7 @@ export class Game {
     };
     this.onMouseDown = (e) => {
       if (this.touchMode) return; // taps are for the on-screen buttons
-      if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || (e.button !== 0 && e.button !== 2)) return;
+      if (e.target !== this.canvas || this.paused || this.celeb || this.frozen || this.cutscene || (e.button !== 0 && e.button !== 2)) return;
       this.onMouseMove(e);
       this.mouseHeld[e.button] = true;
       if (e.button === 0 && !this.dead) {
@@ -400,6 +406,89 @@ export class Game {
     const resumed = !session && saved && Number.isFinite(saved.x);
     for (const d of saved?.houseDrops || []) if (ITEMS[d.id] && this.combat) this.combat.drops.push({ x: d.x, y: d.y, id: d.id, qty: d.qty, age: 1, ins: true, burst: true });
     if (!tp && !training && this.canHaveInterior() && (saved?.inside || !resumed)) this.enterHouse(true); // (the training ground starts outside, so you can see the map)
+    this.resumed = !!resumed;
+    this.cutscene = null; // the opening story: your hero walks to the door on its own (see startCutscene)
+  }
+
+  // ---------- the opening story ----------
+
+  // A new game opens on the real map: the hero starts a little way off and walks to the house (Free Roam: in through the front door,
+  // into the room) or to the shelter (Survival) by itself while the story is told. Returns false when there is nothing to show
+  // (a game that is being resumed, for one).
+  startCutscene() {
+    if (this.demo || this.cutscene || this.dead || this.resumed) return false;
+    const p = this.player;
+    const apoc = this.world.apoc;
+    if (this.inside) this.exitHouse(true);
+    const door = apoc ? { x: p.x, y: p.y } : { x: this.home.x, y: this.home.y };
+    // somewhere south of the door, from where a straight walk to it crosses no water, tree or wall
+    const clear = (x, y) => this.world.type(Math.floor(x / T), Math.floor((y - 2) / T)) !== WATER && !this.blocked(x, y);
+    let stage = null;
+    for (const dist of [190, 160, 220, 130, 100]) {
+      for (const deg of [90, 75, 105, 60, 120, 45, 135, 30, 150, 0, 180]) {
+        const x = door.x + Math.cos((deg * Math.PI) / 180) * dist;
+        const y = door.y + Math.sin((deg * Math.PI) / 180) * dist;
+        let ok = clear(x, y);
+        for (let k = 1; k < 18 && ok; k++) {
+          const f = k / 18;
+          if (dist * (1 - f) > 26) ok = clear(x + (door.x - x) * f, y + (door.y - y) * f);
+        }
+        if (ok) {
+          stage = { x, y };
+          break;
+        }
+      }
+      if (stage) break;
+    }
+    if (!stage) return false;
+    p.x = stage.x;
+    p.y = stage.y;
+    p.dir = 'up';
+    p.moving = false;
+    this.cam.x = p.x;
+    this.cam.y = p.y;
+    this.cutscene = { door, apoc, t: 0, hold: this.wave ? Math.max(this.wave.timer, 25) : 0, arrived: false };
+    this.keys.clear();
+    return true;
+  }
+
+  // the story is over (or skipped): you are inside your house in Free Roam, at the shelter's door in Survival, and the controls are yours
+  endCutscene() {
+    const c = this.cutscene;
+    if (!c) return;
+    this.cutscene = null;
+    this.keys.clear();
+    if (!c.apoc && !this.inside && this.canHaveInterior()) this.enterHouse(true);
+  }
+
+  driveCutscene(dt) {
+    const c = this.cutscene;
+    const p = this.player;
+    c.t += dt;
+    this.keys.clear();
+    this.combat.invuln = Math.max(this.combat.invuln, 0.5);
+    if (this.wave && this.wave.phase === 'prep') this.wave.timer = Math.max(this.wave.timer, c.hold); // the first wave waits for the story
+    if (this.fade || this.dead) return;
+    let tx;
+    let ty;
+    if (this.inside) {
+      tx = ROOM.w / 2;
+      ty = ROOM.h / 2 + 30;
+    } else {
+      tx = c.door.x;
+      ty = c.apoc ? c.door.y : c.door.y - 14; // (walking on through the door is what takes you in)
+    }
+    const dx = tx - p.x;
+    const dy = ty - p.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      if (Math.abs(dx) > 3) this.keys.add(dx > 0 ? 'right' : 'left');
+      if (Math.abs(dy) > 3) this.keys.add(dy > 0 ? 'down' : 'up');
+    } else if (this.inside) p.dir = 'down';
+    else if (c.apoc && !c.arrived) {
+      c.arrived = true;
+      p.dir = 'up';
+    }
+    if (!c.apoc && !this.inside && c.t > 16) this.enterHouse(); // (stuck on something on the way: in you go anyway)
   }
 
   start() {
@@ -488,7 +577,10 @@ export class Game {
     if (session && sites.length) {
       // the room gets a tight little cluster of houses, one for each player slot
       const group = this.world.homeCluster(Math.max(session.room.max || 4, 2), hashString(session.room.code));
-      return this.world.homePoint(group[Math.min(session.slot || 0, group.length - 1)]);
+      // in a team game each team has one camp (a house) that all of them go into; otherwise every slot has its own house
+      const team = session.room.teams > 0 ? session.teams?.[session.you] : undefined;
+      const i = team !== undefined && team !== null ? team : session.slot || 0;
+      return this.world.homePoint(group[Math.min(i, group.length - 1)]);
     }
     if (!session && saved?.home && Number.isFinite(saved.home.x)) return saved.home;
     return this.pickRandomHome();
@@ -537,7 +629,7 @@ export class Game {
     this.emitStorage();
     this.supplies = { hp: 0, stam: 0 };
     this.consumables = {};
-    this.skills = { shield: false, invis: false, dash: false, spiral: false, equipped: 'dash', equippedUtil: null };
+    this.skills = { shield: false, invis: false, dash: false, grapple: false, equipped: 'dash', equippedUtil: null };
     this.world.felled.clear(); // the trees you cut down grow back
     this.world.regrow.clear();
     this.world.treeHp.clear();
@@ -734,7 +826,7 @@ export class Game {
     }
   }
 
-  // Skills come with the character level (Dash 6, Spiral 8, Shield 10, Invisibility 15). `relock` also takes back the ones above your level.
+  // Skills come with the character level (Dash 6, Grapple 8, Shield 10, Invisibility 15). `relock` also takes back the ones above your level.
   syncSkills(announce = false, relock = false) {
     const unlocked = [];
     if (this.wave) return unlocked;
@@ -1398,9 +1490,9 @@ export class Game {
   activeSkill() {
     if (this.wave) return 'dash';
     const s = this.skills;
-    if (s.equipped === 'spiral' && s.spiral) return 'spiral';
+    if (s.equipped === 'grapple' && s.grapple) return 'grapple';
     if (s.equipped === 'dash' && s.dash) return 'dash';
-    return s.dash ? 'dash' : s.spiral ? 'spiral' : null;
+    return s.dash ? 'dash' : s.grapple ? 'grapple' : null; // (the spiral now belongs to the axes)
   }
 
   // The id of the house you live in (it is the only one you can walk into)
@@ -1422,7 +1514,7 @@ export class Game {
     return {
       melee: c.meleeDmg(),
       skill,
-      skillText: skill === 'spiral' ? `r${(c.spinRadius() / 16).toFixed(1)}t · ${c.spinDmg(1).toFixed(1)}` : skill === 'dash' ? `${(c.dashDist(1) / 16).toFixed(1)}t · ${c.dashDmg(1).toFixed(1)}` : 'none',
+      skillText: skill === 'grapple' ? `${(c.grappleRange(1) / 16).toFixed(1)}t hook` : skill === 'dash' ? `${(c.dashDist(1) / 16).toFixed(1)}t · ${c.dashDmg(1).toFixed(1)}` : 'none',
       dashTiles: c.dashDist(1) / 16,
       dashDmg: c.dashDmg(1),
       throwBonus: c.throwBonus(),
@@ -1685,6 +1777,7 @@ export class Game {
       const g = GUNS[id];
       if (!g || id === 'pistol' || !c.owned[id]) return;
       c.owned[id] = false;
+      c.gunUp[id] = { mag: 0, dmg: 0 }; // (an upgrade goes with the gun)
       const gi = this.inventory.findIndex((s) => s?.id === `gun_${id}`);
       if (gi >= 0) this.inventory[gi] = null;
       this.emitInventory();
@@ -1787,6 +1880,34 @@ export class Game {
   }
 
   // Survival: buy a gun (and pick it up straight away), or switch to one you own
+  // Survival: upgrade a gun you own (the pistol from the start): `stat` is 'mag' (bigger magazine) or 'dmg' (firepower)
+  gunUpgradeCost(id, stat, level) {
+    const base = stat === 'mag' ? [6, 10, 15, 22, 30] : [8, 13, 19, 27, 38];
+    const list = base[Math.min(level, base.length - 1)];
+    return Math.round(list * (1 + GUNS[id].price / 120)) + (level >= base.length ? 10 * (level - base.length + 1) : 0);
+  }
+
+  upgradeGun(id, stat) {
+    const c = this.combat;
+    if (!this.wave || !GUNS[id] || !c || !c.owned[id] || !['mag', 'dmg'].includes(stat)) return;
+    const level = c.gunLv(id, stat);
+    if (level >= MAX_LEVEL) {
+      this.onToast?.(`${GUNS[id].name}: already at its best.`);
+      return;
+    }
+    const cost = this.gunUpgradeCost(id, stat, level);
+    if (!this.spendCoins(cost)) {
+      sfx.play('nope');
+      this.onToast?.(`That costs ${cost} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    (c.gunUp[id] ||= { mag: 0, dmg: 0 })[stat] = level + 1;
+    if (stat === 'mag') c.ammo[id] = c.gunMag(id); // the bigger magazine comes loaded
+    sfx.play('levelup');
+    this.onToast?.(`${GUNS[id].icon} ${GUNS[id].name}: ${stat === 'mag' ? `magazine ${c.gunMag(id)} rounds` : `firepower +${20 * (level + 1)}%`}`);
+    this.emitHud();
+  }
+
   buyGun(id) {
     const info = GUNS[id];
     const c = this.combat;
@@ -1808,7 +1929,7 @@ export class Game {
       return;
     }
     c.owned[id] = true;
-    c.ammo[id] = info.mag;
+    c.ammo[id] = c.gunMag(id);
     addItem(this.inventory, `gun_${id}`, 1);
     this.emitInventory();
     sfx.play('levelup');
@@ -1832,6 +1953,64 @@ export class Game {
     if (gun && this.combat?.owned[gun]) this.combat.equipGun(gun);
   }
 
+  // Visit: teleport straight to where another player is (only when the room allows it)
+  visitPlayer(id) {
+    const r = this.remotes.get(id);
+    if (!this.mp || !r) return;
+    if (!this.allowVisit) {
+      this.onToast?.('Visiting is switched off in this room. The host can allow it in the room settings.');
+      return;
+    }
+    if (this.dead || this.cutscene || this.frozen) return;
+    if (this.dungeon) {
+      this.onToast?.('Leave the dungeon first.');
+      return;
+    }
+    if (r.hidden) {
+      this.onToast?.(`${r.name} is indoors. Try again when they are outside.`);
+      return;
+    }
+    if (this.t - (this.visitAt ?? -99) < 5) return; // (not every instant)
+    this.visitAt = this.t;
+    const go = () => {
+      if (this.inside) {
+        this.storageOpen = false;
+        this.inside = null;
+      }
+      if (this.mount) this.dismount();
+      // next to them, on the first free spot
+      for (const [ox, oy] of [[16, 6], [-16, 6], [0, 16], [0, -12], [26, 0], [-26, 0]]) {
+        if (!this.blocked(r.x + ox, r.y + oy)) {
+          this.player.x = r.x + ox;
+          this.player.y = r.y + oy;
+          break;
+        }
+      }
+      this.cam.x = this.player.x;
+      this.cam.y = this.player.y;
+      this.combat.revealT = 0;
+      sfx.play('pickup');
+      this.onToast?.(`📍 You joined ${r.name}.`);
+    };
+    this.transition(go);
+  }
+
+  // Is this spot on somebody's screen (yours, or another player's, with a margin)? Nothing is allowed to appear there.
+  seenFrom(x, y, margin = 28) {
+    const hw = this.viewW / 2 + margin;
+    const hh = this.viewH / 2 + margin;
+    if (Math.abs(x - this.player.x) < hw && Math.abs(y - this.player.y) < hh) return true;
+    for (const r of this.remotes.values()) if (!r.hidden && Math.abs(x - r.x) < hw && Math.abs(y - r.y) < hh) return true;
+    return false;
+  }
+
+  // V or the Start button, between waves: the room's rule decides what it does (see WaveSim.pressStart)
+  pressStartWave() {
+    const r = this.wave?.pressStart(this.mp?.you ?? 0);
+    if (r === 'voted') this.onToast?.('🗳️ Vote counted. Press V again to take it back.');
+    else if (r === 'host-only') this.onToast?.('Only the host starts the next wave.');
+  }
+
   // Survival's Shelter light is one level for the whole team: whoever buys it lights the lamps for everyone, and the level you see is the team's
   syncShelterLight() {
     const w = this.wave;
@@ -1847,7 +2026,7 @@ export class Game {
     const info = UPGRADES.find((u) => u.id === id);
     const house = id === 'house';
     const level = house ? this.wave.baseLevel || 0 : this.upgrades[id];
-    if (level >= MAX_LEVEL) {
+    if (level >= MAX_LEVEL && !(house && this.world.apoc)) {
       this.onToast?.(`${info.name} is already at its best.`);
       return;
     }
@@ -2537,23 +2716,14 @@ export class Game {
       ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
       ctx.restore();
     }
-    const st = w.hudState();
-    const { x: bx, y: by, w: bw } = w.bar;
-    ctx.fillStyle = 'rgba(60,40,30,0.8)';
-    ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
-    ctx.fillStyle = st.baseHp / st.baseMax > 0.4 ? '#7fd48f' : '#ee5d7d';
-    ctx.fillRect(bx, by, Math.max(1, Math.round(bw * (st.baseHp / st.baseMax))), 4);
-    if (this.world.apoc) {
-      // the shelter's upgrade level, over its health bar
-      ctx.save();
-      ctx.font = 'bold 7px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = 'rgba(30,20,30,0.9)';
-      ctx.fillStyle = '#ffe08a';
-      ctx.strokeText(`🏚️ Shelter Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
-      ctx.fillText(`🏚️ Shelter Lv ${(w.baseLevel || 0) + 1}`, bx + bw / 2, by - 3);
-      ctx.restore();
+    // (Survival's shelter health is the bar above the hotbar; the base in Wave Defense keeps its bar on the ground)
+    if (!this.world.apoc) {
+      const st = w.hudState();
+      const { x: bx, y: by, w: bw } = w.bar;
+      ctx.fillStyle = 'rgba(60,40,30,0.8)';
+      ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
+      ctx.fillStyle = st.baseHp / st.baseMax > 0.4 ? '#7fd48f' : '#ee5d7d';
+      ctx.fillRect(bx, by, Math.max(1, Math.round(bw * (st.baseHp / st.baseMax))), 4);
     }
 
     const held = this.inventory[this.selectedSlot];
@@ -2670,6 +2840,8 @@ export class Game {
       this.rules = { melee: m.room.allowMelee !== false, throw: m.room.allowThrow !== false };
       if (this.mp) this.mp.streakMonsters = !!m.room.streakMonsters;
       if (m.room.difficulty) this.wave?.setDifficulty(m.room.difficulty); // the host can change the difficulty mid-round
+      this.wave?.setStartMode(m.room.waveStart); // ...and what starts the next wave
+      this.allowVisit = !!m.room.allowVisit;
     } else if (m.t === 'teams') {
       this.teamMap = { ...m.teams };
     } else if (m.t === 'state') {
@@ -2726,6 +2898,12 @@ export class Game {
     } else if (m.t === 'fx' && m.kind === 'swing') {
       const r = this.remotes.get(m.id);
       if (r) r.swing = { t: 0, a: m.a, w: m.w, lv: r.lv };
+    } else if (m.t === 'fx' && m.kind === 'grapple') {
+      this.combat.remoteGrapple(m);
+    } else if (m.t === 'fx' && m.kind === 'bomb') {
+      this.combat.remoteBomb(m);
+    } else if (m.t === 'fx' && m.kind === 'fan') {
+      this.combat.remoteFan(m);
     } else if (m.t === 'fx' && m.kind === 'trident') {
       this.combat.remoteTrident(m);
     } else if (m.t === 'fx' && m.kind === 'cast') {
@@ -2908,6 +3086,7 @@ export class Game {
 
   update(dt) {
     const p = this.player;
+    if (this.cutscene) this.driveCutscene(dt);
     this.updateFade(dt);
     this.updateWeather(dt);
     this.updateLightning(dt);
@@ -2968,7 +3147,7 @@ export class Game {
         if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
       }
       const ride = this.mount ? (this.mount.type === 'chicken' ? 1.35 : 1.15) : 1; // a chicken hurries, a cow ambles along
-      const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1);
+      const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1) * (this.cutscene ? 0.5 : 1); // (a stroll in the story)
       this.animT += dt * (this.sprinting ? 1.7 : 1);
       if (p.moving && !dashing) {
         if (dx && dy) {
@@ -3031,6 +3210,7 @@ export class Game {
       this.updateCelebration(dt);
       this.updateWallHold(dt);
       this.combat.update(dt);
+      this.trackHurt(dt);
       if (!this.balls && !this.demo && this.home) this.balls = new Balls(this);
       this.balls?.update(dt);
       if (!this.inside && !this.dungeon) this.bots?.update(dt);
@@ -3056,8 +3236,11 @@ export class Game {
         }
       }
       if (this.wave && this.world.apoc) {
+        this.updateNightK(dt);
         this.updateDawn(dt);
-        this.hour = (SURVIVAL_HOUR + this.dawn * 10.5) % 24; // Survival is always night, until the dawn: 11 PM slowly turns into 9:30 AM
+        const info = this.world.mapInfo;
+        if (info?.day || info?.bossStorm) this.hour = SURVIVAL_DAY_HOUR + 11 * this.nightK; // a sunny map: noon, going dark when the storm comes
+        else this.hour = (SURVIVAL_HOUR + this.dawn * 10.5) % 24; // Survival is always night, until the dawn: 11 PM slowly turns into 9:30 AM
       }
       this.hudTimer -= dt;
       if (this.hudTimer <= 0) {
@@ -3106,6 +3289,7 @@ export class Game {
       wave: this.wave?.hudState() || null,
       fight: this.bots?.scoreboard() || null,
       upg: this.upgrades,
+      dayMap: !!this.world.mapInfo?.day,
       stats: this.statsHud(),
       supplies: { ...this.supplies },
       consumables: { ...this.consumables },
@@ -3127,6 +3311,8 @@ export class Game {
       slowT: this.combat.slowT,
       blastT: this.combat.blastT,
       ammo: this.combat.ammo[this.combat.gun],
+      gunMag: this.combat.gunMag(this.combat.gun),
+      gunUp: JSON.parse(JSON.stringify(this.combat.gunUp)),
       reload: this.combat.reloadT > 0 ? 1 - this.combat.reloadT / GUNS[this.combat.gun].reload : 0,
       reloading: this.combat.reloadT > 0,
       recallCd: this.combat.recallCd,
@@ -3250,6 +3436,9 @@ export class Game {
     this.weather = weatherAt(this.world.seed, sky ? 1 : this.day, sky ? this.skyTotal : this.hour, this.demo || this.dungeon ? 'none' : this.climate());
     const f = this.weatherForce;
     if (f && !this.weather.indoors) this.weather = { kind: f, k: 1, cloud: WEATHER[f].cloud, rain: f === 'rain' || f === 'storm' ? 1 : 0, storm: f === 'storm' ? 1 : 0, snow: f === 'snow' ? 1 : 0 };
+    if (this.world.mapInfo?.bossStorm && this.nightK > 0.15 && !this.weather.indoors) {
+      this.weather = { kind: 'storm', k: 1, cloud: WEATHER.storm.cloud, rain: 1, storm: 1, snow: 0 }; // a boss is out: thunder and rain
+    }
     if (this.dawn > 0 && !this.weather.indoors) {
       // the sunrise burns the weather off: the rain thins, the thunder stops and the sky clears
       const w = this.weather;
@@ -3258,11 +3447,23 @@ export class Game {
     }
   }
 
+  // The sunny maps: daylight all the time. The storm map is sunny too, until a boss is out: then the sky goes black and thunder rolls in.
+  updateNightK(dt) {
+    const info = this.world.mapInfo;
+    if (!info || !(info.day || info.bossStorm)) return;
+    let target = 0;
+    if (info.bossStorm) target = this.wave.monsters.some((m) => m.state !== 'dead' && MONSTERS[m.type].boss) ? 1 : 0;
+    const before = this.nightK;
+    this.nightK = target > this.nightK ? Math.min(target, this.nightK + dt / 3) : Math.max(target, this.nightK - dt / 8);
+    if ((before > 0.15) !== (this.nightK > 0.15)) this.weatherT = 0; // the weather follows
+  }
+
   // Survival: when the last wave is nearly done (10 enemies left, or all of them dead) the sun starts to come up, slowly.
   // Once it has started it carries on, even if more enemies turn up.
   updateDawn(dt) {
     const w = this.wave;
     if (!w || this.dawn >= 1) return;
+    if (this.world.mapInfo?.day || this.world.mapInfo?.bossStorm) return; // (it is day already)
     if (this.dawn === 0) {
       this.dawnT -= dt;
       if (this.dawnT > 0) return; // (looked at four times a second)
@@ -3613,7 +3814,7 @@ export class Game {
         this.dismount();
         this.onToast?.('You left your ride at the door.');
       }
-      this.inside = { out: { x: b.x, y: b.y + 14 }, sleepCd: 0, b };
+      this.inside = { out: { x: b.x, y: b.y + 14 }, sleepCd: 0, b, design: designFor(b) };
       this.player.x = ROOM.w / 2;
       this.player.y = ROOM.h - 28;
       this.player.dir = 'up';
@@ -3676,10 +3877,11 @@ export class Game {
       }
       if (Math.abs(dx) >= Math.abs(dy)) p.dir = dx > 0 ? 'right' : 'left';
       else p.dir = dy > 0 ? 'down' : 'up';
-      const nx = p.x + dx * SPEED * dt;
-      if (!roomBlocked(nx, p.y, FOOT_W, FOOT_H)) p.x = nx;
-      const ny = p.y + dy * SPEED * dt;
-      if (!roomBlocked(p.x, ny, FOOT_W, FOOT_H)) p.y = ny;
+      const sp = SPEED * (this.cutscene ? 0.5 : 1);
+      const nx = p.x + dx * sp * dt;
+      if (!roomBlocked(nx, p.y, FOOT_W, FOOT_H, this.inside.design)) p.x = nx;
+      const ny = p.y + dy * sp * dt;
+      if (!roomBlocked(p.x, ny, FOOT_W, FOOT_H, this.inside.design)) p.y = ny;
     }
     this.inside.sleepCd = Math.max(0, this.inside.sleepCd - dt);
     // the room is small: keep it centred, or follow the hero when the window is smaller than the room
@@ -3693,7 +3895,7 @@ export class Game {
     const p = this.player;
     let best = null;
     let bd = 26;
-    for (const [inter, s] of Object.entries(SPOTS)) {
+    for (const [inter, s] of Object.entries(spotsOf(this.inside.design))) {
       const d = Math.hypot(s.x - p.x, s.y - p.y);
       if (d < bd) {
         bd = d;
@@ -3704,7 +3906,7 @@ export class Game {
     this.prompt = best;
     if (this.interactPressed && best && !this.fade) {
       if (best.inter === 'chest' && this.inside.b) {
-        const o = { id: `bi${this.inside.b.id}`, x: best.x, y: best.y, rich: true, lootKind: this.inside.b.type === 'shop' ? 'atm' : 'supply' };
+        const o = { id: `bi${this.inside.b.id}`, x: best.x, y: best.y, rich: true, lootKind: this.inside.b.type === 'shop' ? 'atm' : this.inside.b.type === 'kiosk' ? 'food' : 'supply' };
         if (this.looted(o)) this.onToast?.('The chest is empty. It fills up again in a few days.');
         else this.burstChest(o);
       } else if (best.inter === 'chest') {
@@ -3937,6 +4139,7 @@ export class Game {
       hour: this.hour,
       storageOpen: this.storageOpen,
       weather: this.weather?.kind,
+      design: this.inside?.design,
       meY: p.y,
       drawMe: () => {
         ctx.globalAlpha = 1;
@@ -4249,6 +4452,76 @@ export class Game {
     }
   }
 
+  // ---------- hurt, low health and reloading: what the screen shows ----------
+
+  // watches your health: a drop starts a short shake and red flash, and low health keeps the screen blinking red
+  trackHurt(dt) {
+    const c = this.combat;
+    const max = c.maxHp || 1;
+    if (this.lastHp !== undefined && c.hp < this.lastHp - 1e-6 && !this.dead && !this.inside) {
+      this.hurtFx = { t: 0, big: Math.min(1, 0.45 + ((this.lastHp - c.hp) / max) * 2.5) };
+    }
+    this.lastHp = c.hp;
+    if (this.hurtFx && (this.hurtFx.t += dt) > 0.45) this.hurtFx = null;
+    this.lowHp = !this.dead && c.hp > 0 && c.hp / max <= 0.3;
+  }
+
+  shakeAmount(hf) {
+    return hf.big * Math.max(0, 1 - hf.t / 0.45);
+  }
+
+  drawScreenFx() {
+    if (this.demo) return;
+    const { ctx, canvas } = this;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.lowHp) {
+      // low health: the edges of the screen blink red, a little faster the lower you are
+      const lo = 0.5 + 0.5 * Math.sin(this.t * 6.5);
+      const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.72);
+      g.addColorStop(0, 'rgba(230,20,40,0)');
+      g.addColorStop(1, `rgba(230,20,40,${0.28 + 0.4 * lo})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    }
+    const hf = this.hurtFx;
+    if (hf) {
+      ctx.fillStyle = `rgba(255,24,36,${0.38 * this.shakeAmount(hf)})`; // the red blink of the hit itself
+      ctx.fillRect(0, 0, w, h);
+    }
+    // reloading: a turning arrow, with a ring that fills up, next to the cursor
+    if (this.combat.reloadT > 0 && !this.touchMode && !this.paused) {
+      const gun = GUNS[this.combat.gun];
+      const done = gun ? 1 - this.combat.reloadT / gun.reload : 0;
+      const r = Math.max(9, this.zoom * 3.4);
+      const x = this.mouse.x + r * 2;
+      const y = this.mouse.y + r * 2;
+      ctx.save();
+      ctx.fillStyle = 'rgba(40,30,30,0.7)';
+      ctx.beginPath();
+      ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#ffd24d';
+      ctx.beginPath();
+      ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * done);
+      ctx.stroke();
+      ctx.translate(x, y);
+      ctx.rotate(this.t * 7);
+      ctx.fillStyle = '#fff';
+      ctx.font = `700 ${Math.round(r * 1.5)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('↻', 0, 1);
+      ctx.restore();
+    }
+  }
+
   // ---------- drawing ----------
 
   chunkCanvas(cx, cy) {
@@ -4271,8 +4544,11 @@ export class Game {
   draw() {
     const { ctx, canvas, zoom, img } = this;
     const rumble = this.houseHit && this.houseHit.t < 0.25 ? Math.round(Math.sin(this.houseHit.t * 90) * 1.5 * (1 - this.houseHit.t / 0.25) * this.houseHit.big) : 0; // the ground shudders when the shelter is hit
-    const camX = Math.round(this.cam.x - this.viewW / 2) + rumble;
-    const camY = Math.round(this.cam.y - this.viewH / 2);
+    // taking a hit shakes the whole screen for a moment
+    const hf = this.hurtFx;
+    const k = hf ? this.shakeAmount(hf) : 0;
+    const camX = Math.round(this.cam.x - this.viewW / 2) + rumble + (hf ? Math.round(Math.sin(hf.t * 85) * 2.2 * k) : 0);
+    const camY = Math.round(this.cam.y - this.viewH / 2) + (hf ? Math.round(Math.cos(hf.t * 97) * 1.6 * k) : 0);
     this.camX = camX;
     this.camY = camY;
 
@@ -4286,7 +4562,8 @@ export class Game {
       this.drawInterior();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       this.drawNameTag(camX, camY);
-      if (this.prompt) this.drawPrompt(this.prompt, camX, camY);
+      if (this.prompt && !this.cutscene) this.drawPrompt(this.prompt, camX, camY);
+      this.drawScreenFx();
       this.drawFade();
       return;
     }
@@ -4355,7 +4632,8 @@ export class Game {
     for (const o of drawList) {
       switch (o.kind) {
         case 'tree':
-          if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
+          // (an animated prop plays its frames: o.anim = { frames, fps })
+          if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.anim ? (Math.floor(this.t * o.anim.fps + o.x) % o.anim.frames) * o.sw : o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
           break;
         case 'house':
           // see-through while you are indoors, so you can still spot yourself
@@ -4490,7 +4768,8 @@ export class Game {
         const [sx, sy] = this.toScreen(this.ghostWhy.x, this.ghostWhy.y - 34, camX, camY);
         this.pill(this.placeMessage(this.ghostWhy.why).replace(/\.$/, ''), sx, sy, this.zoom * 3.6, '#fff', 'rgba(224,70,90,0.95)');
       }
-      if (this.prompt) this.drawPrompt(this.prompt, camX, camY);
+      if (this.prompt && !this.cutscene) this.drawPrompt(this.prompt, camX, camY);
+      this.drawScreenFx();
       this.drawFade();
     }
 
@@ -4526,7 +4805,7 @@ export class Game {
     const c = cv.getContext('2d');
     c.globalCompositeOperation = 'source-over';
     c.clearRect(0, 0, cw, ch);
-    const lit = (1 - 0.75 * Math.min(1, this.flash)) * (1 - this.dawn); // a lightning strike lights the whole night up for a moment; the dawn takes it away
+    const lit = (1 - 0.75 * Math.min(1, this.flash)) * (1 - this.dawn) * this.nightK; // a lightning strike lights the whole night up for a moment; the dawn takes it away
     c.fillStyle = this.world.hw ? `rgba(24,8,46,${0.82 * lit})` : `rgba(7,11,40,${0.8 * lit})`;
     c.fillRect(0, 0, cw, ch);
     const flick = 1 + 0.03 * Math.sin(this.t * 7) + 0.02 * Math.sin(this.t * 13.7);
@@ -4587,7 +4866,7 @@ export class Game {
   }
 
   drawDaylight(camX, camY) {
-    if (this.wave && this.world.apoc && !this.dungeon && !this.inside && this.dawn < 1) {
+    if (this.wave && this.world.apoc && !this.dungeon && !this.inside && this.dawn < 1 && this.nightK > 0.02) {
       this.drawNight(camX, camY);
       return;
     }
@@ -4694,6 +4973,18 @@ export class Game {
 
   // Everyone who lives in a house, with the house's doorstep
   houseOwners() {
+    if (this.teamCount && this.roomHomes) {
+      // one camp for each team, named after it
+      const out = [];
+      const mine = this.myTeam();
+      for (let t = 0; t < this.teamCount; t++) {
+        const site = this.roomHomes[Math.min(t, this.roomHomes.length - 1)];
+        const who = t === mine ? { hero: this.hero } : [...this.remotes.values()].find((r) => this.teamMap[r.id] === t);
+        if (!site || !who) continue;
+        out.push({ name: `${TEAMS[t].icon} ${TEAMS[t].name} camp`, hero: who.hero, home: this.world.homePoint(site), color: TEAMS[t].color, me: t === mine });
+      }
+      return out;
+    }
     const out = [{ name: this.name || 'Friend', hero: this.hero, home: this.home, me: true }];
     for (const b of this.bots?.list || []) out.push({ name: b.name, hero: b.hero, home: b.home });
     if (this.roomHomes) {

@@ -28,7 +28,7 @@ export class AiPlayers extends Bots {
 
   adopt(r) {
     const g = this.g;
-    const site = g.roomHomes?.[Math.min(r.slot ?? 0, g.roomHomes.length - 1)];
+    const site = g.roomHomes?.[Math.min((g.teamCount ? g.teamMap[r.id] : r.slot) ?? 0, g.roomHomes.length - 1)]; // (a team's computer players live in the team's camp)
     const home = site ? g.world.homePoint(site) : g.world.randomSpawn();
     Object.assign(r, {
       sim: true, // this game moves it: it does not glide towards network positions

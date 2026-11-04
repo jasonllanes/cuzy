@@ -10,9 +10,13 @@ export const UPGRADES = [
   { id: 'light', icon: '🔦', name: 'Lantern', desc: 'A bigger, brighter glow around you, so the night is easier to see through.', cost: [3, 5, 8, 12, 16], survIcon: '💡', survName: 'Shelter light', survDesc: 'Hang a lamp on the shelter. Every level reaches further and brings more lamps (2 at level 2, 3 at level 4), lighting up the ground so you can see the zombies coming. Shared by everyone in the room.' },
 ];
 
-export const emptyUpgrades = () => ({ armor: 0, chest: 0, atkspd: 0, house: 0, stamina: 0, melee: 0, throw: 0, light: 0, dash: 0, dashdmg: 0, spinrad: 0, spindmg: 0, rapid: 0, health: 0 });
+export const emptyUpgrades = () => ({ armor: 0, chest: 0, atkspd: 0, house: 0, stamina: 0, melee: 0, throw: 0, light: 0, dash: 0, dashdmg: 0, grange: 0, spinrad: 0, spindmg: 0, rapid: 0, health: 0 });
 
-export const upgradeCost = (id, level) => UPGRADES.find((u) => u.id === id).cost[level];
+// (past the end of the price list a level costs 35% more than the one before: Survival's shelter has no top level)
+export const upgradeCost = (id, level) => {
+  const list = UPGRADES.find((u) => u.id === id).cost;
+  return level < list.length ? list[level] : Math.round(list[list.length - 1] * 1.35 ** (level - list.length + 1));
+};
 
 // ---------- Free Roam shop (press U): coins from chests and skeletons ----------
 
@@ -61,14 +65,9 @@ export const FREE_UPGRADES = [
     value: (l) => `+${Math.round(8.75 * l)}% dash damage`,
   },
   {
-    id: 'spinrad', icon: '🌀', name: 'Spiral radius', cost: [3, 6, 9, 13, 18], needs: 'spiral',
-    desc: 'The spiral sweeps a wider circle around you.',
-    value: (l) => `+${Math.round(18.4 * l)}% spiral radius`,
-  },
-  {
-    id: 'spindmg', icon: '🗡️', name: 'Spiral damage', cost: [4, 7, 11, 16, 22], needs: 'spiral',
-    desc: 'Every blade of the spiral cuts deeper.',
-    value: (l) => `+${10 * l}% spiral damage`,
+    id: 'grange', icon: '🪝', name: 'Grapple range', cost: [3, 6, 9, 13, 18], needs: 'grapple',
+    desc: 'The hook flies further before it gives up.',
+    value: (l) => `+${18 * l}% hook range`,
   },
   {
     id: 'throw', icon: '💥', name: 'Throw damage', cost: [4, 6, 9, 13, 18],
@@ -88,11 +87,11 @@ export const SUPPLY_SHOP = [
 
 // Skills are not sold: you unlock each one by reaching its character level, then pick what to equip.
 // You use ONE from each group:
-//   sword   - Dash or Spiral Sword (the Space skill)
+//   sword   - Dash or Grapple Hook (the Space skill). The spiral spin now belongs to the axes: hold left click with one.
 //   utility - Shield or Invisibility
 export const SKILL_SHOP = [
   { id: 'dash', icon: '💨', name: 'Dash', group: 'sword', level: 6, sword: true, desc: 'Press Space (hold it to charge) to dash through enemies. Upgrade distance and damage in the shop.' },
-  { id: 'spiral', icon: '🌀', name: 'Spiral Sword', group: 'sword', level: 8, sword: true, desc: 'Press Space (hold it to charge) to spin your blade around you. Upgrade radius and damage in the shop.' },
+  { id: 'grapple', icon: '🪝', name: 'Grapple Hook', group: 'sword', level: 8, sword: true, desc: 'Press Space (hold it to charge how far it reaches) to fire a hook. It catches a tree, a wall, a house, a creature or a player, and pulls you straight to it. Upgrade its range in the shop.' },
   { id: 'shield', icon: '🛡️', name: 'Shield', group: 'utility', level: 10, desc: 'Press R: blocks all damage for 3 seconds. 10 second cooldown.' },
   { id: 'invis', icon: '👻', name: 'Invisibility', group: 'utility', level: 15, desc: 'Press R: enemies can no longer see you for 4 seconds (attacking reveals you). 25 second cooldown.' },
 ];

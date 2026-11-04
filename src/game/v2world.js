@@ -1,6 +1,6 @@
 import { hash2 } from './rng';
 import { DREGION } from './dungeon';
-import { loadTheme, loadedThemes } from '../v2/assets';
+import { loadSheet, loadTheme, loadedThemes } from '../v2/assets';
 import { CONTAINER, footprint, isFlat } from '../v2/world';
 
 // Free Roam V2: the same world as Free Roam (the same land, houses, trees, caves and chests), with the Modern Exteriors props added
@@ -14,7 +14,18 @@ export const stripV2 = (s) => String(s).replace(/~v2$/, '');
 export const isHalloweenSeed = (s) => /^haunted-/.test(String(s));
 export const HALLOWEEN_THEMES = ['graveyard', 'camping'];
 
-const THEMES = ['props', 'vehicles', 'houses', 'villas', 'shops', 'garden', 'camping', 'graveyard', 'police', 'fire', 'hotel', 'school', 'garage', 'military', 'worksite'];
+const THEMES = ['props', 'vehicles', 'houses', 'villas', 'shops', 'garden', 'camping', 'graveyard', 'police', 'fire', 'hotel', 'school', 'garage', 'military', 'worksite', 'pool'];
+
+// Animated scenery (Modern Exteriors, Animated_16x16): a row of equal frames each, played in the world. The sheets are copied by scripts/add-v2-anim.py.
+export const ANIMS = {
+  fountain1: { fw: 32, fh: 48, frames: 6, fps: 6 },
+  fountain3: { fw: 48, fh: 96, frames: 6, fps: 6 },
+  fountain5: { fw: 64, fh: 80, frames: 6, fps: 6 },
+  fountain8: { fw: 32, fh: 48, frames: 8, fps: 8 },
+  flag: { fw: 48, fh: 144, frames: 8, fps: 5 },
+  cookpot: { fw: 48, fh: 32, frames: 6, fps: 7 },
+};
+const animSprite = (id) => ({ name: `anim_${id}`, theme: 'anim', anim: id, w: ANIMS[id].fw, h: ANIMS[id].fh, x: 0, y: 0 });
 
 // the atlases become images the engine can draw as `v2/<theme>`
 export const SURVIVAL_THEMES = ['props', 'vehicles', 'military', 'garage', 'camping', 'worksite', 'police', 'houses', 'shops', 'graveyard', 'fire'];
@@ -23,6 +34,9 @@ export async function loadV2Images(img, themes = THEMES) {
   await Promise.all(themes.map(async (id) => {
     const t = await loadTheme(id);
     img[`v2/${id}`] = t.img;
+  }));
+  await Promise.all(Object.keys(ANIMS).map(async (id) => {
+    img[`v2anim/${id}`] = await loadSheet(`anim/${id}.png`);
   }));
 }
 
@@ -35,6 +49,8 @@ const list = (theme, re, test) => {
 
 const BAD_HOUSE = /Door|Sign|Balcony|Umbrella|Banister|Roof|Canopy|Base|Basement|Wind|Solar|Modular|Side|Open|Styling|Lantern|Pole|Haunted|Apocalyptic|Chimney|Ladder|Window|Yard|Doormat|Toy|Tree|Hanging|Potted|Propeller|Picnic|Lemonade/;
 
+const pickFrom = (l, r) => l[Math.floor(r(1) * l.length)];
+
 // ---- the kinds of places ----
 // each: how big it is (tiles), and how to fill it. `s` is the main sprite.
 const KINDS = [
@@ -42,13 +58,16 @@ const KINDS = [
   { id: 'shop', weight: 20, enter: 'shop', pick: (r) => { const l = list('shops', /^Market_(Big|Medium|Small)_\d+$/); return l[Math.floor(r(1) * l.length)]; } },
   { id: 'civic', weight: 8, enter: 'civic', pick: (r) => { const l = [...list('police', /^Police_Station_[123]$/), ...list('fire', /^Building$/), ...list('hotel', /^(Hospital|Hotel)_1$/), ...list('school', /^School_1$/)]; return l[Math.floor(r(1) * l.length)]; } },
   { id: 'gas', weight: 9, min: [24, 18], pick: (r) => { const l = list('vehicles', /^Gas_Station_[12]$/); return l[Math.floor(r(1) * l.length)]; } },
+  // the small places: a caravan to look round, a kiosk, and a few loungers by an umbrella (each caravan and kiosk can be walked into)
+  { id: 'cabin', weight: 12, enter: 'cabin', pick: (r) => pickFrom(list('camping', /^Mobile_House_Small_\d$/), r) },
+  { id: 'kiosk', weight: 9, enter: 'kiosk', pick: (r) => pickFrom(list('props', /^Kiosk_(Icecream|Coffee_Cup|Mushroom_1|Infopoint_1|Infopoint_2)$/), r) },
+  { id: 'poolside', weight: 8, min: [22, 18], pick: (r) => pickFrom(list('pool', /^Umbrella_[1-8]$/), r) },
   { id: 'camp', weight: 16, min: [22, 20], pick: (r) => { const l = list('camping', /^Tent_\d+$/); return l[Math.floor(r(1) * l.length)]; } },
   { id: 'park', weight: 14, min: [22, 20], pick: () => list('garden', /^Fountain/)[0] },
   { id: 'junk', weight: 14, min: [22, 18], pick: (r) => { const l = list('props', /^Dumpster/); return l[Math.floor(r(1) * l.length)]; } },
   { id: 'graves', weight: 9, min: [20, 20], pick: (r) => { const l = list('graveyard', /^Medium_Gate(_\d+)?$/); return l[Math.floor(r(1) * l.length)]; } },
 ];
 // Halloween: graveyards and gates, a chapel, pumpkin patches and dead groves
-const pickFrom = (l, r) => l[Math.floor(r(1) * l.length)];
 const KINDS_HW = [
   { id: 'hwgraves', weight: 30, min: [20, 20], pick: (r) => pickFrom(list('graveyard', /^(Medium|Big|High|Small)_Gate(_Red_Orb)?$/), r) },
   { id: 'chapel', weight: 9, pick: () => list('graveyard', /^Grace_Chapel_With_Gate$/)[0] },
@@ -59,7 +78,13 @@ const TOTAL = KINDS.reduce((n, k) => n + k.weight, 0);
 const TOTAL_HW = KINDS_HW.reduce((n, k) => n + k.weight, 0);
 const CELL = 30; // a place is rolled per 30x30 tiles
 
-export const BUILDING_NAMES = { house: ['Cosy House', 'Family Home', 'Little House', 'Old Villa'], shop: ['General Store', 'Corner Market', 'Fruit Stand', 'Trading Post'], civic: ['Town Hall', 'Clinic', 'Station', 'Old School'] };
+export const BUILDING_NAMES = {
+  house: ['Cosy House', 'Family Home', 'Little House', 'Old Villa'],
+  shop: ['General Store', 'Corner Market', 'Fruit Stand', 'Trading Post'],
+  civic: ['Town Hall', 'Clinic', 'Station', 'Old School'],
+  cabin: ['Little Caravan', 'Camper Van', 'Tiny Home', 'Wheeled Cabin'],
+  kiosk: ['Corner Kiosk', 'Snack Stand', 'Little Kiosk', 'Info Point'],
+};
 
 // what a container gives
 const lootKind = (name) => (/ATM/i.test(name) ? 'atm' : /Vending/i.test(name) ? 'food' : /Mailbox/i.test(name) ? 'mail' : /Dumpster|Trash/i.test(name) ? 'junk' : /Coffin/i.test(name) ? 'grave' : 'supply');
@@ -170,6 +195,7 @@ function fill(P) {
       dec('props', /^Bench_\d/, 6, cx - 4, feet + 5);
       dec('props', /^Hydrant/, 7, cx + sw / 2 + 1, feet + 2);
       dec('props', /^Phone_Booth/, 8, cx - sw / 2 - 1.5, feet + 3);
+      if (r(12) < 0.6) add(animSprite('flag'), cx + sw / 2 + 4, feet + 1);
       dec('vehicles', /^Ambulance_(Left|Right)/, 9, cx + sw / 2 + 5, feet + 6);
       break;
     }
@@ -183,10 +209,42 @@ function fill(P) {
       dec('props', /^Dumpster/, 11, cx - sw / 2 - 2, feet + 1);
       break;
     }
+    case 'cabin': {
+      add(s, cx, feet, { enter: 'cabin', name: BUILDING_NAMES.cabin[Math.floor(r(5) * 4)] });
+      dec('camping', /^Benched_Table/, 6, cx - sw / 2 - 2, feet + 2);
+      dec('camping', /^(Campfire(_\d+)?|Barbecue)/, 7, cx + sw / 2 + 2, feet + 2);
+      dec('camping', /^(Rock|Lantern|Tiny_Table)/, 8, cx + sw / 2 + 1, feet + 4);
+      dec('props', /^Mailbox/, 9, cx - 1, feet + 3);
+      dec('props', /^(Black|Green|Blue)_Closed_Trash_Can$/, 10, cx - sw / 2 - 2, feet + 4);
+      break;
+    }
+    case 'kiosk': {
+      add(s, cx, feet, { enter: 'kiosk', name: BUILDING_NAMES.kiosk[Math.floor(r(5) * 4)] });
+      dec('props', /^Bench_\d/, 6, cx - 4, feet + 3);
+      dec('props', /^Vending/, 7, cx + sw / 2 + 1.5, feet + 1);
+      dec('props', /^(Black|Green|Blue)_Closed_Trash_Can$/, 8, cx - sw / 2 - 1, feet + 2);
+      if (r(10) < 0.5) add(animSprite('fountain1'), cx + sw / 2 + 5, feet + 4);
+      break;
+    }
+    case 'poolside': {
+      add(s, cx, top + 6);
+      for (let i = 0; i < 3; i++) {
+        const sunbed = one('pool', /^Sunbed_\d+$/, 20 + i);
+        if (sunbed) add(sunbed, cx - 5 + i * 5, top + 9 + (i % 2) * 2);
+      }
+      dec('pool', /^Palm_\d$/, 6, cx - 9, top + 6);
+      dec('pool', /^Palm_\d$/, 7, cx + 9, top + 7);
+      dec('pool', /^Toy_(Floating_)?\d+$/, 8, cx - 6, top + 13);
+      dec('pool', /^Toy_(Floating_)?\d+$/, 9, cx + 4, top + 13);
+      dec('pool', /^Lifeguard_Chair_\d$/, 10, cx + 9, top + 12);
+      dec('pool', /^Buoy_\d$/, 11, cx - 10, top + 12);
+      break;
+    }
     case 'camp': {
       add(s, cx - 4, top + 8);
       dec('camping', /^Tent_\d+$/, 6, cx + 4, top + 9);
-      dec('camping', /^Campfire(_\d+)?$/, 7, cx, top + 13);
+      if (r(8) < 0.5) add(animSprite('cookpot'), cx, top + 13); // a pot on the fire, with its flames playing
+      else dec('camping', /^Campfire(_\d+)?$/, 7, cx, top + 13);
       dec('camping', /^Benched_Table/, 8, cx - 5, top + 15);
       dec('camping', /^Sleeping_Bag/, 9, cx + 6, top + 14);
       dec('military', /^Military_Tent_Box_\d_Open|^Military_Tent_Locker/, 10, cx + 2, top + 16);
@@ -194,7 +252,7 @@ function fill(P) {
       break;
     }
     case 'park': {
-      add(s, cx, top + 7);
+      add(animSprite(['fountain3', 'fountain5', 'fountain8'][Math.floor(r(5) * 3)]), cx, top + 8); // (the fountain plays)
       dec('garden', /^(Square_Bench|Medium_Bench_Horizontal)/, 6, cx - 6, top + 11);
       dec('garden', /^(Square_Bench|Medium_Bench_Horizontal)/, 7, cx + 6, top + 11);
       dec('garden', /Flower.*Vase$|^Big_.*Flower$/, 8, cx - 3, top + 3);
@@ -382,6 +440,14 @@ function scatter(world, chunk, cx, cy) {
 // one prop as chunk objects: scenery you walk around, containers you open, buildings you can walk into
 export function addProp(world, chunk, s, x, y, id, extra) {
   const o = { theme: s.theme, name: s.name, x, y };
+  if (s.anim) {
+    // animated scenery: a prop whose frames are played (see ANIMS)
+    const a = ANIMS[s.anim];
+    chunk.objects.push({ kind: 'tree', vid: id, sheet: `v2anim/${s.anim}`, sx: 0, sy: 0, sw: a.fw, sh: a.fh, x, y, anim: { frames: a.frames, fps: a.fps } });
+    const rect = footprint(o, s);
+    if (rect) chunk.rects.push({ vid: id, ...rect });
+    return;
+  }
   if (isFlat(s.name, s.w, s.h)) {
     chunk.objects.push({ kind: 'tree', ground: true, vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, ox: Math.round(x - s.w / 2), oy: y - s.h, x: 0, y: 0 });
     return;

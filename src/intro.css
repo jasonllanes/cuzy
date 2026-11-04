@@ -67,3 +67,13 @@
 .intro-talk { display: flex; align-items: center; gap: 14px; }
 .intro-say { flex: 1; min-width: 0; }
 .intro-hero { flex: none; display: grid; place-items: center; width: 68px; height: 68px; background: #fff3df; border: 3px solid var(--wood); border-radius: 14px; overflow: hidden; }
+
+/* the story on the real map: black bars top and bottom, a caption box, and the game's own world in between */
+.intro.cut { animation: none; pointer-events: none; }
+.intro.cut .intro-bar { position: absolute; left: 0; right: 0; height: 9vh; background: #000; }
+.intro.cut .intro-bar.top { top: 0; }
+.intro.cut .intro-bar.bottom { bottom: 0; }
+.intro.cut .intro-talk { bottom: calc(9vh + 14px); top: auto; pointer-events: none; }
+.intro.cut .intro-skip { bottom: calc(9vh + 14px); right: 16px; pointer-events: auto; }
+/* nothing from the game's screen (hud, hotbar) shows while the story plays */
+.game.cutscene > *:not(.game-canvas):not(.intro) { visibility: hidden; }

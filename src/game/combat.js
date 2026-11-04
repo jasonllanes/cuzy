@@ -33,6 +33,16 @@ const BIOME_FOES = {
 export const biomeOf = (world, x, y) => (world.mixed ? world.biomeAt(Math.floor(x / 16), Math.floor(y / 16)) : world.tileset) || 'clover';
 const foesAt = (world, x, y) => BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover;
 
+// Who fights whom: monsters of different camps attack each other when they meet. A type that is in no camp stays out of it.
+const CAMPS = {
+  orc: ['t_orc', 't_eliteorc', 't_armorc', 't_orcrider', 'redcap', 'ogre', 'stonetroll', 'swamptroll'],
+  human: ['t_soldier', 't_swordsman', 't_knight', 't_templar', 't_lancer', 't_archer', 't_axeman', 't_wizard', 't_priest', 'archer'],
+  undead: ['t_skeleton', 't_skarcher', 't_armskel', 't_gskel', 't_necro', 'bones', 'ghoul', 'ghastly', 'revenant', 'cadaver', 'hand'],
+  beast: ['t_werewolf', 't_werebear', 'hound', 't_bat', 'bat', 'scarab', 'crawler'],
+  slime: ['t_slime', 'jelly', 'slime'],
+};
+const CAMP_OF = Object.fromEntries(Object.entries(CAMPS).flatMap(([camp, types]) => types.map((t) => [t, camp])));
+
 // Is the player inside the red fan a monster's swing shows? (the fan reaches `reach` ahead of it, about 130° wide: see drawSwingWarning)
 const FAN_HALF = 1.15;
 function inFan(w, p, reach) {
@@ -92,6 +102,9 @@ export const INVIS_DUR = 4;
 export const INVIS_CD = 25; // counted from the moment you vanish
 const SPIN_DUR = 0.6;
 export const SPIN_COOLDOWN = 1.4;
+export const GRAPPLE_COOLDOWN = 1.5;
+const GRAPPLE_OUT = 560; // px/s the hook flies
+const GRAPPLE_PULL = 330; // px/s you are pulled
 
 // Wave Defense: right click throws without limit, but each throw drains this meter (like stamina)
 const THROW_COST_FREE = 0.11;
@@ -193,6 +206,7 @@ export class Combat {
     this.smokes = []; // clouds from smoke grenades: { x, y, t, life, R }
     this.blasts = []; // the flash of one going off
     this.remoteShots = [];
+    this.remoteBombs = []; // other players' grenades: just the circle on the ground and the blast
     this.drops = [];
     this.floaters = [];
     this.decals = []; // splashes lying on the ground for a moment
@@ -204,6 +218,7 @@ export class Combat {
     this.throwCd = 0;
     this.gun = 'pistol';
     this.owned = { pistol: true }; // the others are bought in the shop
+    this.gunUp = {}; // per gun: { mag, dmg } upgrade levels (the pistol can be upgraded from the start; the others once you own them)
     this.ammo = Object.fromEntries(Object.entries(GUNS).map(([k, g]) => [k, g.mag]));
     this.reloadT = 0; // seconds of reloading left
     this.idleT = 0;
@@ -213,6 +228,8 @@ export class Combat {
     this.skillHold = null; // {t} while Space is held to charge the dash
     this.thrown = null; // the trident in flight: { x, y, a, out, range, hit, ... }
     this.dash = null;
+    this.grapple = null; // the hook in flight, or you being pulled along its rope
+    this.remoteGrapples = []; // other players' ropes
     this.dashCd = 0;
     this.trail = [];
     this.shieldT = 0;
@@ -255,6 +272,22 @@ export class Combat {
     return !eq || eq === 'trusty' ? null : weaponById(eq);
   }
 
+  // ---------- gun upgrades (Survival) ----------
+
+  gunLv(id, stat) {
+    return this.gunUp[id]?.[stat] || 0;
+  }
+
+  // the magazine: +25% rounds per level
+  gunMag(id) {
+    return Math.round(GUNS[id].mag * (1 + 0.25 * this.gunLv(id, 'mag')));
+  }
+
+  // the firepower: +20% damage per bullet per level
+  gunDmg(id) {
+    return GUNS[id].dmg * (1 + 0.2 * this.gunLv(id, 'dmg'));
+  }
+
   meleeDmg() {
     return SWORD_DMG + (this.weapon()?.dmg || 0) + this.up('melee') * (this.g.wave ? 1 : 0.4) + (this.g.wave ? 0 : DMG_PER_LEVEL * ((this.g.level || 1) - 1));
   }
@@ -274,13 +307,14 @@ export class Combat {
     return 2 + Math.round(power * 2) + (this.g.wave ? Math.floor(this.up('melee') / 2) : this.up('dashdmg') * 0.35);
   }
 
-  // The spiral: radius around you, and what it deals at a given charge
+  // The whirlwind (an axe's held left click): radius around you, and what it deals at a given charge
   spinRadius() {
-    return 38 + 7 * this.up('spinrad'); // the tips of the blades reach this far
+    return this.weapon()?.spin?.r || 38; // the tips of the blades reach this far
   }
 
   spinDmg(power = 1) {
-    return 1.5 + 1.5 * power + 0.3 * this.up('spindmg');
+    const mul = this.weapon()?.spin?.mul || 1;
+    return (1.5 + 1.5 * power + 0.5 * (this.meleeDmg() - SWORD_DMG)) * mul;
   }
 
   throwBonus() {
@@ -351,7 +385,7 @@ export class Combat {
     const a = this.aim();
     const w = this.weapon();
     if (w?.kind === 'staff') return this.castBolt(w, a);
-    if (w?.kind === 'trident' && this.thrown) {
+    if ((w?.kind === 'trident' || w?.kind === 'fan') && this.thrown) {
       this.g.onToast?.('🔱 Your trident is out there. Wait for it to come back.');
       return;
     }
@@ -454,6 +488,20 @@ export class Combat {
     }
     if (this.thrown) return;
     const [cx, cy] = this.center();
+    if (w.kind === 'fan') {
+      // opened and thrown like a glider: out in a curve, then round and back to you
+      const L = this.tridentRange(w, t);
+      this.thrown = {
+        fan: true, x: cx, y: cy, a, u: 0, T: 1 + L / 210, L, W: L * 0.42, side: Math.random() < 0.5 ? 1 : -1, hit: new Set(), rot: a, age: 0,
+        dmg: this.meleeDmg() * 1.1, w: w.id, effect: w.effect, ox: cx, oy: cy,
+      };
+      this.swingCd = Math.max(this.swingCd, 0.25);
+      this.revealT = 1.5;
+      sfx.play('dash', 0.7);
+      this.g.mp?.net.send({ t: 'fx', kind: 'fan', x: cx, y: cy, a, L, T: this.thrown.T, side: this.thrown.side, w: w.id }); // the others see it glide too
+      this.faceAim(a);
+      return;
+    }
     this.thrown = {
       x: cx, y: cy, a, out: true, range: this.tridentRange(w, t), went: 0, hit: new Set(), rot: a, speed: w.throw.speed, age: 0,
       dmg: this.meleeDmg() * 1.3, w: w.id, effect: w.effect,
@@ -463,6 +511,13 @@ export class Combat {
     sfx.play('dash', 0.8);
     this.g.mp?.net.send({ t: 'fx', kind: 'trident', x: cx, y: cy, a, range: this.thrown.range, speed: w.throw.speed, w: w.id }); // the others see it fly too
     this.faceAim(a);
+  }
+
+  // another player's fan: the same curve, drawn from where they stand now (their own game does the hitting)
+  remoteFan(m) {
+    if (!weaponById(m.w) || !this.g.remotes.has(m.id)) return;
+    const L = Math.min(300, m.L || 100);
+    this.remoteTridents.push({ fan: true, id: m.id, x: m.x, y: m.y, a: m.a, u: 0, T: Math.min(4, m.T || 1.5), L, W: L * 0.42, side: m.side < 0 ? -1 : 1, rot: m.a, age: 0, w: m.w, ox: m.x, oy: m.y });
   }
 
   // another player's trident: it flies out and comes back to them, for show (their own game does the hitting)
@@ -478,11 +533,20 @@ export class Combat {
       th.age += dt;
       const cx = r.x;
       const cy = r.y - 8;
+      if (th.fan) {
+        th.u += dt / th.T;
+        if (th.u >= 1 || th.age > 8) return false;
+        [th.x, th.y] = this.fanPoint(th, th.u, cx, cy);
+        th.ox = cx;
+        th.oy = cy;
+        th.rot += dt * 16;
+        return true;
+      }
       const step = th.speed * (th.out ? 1 : 1.15) * dt;
       if (th.out) {
         const nx = th.x + Math.cos(th.a) * step;
         const ny = th.y + Math.sin(th.a) * step;
-        if (this.g.world.isBlocked(nx - 1, ny - 1, 2, 2, true, true)) th.went = th.range;
+        if (this.g.world.isBlocked(nx - 1, ny - 1, 2, 2, true, true, true)) th.went = th.range;
         else {
           th.x = nx;
           th.y = ny;
@@ -501,7 +565,39 @@ export class Combat {
     });
   }
 
+  // where a thrown fan is, `u` of the way round its loop (0..1), measured from wherever its owner stands now
+  fanPoint(th, u, cx, cy) {
+    const fwd = (th.L * (1 - Math.cos(2 * Math.PI * u))) / 2;
+    const side = th.W * th.side * Math.sin(2 * Math.PI * u);
+    const ca = Math.cos(th.a);
+    const sa = Math.sin(th.a);
+    return [cx + ca * fwd - sa * side, cy + sa * fwd + ca * side];
+  }
+
+  updateFan(dt) {
+    const th = this.thrown;
+    const [cx, cy] = this.center();
+    th.u += dt / th.T;
+    th.age += dt;
+    if (th.u >= 1 || th.age > 8) {
+      this.thrown = null;
+      sfx.play('pickup', 0.8);
+      return;
+    }
+    [th.x, th.y] = this.fanPoint(th, th.u, cx, cy);
+    th.ox = cx;
+    th.oy = cy;
+    th.rot += dt * 16;
+    if (th.u > 0.5 && !th.back) {
+      th.back = true; // on the way home it can hit everything again, a little softer
+      th.hit = new Set();
+      th.dmg *= 0.8;
+    }
+    this.thrownHits(th, 12);
+  }
+
   updateTrident(dt) {
+    if (this.thrown.fan) return this.updateFan(dt);
     const th = this.thrown;
     const [cx, cy] = this.center();
     th.age += dt;
@@ -510,7 +606,7 @@ export class Combat {
     if (th.out) {
       const nx = th.x + Math.cos(th.a) * step;
       const ny = th.y + Math.sin(th.a) * step;
-      if (this.g.world.isBlocked(nx - 1, ny - 1, 2, 2, true, true)) th.went = th.range; // stuck in something: back it comes (water is no obstacle)
+      if (this.g.world.isBlocked(nx - 1, ny - 1, 2, 2, true, true, true)) th.went = th.range; // stuck in something: back it comes (water is no obstacle)
       else {
         th.x = nx;
         th.y = ny;
@@ -531,13 +627,17 @@ export class Combat {
       th.x += ((cx - th.x) / d) * Math.min(d, step);
       th.y += ((cy - th.y) / d) * Math.min(d, step);
     }
-    // everything along the way gets skewered once per leg
+    this.thrownHits(th, 9);
+  }
+
+  // everything a thrown trident or fan passes through gets cut once per leg
+  thrownHits(th, reach) {
     for (const s of this.skeletons) {
-      if (s.state === 'dead' || th.hit.has(`s${s.id}`) || Math.hypot(s.x - th.x, s.y - 8 - th.y) > 13) continue;
+      if (s.state === 'dead' || th.hit.has(`s${s.id}`) || Math.hypot(s.x - th.x, s.y - 8 - th.y) > reach + 4) continue;
       th.hit.add(`s${s.id}`);
       this.damageSkeleton(s, th.dmg, th.x - Math.cos(th.a) * 8, th.y - Math.sin(th.a) * 8, 140);
     }
-    for (const m of this.monstersNear(th.x, th.y, 9)) {
+    for (const m of this.monstersNear(th.x, th.y, reach)) {
       if (th.hit.has(`m${m.id}`)) continue;
       th.hit.add(`m${m.id}`);
       this.hitMonster(m, th.dmg, th.x - Math.cos(th.a) * 8, th.y - Math.sin(th.a) * 8, th.effect === 'tide' ? 220 : 140);
@@ -545,7 +645,7 @@ export class Combat {
     }
     if (this.g.fight) {
       for (const r of this.g.remotes.values()) {
-        if (r.hidden || this.g.sameTeam(r) || th.hit.has(`r${r.id}`) || Math.hypot(r.x - th.x, r.y - 8 - th.y) > 12) continue;
+        if (r.hidden || this.g.sameTeam(r) || th.hit.has(`r${r.id}`) || Math.hypot(r.x - th.x, r.y - 8 - th.y) > reach + 3) continue;
         th.hit.add(`r${r.id}`);
         this.hitRemote(r, th.dmg);
       }
@@ -555,7 +655,7 @@ export class Combat {
       th.hit.add(`b${b.i}`);
       this.g.balls.hit(b, Math.cos(th.a), Math.sin(th.a), 200);
     }
-    this.chopTrees(th.x, th.y, 9, th.dmg * 0.5, null, 0, th.hit);
+    this.chopTrees(th.x, th.y, reach, th.dmg * 0.5, null, 0, th.hit);
   }
 
   // freeze a monster or skeleton in place for a while
@@ -612,7 +712,7 @@ export class Combat {
     const skill = this.g.activeSkill();
     if (!skill || !this.canFight()) return;
     const power = Math.max(0.2, Math.min(1, h.t / (HOLD_MIN + CHARGE_TIME)));
-    if (skill === 'spiral') this.startSpin(power, true);
+    if (skill === 'grapple') this.startGrapple(power, true);
     else this.startDash(power, true);
   }
 
@@ -630,7 +730,7 @@ export class Combat {
       this.warnIndoors();
       return;
     }
-    if (!this.g.wave && this.weapon()?.kind === 'trident' && this.thrown) return; // it is still out there
+    if (['trident', 'fan'].includes(this.weapon()?.kind) && this.thrown) return; // it is still out there
     this.hold = { t: 0 };
   }
 
@@ -653,7 +753,8 @@ export class Combat {
     }
     if (t < HOLD_MIN) this.attack();
     else if (kind === 'staff') this.castGround(w, Math.min(1, (t - HOLD_MIN) / CHARGE_TIME));
-    else if (kind === 'trident' || kind === 'sling') this.releaseCharge(w, t);
+    else if (kind === 'trident' || kind === 'sling' || kind === 'fan') this.releaseCharge(w, t);
+    else if (kind === 'axe') this.startSpin(Math.min(1, (t - HOLD_MIN) / CHARGE_TIME)); // the whirlwind
     else this.attack();
   }
 
@@ -682,6 +783,200 @@ export class Combat {
     this.invuln = Math.max(this.invuln, this.dash.dur + 0.15);
     this.faceAim(a);
     g.mp?.net.send({ t: 'fx', kind: 'swing', a });
+  }
+
+  // ---------- the grapple hook (a Space skill): holding sets the range, letting go fires it ----------
+
+  grappleRange(power) {
+    return (70 + 150 * power) * (1 + 0.18 * this.up('grange'));
+  }
+
+  // fly the hook along the aim line until it meets something: a wall, a tree, a house, a barricade, a creature or another player
+  startGrapple(power, quiet = false) {
+    const g = this.g;
+    if (this.grapple || this.dash || this.spin) return;
+    const cost = DASH_STAMINA / g.staminaCap();
+    if (this.dashCd > 0 || g.stamina < cost) {
+      if (g.stamina < cost) g.onToast?.('Too tired to grapple!');
+      if (!quiet) this.attack();
+      return;
+    }
+    const a = this.aim();
+    const [cx, cy] = this.center();
+    const range = this.grappleRange(power);
+    let hit = null;
+    for (let d = 10; d <= range && !hit; d += 4) {
+      const x = cx + Math.cos(a) * d;
+      const y = cy + Math.sin(a) * d;
+      for (const r of g.remotes.values()) {
+        if (!r.hidden && Math.hypot(r.x - x, r.y - 8 - y) < 9) hit = { kind: 'player', id: r.id, x: r.x, y: r.y - 8, d };
+      }
+      if (!hit) {
+        const m = this.monstersNear(x, y, 5)[0];
+        if (m) hit = { kind: 'mob', ref: m, x: m.x, y: bodyY(m), d };
+      }
+      if (!hit) {
+        const s = this.skeletons.find((k) => k.state !== 'dead' && Math.hypot(k.x - x, k.y - 8 - y) < 8);
+        if (s) hit = { kind: 'mob', ref: s, x: s.x, y: s.y - 8, d };
+      }
+      if (!hit && g.world.isBlocked(x - 1, y - 1, 2, 2, true)) hit = { kind: 'wall', x, y, d }; // (water is no obstacle)
+    }
+    g.stamina -= cost;
+    this.dashCd = GRAPPLE_COOLDOWN;
+    this.revealT = 1.5;
+    sfx.play('dash', 0.7);
+    this.faceAim(a);
+    const len = hit ? hit.d : range;
+    this.grapple = { a, hit, hx: cx + Math.cos(a) * len, hy: cy + Math.sin(a) * len, len, ext: 0, phase: 'out', t: 0, pulled: 0, ox: cx, oy: cy };
+    g.mp?.net.send({ t: 'fx', kind: 'grapple', a, len: Math.round(len), hit: hit ? 1 : 0 }); // the others see the rope too
+  }
+
+  updateGrapple(dt) {
+    const gr = this.grapple;
+    const g = this.g;
+    const p = g.player;
+    gr.t += dt;
+    const cx = p.x;
+    const cy = p.y - 8;
+    gr.ox = cx;
+    gr.oy = cy;
+    if (gr.phase === 'out') {
+      gr.ext = Math.min(gr.len, gr.ext + GRAPPLE_OUT * dt);
+      gr.hx = cx + Math.cos(gr.a) * gr.ext;
+      gr.hy = cy + Math.sin(gr.a) * gr.ext;
+      if (gr.ext >= gr.len) {
+        if (gr.hit) {
+          gr.phase = 'pull';
+          sfx.play('thud', 0.7);
+          this.invuln = Math.max(this.invuln, 0.9);
+        } else gr.phase = 'back'; // it found nothing: the rope comes back in
+      }
+      return;
+    }
+    if (gr.phase === 'pull') {
+      const h = gr.hit;
+      if (h.kind === 'player') {
+        const r = g.remotes.get(h.id);
+        if (r) {
+          h.x = r.x;
+          h.y = r.y - 8;
+        }
+      } else if (h.kind === 'mob' && h.ref.state !== 'dead') {
+        h.x = h.ref.x;
+        h.y = h.ref.y - 8;
+      }
+      gr.hx = h.x;
+      gr.hy = h.y;
+      const dx = h.x - cx;
+      const dy = h.y - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const stop = h.kind === 'wall' ? 12 : 18;
+      const step = Math.min(GRAPPLE_PULL * dt, Math.max(0, dist - stop));
+      const nx = p.x + (dx / dist) * step;
+      const ny = p.y + (dy / dist) * step;
+      let moved = true;
+      if (!g.blocked(nx, ny)) {
+        p.x = nx;
+        p.y = ny;
+      } else if (!g.blocked(nx, p.y)) p.x = nx;
+      else if (!g.blocked(p.x, ny)) p.y = ny;
+      else moved = false;
+      p.moving = true;
+      gr.pulled += step;
+      this.trail.push({ x: p.x, y: p.y, dir: p.dir, t: 0 });
+      if (dist - step <= stop + 0.5 || !moved || gr.t > 1.6) {
+        // arrived: a creature you hooked takes a hit on the way in
+        if (h.kind === 'mob' && h.ref.state !== 'dead') {
+          if (h.ref.hp !== undefined && h.ref.max !== undefined && h.ref.type) this.hitMonster(h.ref, this.dashDmg(0.4), cx, cy, 80);
+          else this.damageSkeleton(h.ref, this.dashDmg(0.4), cx, cy, 80);
+        } else if (h.kind === 'player' && g.fight) {
+          const r = g.remotes.get(h.id);
+          if (r && !r.hidden && !g.sameTeam(r)) this.hitRemote(r, this.dashDmg(0.4));
+        }
+        gr.phase = 'back';
+        gr.back = 0;
+      }
+      return;
+    }
+    // the rope reels in
+    gr.back = (gr.back || 0) + dt;
+    const k = Math.min(1, gr.back / 0.12);
+    gr.hx += (cx - gr.hx) * k;
+    gr.hy += (cy - gr.hy) * k;
+    if (k >= 1) this.grapple = null;
+  }
+
+  // another player's rope: from where they stand now out to the hook, held for as long as it takes (for show)
+  remoteGrapple(m) {
+    if (!this.g.remotes.has(m.id)) return;
+    const len = Math.min(260, Math.max(8, m.len || 40));
+    const out = len / GRAPPLE_OUT;
+    const pull = m.hit ? Math.min(1.6, len / GRAPPLE_PULL) : 0;
+    this.remoteGrapples.push({ id: m.id, a: m.a, len, hit: !!m.hit, t: 0, out, pull, total: out + pull + 0.14, ox: 0, oy: 0, hx: 0, hy: 0, fixed: null });
+  }
+
+  updateRemoteGrapples(dt) {
+    this.remoteGrapples = this.remoteGrapples.filter((gr) => {
+      const r = this.g.remotes.get(gr.id);
+      if (!r) return false;
+      gr.t += dt;
+      gr.ox = r.x;
+      gr.oy = r.y - 8;
+      if (!gr.fixed) {
+        // the hook flies out from them, and stays where it landed while they are pulled in
+        const ext = Math.min(gr.len, gr.t * GRAPPLE_OUT);
+        gr.hx = gr.ox + Math.cos(gr.a) * ext;
+        gr.hy = gr.oy + Math.sin(gr.a) * ext;
+        if (gr.hit && gr.t >= gr.out) gr.fixed = { x: gr.hx, y: gr.hy };
+      } else {
+        gr.hx = gr.fixed.x;
+        gr.hy = gr.fixed.y;
+      }
+      if (!gr.hit && gr.t > gr.out) {
+        const k = Math.min(1, (gr.t - gr.out) / 0.12);
+        gr.hx += (gr.ox - gr.hx) * k;
+        gr.hy += (gr.oy - gr.hy) * k;
+      }
+      return gr.t < gr.total;
+    });
+  }
+
+  // the rope and its hook, from (gr.ox, gr.oy) to (gr.hx, gr.hy)
+  drawGrappleRope(ctx, gr) {
+    const x0 = gr.ox;
+    const y0 = gr.oy - 2;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(40,24,10,0.85)';
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(gr.hx, gr.hy);
+    ctx.stroke();
+    ctx.strokeStyle = '#d8b878';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([3, 2]);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(gr.hx, gr.hy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // the hook: a small grey claw pointing the way it flew
+    const a = Math.atan2(gr.hy - y0, gr.hx - x0);
+    ctx.translate(gr.hx, gr.hy);
+    ctx.rotate(a);
+    ctx.fillStyle = '#c9ced6';
+    ctx.strokeStyle = '#3d424d';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(4, 0);
+    ctx.lineTo(-2, -3.5);
+    ctx.lineTo(-1, 0);
+    ctx.lineTo(-2, 3.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   startSpin(power, quiet = false) {
@@ -937,7 +1232,26 @@ export class Combat {
     this.revealT = 1.5;
     sfx.play('throw', 0.8);
     this.throwCd = 0.4;
+    this.g.mp?.net.send({ t: 'fx', kind: 'bomb', item, tx: Math.round(tx), ty: Math.round(ty) }); // the others see the circle and the blast too
     this.faceAim(a);
+  }
+
+  // another player's grenade: the circle on the ground that fills up, then the blast (for show; their game does the damage)
+  remoteBomb(m) {
+    const gren = GRENADES[m.item];
+    if (!gren || !Number.isFinite(m.tx) || !Number.isFinite(m.ty)) return;
+    this.remoteBombs.push({ x: m.tx, y: m.ty, tx: m.tx, ty: m.ty, fly: 0, flightMax: 1, dist: 0, fuse: gren.fuse, max: gren.fuse, stuck: null, R: gren.R, kind: gren.kind, item: m.item, remote: true });
+  }
+
+  updateRemoteBombs(dt) {
+    this.remoteBombs = this.remoteBombs.filter((b) => {
+      if ((b.fuse -= dt) > 0) return true;
+      if (b.kind !== 'smoke') {
+        this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R, ...(b.kind === 'stun' ? { tone: 'stun' } : {}) });
+        sfx.play('boom', 0.5);
+      }
+      return false;
+    });
   }
 
   updateBombs(dt) {
@@ -964,7 +1278,7 @@ export class Combat {
             break;
           }
         }
-        if (!b.stuck && world.isBlocked(b.x - 1, b.y - 1, 2, 2, true, true)) {
+        if (!b.stuck && world.isBlocked(b.x - 1, b.y - 1, 2, 2, true, true, true)) {
           b.x = px;
           b.y = py;
           b.fly = 0;
@@ -1053,7 +1367,7 @@ export class Combat {
       const shot = {
         x: cx + Math.cos(b) * 12, y: cy + Math.sin(b) * 12,
         vx: Math.cos(b) * BULLET_SPEED, vy: Math.sin(b) * BULLET_SPEED,
-        id: 'bullet', dmg: gun.dmg + this.throwBonus(), life: gun.life, rot: 0, free: true,
+        id: 'bullet', dmg: this.gunDmg(this.gun) + this.throwBonus(), life: gun.life, rot: 0, free: true,
         plasma: !!gun.plasma, pierce: gun.plasma ? 1 : 0, // plasma bolts go through one enemy and hit the next
         pellet: gun.pellets > 1, ox: cx + Math.cos(b) * 12, oy: cy + Math.sin(b) * 12, // shotgun pellets remember where they started
       };
@@ -1200,8 +1514,8 @@ export class Combat {
         const gun = GUNS[this.gun];
         if (this.reloadT > 0) {
           this.reloadT -= dt;
-          if (this.reloadT <= 0) this.ammo[this.gun] = gun.mag;
-        } else if (this.ammo[this.gun] < gun.mag && (this.idleT += dt) > 2) {
+          if (this.reloadT <= 0) this.ammo[this.gun] = this.gunMag(this.gun);
+        } else if (this.ammo[this.gun] < this.gunMag(this.gun) && (this.idleT += dt) > 2) {
           this.reloadT = gun.reload; // not shooting for a while: top the magazine up
         }
       }
@@ -1217,6 +1531,8 @@ export class Combat {
     if (this.skillHold) this.skillHold.t += dt;
     if (this.thrown) this.updateTrident(dt);
     if (this.dash) this.updateDash(dt);
+    if (this.grapple) this.updateGrapple(dt);
+    this.updateRemoteGrapples(dt);
     this.trail = this.trail.filter((tr) => (tr.t += dt) < 0.22);
 
     if (this.swing) {
@@ -1240,6 +1556,7 @@ export class Combat {
       this.updateWilds(dt); // (underground it only moves the monsters that wait in the rooms: nothing new turns up)
     }
     this.updateRemoteTridents(dt);
+    this.updateRemoteBombs(dt);
     this.updateSpells(dt); // (in every mode: Survival and the inside of a house too, or the circles of a staff stay on the screen)
     this.skeletons = this.skeletons.filter((s) => this.updateSkeleton(s, dt));
     this.projectiles = this.projectiles.filter((p) => this.updateProjectile(p, dt));
@@ -1274,14 +1591,14 @@ export class Combat {
     const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 1;
     if (this.skeletons.filter((s) => s.state !== 'dead').length >= cap) return;
     const { world, player: p } = this.g;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const d = 150 + Math.random() * 80;
+      const d = 150 + Math.random() * 120;
       const x = p.x + Math.cos(ang) * d;
       const y = p.y + Math.sin(ang) * d;
       const tx = Math.floor(x / 16);
       const ty = Math.floor(y / 16);
-      if (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4)) continue;
+      if (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4) || this.g.seenFrom(x, y)) continue;
       this.skeletons.push({
         id: this.nextId++, x, y, hp: 3, state: 'idle', stateT: 0, anim: Math.random() * 3, face: 1,
         cd: 0.8, didHit: false, kx: 0, ky: 0, wx: 0, wy: 0, wanderT: 0,
@@ -1412,9 +1729,9 @@ export class Combat {
     const { world, player: p, home } = this.g;
     const def = MONSTERS[type];
     const flyer = def.kind === 'fly';
-    for (let tries = 0; tries < 6; tries++) {
+    for (let tries = 0; tries < 10; tries++) {
       const ang = Math.random() * Math.PI * 2;
-      const d = 170 + Math.random() * 40;
+      const d = 170 + Math.random() * 90;
       const cx = p.x + Math.cos(ang) * d;
       const cy = p.y + Math.sin(ang) * d;
       if (Math.hypot(cx - home.x, cy - home.y) < 160) continue;
@@ -1424,6 +1741,7 @@ export class Combat {
         const y = cy + (Math.random() - 0.5) * 36;
         const tx = Math.floor(x / 16);
         const ty = Math.floor(y / 16);
+        if (this.g.seenFrom(x, y)) continue; // (a pack never turns up on the screen)
         if (!flyer && (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4))) continue;
         this.wilds.push(this.makeWild(type, x, y, Math.max(1, rollMonsterLevel(this.dayLevel()) - 1)));
         made++;
@@ -1467,7 +1785,7 @@ export class Combat {
         } else if (!this.wilds.includes(st.w)) st.w = null; // it was swept away (left the dungeon, and so on): a new one is waiting
       }
       if (st.w || st.until > this.zoneClock) continue;
-      if (Math.hypot(z.x - tx, z.y - ty) < z.r + 6) st.w = this.spawnZoneBoss(z);
+      if (Math.hypot(z.x - tx, z.y - ty) < z.r + 6 && !this.g.seenFrom(z.x * 16 + 8, z.y * 16 + 8, 8)) st.w = this.spawnZoneBoss(z); // (it wakes once the middle of its zone is out of view)
     }
   }
 
@@ -1528,11 +1846,12 @@ export class Combat {
 
   spawnWild(night) {
     const { world, player: p, home } = this.g;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const d = 160 + Math.random() * 80;
+      const d = 160 + Math.random() * 120;
       const x = p.x + Math.cos(ang) * d;
       const y = p.y + Math.sin(ang) * d;
+      if (this.g.seenFrom(x, y)) continue; // never on the screen: it walks in from outside
       const foes = foesAt(world, x, y);
       const type = pickOf(night ? foes.night : foes.day);
       const def = MONSTERS[type];
@@ -1555,7 +1874,7 @@ export class Combat {
     const dist = Math.hypot(dx, dy) || 1;
     w.anim += dt;
     if (w.state === 'dead') return (w.t += dt) < (def.tiny ? 0.85 : 0.5);
-    if (!w.zone && !w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : 430)) return false;
+    if (!w.zone && !w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : Math.max(430, Math.hypot(this.g.viewW, this.g.viewH) / 2 + 220))) return false;
     if (w.nightBoss && !w.zone && !this.g.dungeon && this.g.darkness() < 0.15) w.burning = true; // sunrise
     if (w.burning) {
       // it burns away in the daylight. Nothing drops from something that burned to death.
@@ -1624,6 +1943,7 @@ export class Combat {
     }
     if (def.tiny && dist < 260 && !this.hidden && !this.g.dead && this.tinySkill(w, def, dt, dist, hitNow, by)) return true;
     if ((w.nightBoss || w.miniBoss || def.skill === 'charge') && this.nightBossSkill(w, def, dt, dist, dx, dy, step)) return true;
+    if (this.mobFight(w, def, dist, dt, step, hitNow, rng)) return true;
     const aggro = Math.max(w.nightBoss || w.miniBoss ? 180 : 100, rng ? rng.range + 24 : 0) + dark * 50;
     if (dist < aggro && !this.hidden && !this.g.dead) {
       w.face = dx >= 0 ? 1 : -1;
@@ -1638,7 +1958,8 @@ export class Combat {
         // ranged: keep a distance and fire from there
         if (dist > rng.range * 0.85) step(ux * speed * dt, uy * speed * dt);
         else if (dist < rng.range * 0.4) step(-ux * speed * 0.7 * dt, -uy * speed * 0.7 * dt);
-        if (dist < rng.range && w.cd <= 0) {
+        // (a shooter only fires from where you can see it: an arrow out of nowhere is not fair, so it keeps coming closer instead)
+        if (dist < rng.range && w.cd <= 0 && this.g.seenFrom(w.x, w.y, -4)) {
           w.cd = rng.rate * (0.8 + Math.random() * 0.4);
           if (def.tiny) this.tinyShoot(w, def, hitNow, by);
           else {
@@ -1681,6 +2002,45 @@ export class Combat {
       step(w.wx * dt, w.wy * dt);
       if (w.wx) w.face = w.wx >= 0 ? 1 : -1;
       if (w.wx || w.wy) w.dirv = Math.abs(w.wx) > Math.abs(w.wy) ? (w.wx > 0 ? 2 : 3) : w.wy > 0 ? 0 : 1;
+    }
+    return true;
+  }
+
+  // Monsters of different camps (orcs, humans, the undead, beasts, slimes) go for each other when they meet, unless you are right there.
+  // Bosses stay out of it. Returns true while it is busy with one.
+  mobFight(w, def, dist, dt, step, dmg, rng) {
+    const camp = CAMP_OF[w.type];
+    if (!camp || w.zone || w.nightBoss || w.miniBoss || w.minionOf) return false;
+    if (dist < 55 && !this.hidden && !this.g.dead) return false;
+    let foe = null;
+    let fd = 130;
+    for (const o of this.wilds) {
+      if (o === w || o.state === 'dead' || o.zone || o.nightBoss || o.miniBoss || o.minionOf) continue;
+      const oc = CAMP_OF[o.type];
+      if (!oc || oc === camp) continue;
+      const d = Math.hypot(o.x - w.x, o.y - w.y);
+      if (d < fd) {
+        fd = d;
+        foe = o;
+      }
+    }
+    if (!foe) return false;
+    const ux = (foe.x - w.x) / (fd || 1);
+    const uy = (foe.y - w.y) / (fd || 1);
+    w.face = ux >= 0 ? 1 : -1;
+    w.dirv = Math.abs(ux) > Math.abs(uy) ? (ux > 0 ? 2 : 3) : uy > 0 ? 0 : 1;
+    const reach = rng ? rng.range * 0.8 : (def.reach || 14) * (w.scale || 1) + 4;
+    if (fd > reach) {
+      const speed = def.speed * 1.1 * (w.slowT > 0 ? 0.45 : 1);
+      step(ux * speed * dt, uy * speed * dt);
+    } else if (w.cd <= 0) {
+      w.cd = 1.2 + Math.random() * 0.5;
+      const hit = Math.max(1, dmg * 0.8);
+      if (def.tiny) this.startSwing(w, pickOf(def.swings || ['atk1']), 0.6, 0.55, () => foe.state !== 'dead' && this.damageWild(foe, hit, w.x, w.y, 90, true));
+      else {
+        w.atk = 0.25;
+        this.damageWild(foe, hit, w.x, w.y, 90, true);
+      }
     }
     return true;
   }
@@ -1875,7 +2235,8 @@ export class Combat {
     return true;
   }
 
-  damageWild(w, dmg, fromX, fromY, kb) {
+  // `quiet`: it was another monster that hit it, so a fall counts for nothing (no kill, no loot, no xp)
+  damageWild(w, dmg, fromX, fromY, kb, quiet = false) {
     if (w.state === 'dead') return;
     const def = MONSTERS[w.type];
     if (w.swing?.block) {
@@ -1888,6 +2249,7 @@ export class Combat {
     if (w.hp <= 0) {
       w.state = 'dead';
       w.t = 0;
+      if (quiet) return;
       this.kills++;
       this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss || w.miniBoss) * lvXp(w.lv || 1) * (w.minionOf ? 0.3 : 1)), !!(def.boss || w.nightBoss || w.miniBoss), { x: w.x, y: w.y });
       if (w.miniBoss) {
@@ -2412,6 +2774,7 @@ export class Combat {
     this.projectiles = [];
     this.swing = null;
     this.dash = null;
+    this.grapple = null;
     this.spin = null;
     this.invisT = 0;
     this.hold = null;
@@ -2510,8 +2873,8 @@ export class Combat {
           }
         }
       }
-      // bullets fly straight over the bus, so you can shoot from its roof side at whatever is on the other side
-      if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, true, true, p.id === 'bullet')) {
+      // everything you throw or shoot (bullets, stones, bolts) flies straight over the shelter, so nothing is stopped by it
+      if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, true, true, true)) {
         // (water and lava do not stop a shot: it flies right over them)
         if (p.spell || p.stone) this.chopTrees(p.x, p.y, 7, Math.max(1, p.dmg * 0.9)); // bolts and stones cut at the trees they hit
         this.land(p, px, py);
@@ -2667,6 +3030,9 @@ export class Combat {
     for (const s of this.spells) list.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'spell', s }, y: s.y + 1 });
     for (const sm of this.smokes) list.push({ kind: 'projectile', p: { x: sm.x, y: sm.y, id: 'smoke', sm }, y: sm.y + 30 });
     for (const b of this.bombs) list.push({ kind: 'projectile', p: { x: b.x, y: b.y, id: 'bomb', b }, y: b.y + 6 });
+    if (this.grapple) list.push({ kind: 'projectile', p: { id: 'grapple', gr: this.grapple }, y: this.g.player.y + 30 });
+    for (const gr of this.remoteGrapples) list.push({ kind: 'projectile', p: { id: 'grapple', gr }, y: gr.oy + 30 });
+    for (const b of this.remoteBombs) list.push({ kind: 'projectile', p: { x: b.x, y: b.y, id: 'bomb', b }, y: b.y + 6 });
     for (const bl of this.blasts) list.push({ kind: 'projectile', p: { x: bl.x, y: bl.y, id: 'blast', bl }, y: bl.y + 40 });
     for (const p of this.remoteShots) list.push({ kind: 'projectile', p, y: p.y + 6 });
     for (const d of this.drops) if (!d.ins) list.push({ kind: 'drop', d, y: d.y });
@@ -2813,9 +3179,24 @@ export class Combat {
         ctx.drawImage(this.img[`tiny/fx_${s.fx}`], f * 100, 0, 100, 100, Math.round(s.x - 50 * k), Math.round(s.y - 57 * k), 100 * k, 100 * k);
         ctx.restore();
       }
+    } else if (o.kind === 'projectile' && o.p.id === 'grapple') {
+      this.drawGrappleRope(ctx, o.p.gr);
     } else if (o.kind === 'projectile' && o.p.id === 'trident') {
       const th = o.p.th;
       const icon = this.img[weaponIconFile(weaponById(th.w))];
+      if (th.fan) {
+        // the open fan spins as it glides, with a few fading copies of itself along the curve it just flew
+        for (let k = 4; k >= 0; k--) {
+          const [gx, gy] = k ? this.fanPoint(th, Math.max(0, th.u - k * 0.03), th.ox, th.oy) : [th.x, th.y];
+          ctx.save();
+          ctx.globalAlpha = k ? 0.14 * (5 - k) : 1;
+          ctx.translate(Math.round(gx), Math.round(gy));
+          ctx.rotate(th.rot - k * 0.5);
+          ctx.drawImage(icon, -16, -16);
+          ctx.restore();
+        }
+        return;
+      }
       ctx.save();
       ctx.translate(Math.round(th.x), Math.round(th.y));
       ctx.rotate(th.rot + Math.PI / 4);
@@ -2849,7 +3230,12 @@ export class Combat {
       ctx.save();
       ctx.translate(Math.round(o.p.x), Math.round(o.p.y));
       ctx.rotate(o.p.ang);
-      ctx.drawImage(this.img[`tiny/arrow${o.p.arrow}`], -16, -16);
+      // a monster's arrow: bigger than it was, with a dark edge and a pale streak behind it, so it can be seen against the grass
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillRect(-30, -0.5, 24, 1.5);
+      ctx.shadowColor = 'rgba(20,10,0,0.95)';
+      ctx.shadowBlur = 3;
+      ctx.drawImage(this.img[`tiny/arrow${o.p.arrow}`], -24, -24, 48, 48);
       ctx.restore();
     } else if (o.kind === 'projectile' && o.p.id === 'wshot') {
       // a monster's spit: a small glowing green orb
@@ -3116,7 +3502,7 @@ export class Combat {
   // Progress bar under the hero while the left button is held. The notch marks where a dash unlocks.
   drawChargeBar(ctx, camX, camY, zoom, t) {
     const wk = this.weapon()?.kind;
-    if (!this.g.wave && this.hold && this.hold.t >= HOLD_MIN * 0.8 && (wk === 'trident' || wk === 'sling')) {
+    if (this.hold && this.hold.t >= HOLD_MIN * 0.8 && (wk === 'trident' || wk === 'sling' || wk === 'fan')) {
       // where the trident would land: a line from the hero to the cursor, cut off at its range
       const w = this.weapon();
       const [cx, cy] = this.center();
@@ -3156,8 +3542,23 @@ export class Combat {
       ctx.stroke();
       ctx.restore();
     }
-    const held = this.skillHold || (this.g.wave ? this.hold : null);
-    if (!held || held.t < 0.12 || this.dash || this.spin || !this.g.activeSkill()) return;
+    const axe = wk === 'axe';
+    if (axe && this.hold && this.hold.t >= HOLD_MIN * 0.6 && !this.spin) {
+      // how far the whirlwind will reach: a ring round you
+      const [cx, cy] = this.center();
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,80,70,0.85)';
+      ctx.fillStyle = 'rgba(255,60,50,0.12)';
+      ctx.lineWidth = zoom * 0.9;
+      ctx.setLineDash([zoom * 2, zoom * 1.6]);
+      ctx.beginPath();
+      ctx.arc((cx - camX) * zoom, (cy - camY) * zoom, this.spinRadius() * zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    const held = this.skillHold || (axe ? this.hold : null);
+    if (!held || held.t < 0.12 || this.dash || this.spin || (!axe && !this.g.activeSkill())) return;
     const total = HOLD_MIN + CHARGE_TIME;
     const frac = Math.min(1, held.t / total);
     const unlock = this.skillHold ? 0 : HOLD_MIN / total;
@@ -3185,7 +3586,8 @@ export class Combat {
     ctx.textBaseline = 'top';
     ctx.lineWidth = zoom;
     ctx.strokeStyle = 'rgba(255,250,240,0.95)';
-    const word = this.g.activeSkill() === 'spiral' ? 'spin' : 'dash';
+    const grapple = this.skillHold && this.g.activeSkill() === 'grapple';
+    const word = axe && !this.skillHold ? 'spin' : grapple ? 'grapple' : 'dash';
     const label = full ? `${word.toUpperCase()}! (release)` : ready ? `Release to ${word}` : 'Hold…';
     ctx.strokeText(label, x + w / 2, y + h + zoom * 2);
     ctx.fillStyle = ready ? '#c47a00' : '#8d735f';

@@ -1158,7 +1158,21 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .base-lv { font: 700 0.7rem var(--pixel); color: #b0782a; white-space: nowrap; }
 
 /* the shelter's health: always at the top of the screen, under the weather chip, wherever you are on the map */
-.shelter-bar { top: 46px; left: 50%; transform: translateX(-50%); width: 300px; display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; pointer-events: none; z-index: 5; }
+/* the key list under the map: big, high-contrast letters so it can be read at a glance */
+.key-hints { width: 186px; padding: 6px 8px; pointer-events: auto; background: rgba(255, 248, 235, 0.96); }
+.key-hints-head { width: 100%; display: flex; justify-content: space-between; align-items: center; font: 700 0.95rem var(--pixel); color: var(--ink); background: none; border: 0; padding: 2px 2px 4px; cursor: pointer; }
+.key-hints ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.key-hints li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.key-hints .kh-keys { display: flex; gap: 2px; flex-wrap: nowrap; }
+.key-hints kbd { font: 800 0.85rem var(--body); letter-spacing: 0.02em; color: #2d2118; background: #fff; border: 2px solid var(--wood); border-bottom-width: 3px; border-radius: 6px; padding: 0 5px; min-width: 20px; text-align: center; line-height: 1.35; white-space: nowrap; }
+.key-hints .kh-what { font: 700 0.88rem var(--body); color: var(--ink); text-align: right; white-space: nowrap; }
+@media (max-height: 520px) { .key-hints { display: none; } }
+.gun-upgs { display: grid; gap: 4px; margin-top: 6px; }
+.gun-upg { text-align: left; font-size: 0.78rem; line-height: 1.25; padding: 3px 8px; white-space: normal; }
+.wave-hud .wave-start { pointer-events: auto; justify-self: center; font-size: 0.8rem; line-height: 1.2; padding: 3px 12px; min-height: 0; width: auto; height: auto; }
+.wave-hud .wave-start kbd { font-size: 0.7rem; }
+.shelter-bar { top: auto; bottom: 172px; left: 50%; transform: translateX(-50%); width: 300px; display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; pointer-events: none; z-index: 5; }
+/* the shelter's health sits just above the hotbar, wherever you are */
 .shelter-bar .shelter-ico { font-size: 1.1rem; line-height: 1; }
 .shelter-bar .shelter-name { font: 700 0.72rem var(--pixel); color: #b0782a; white-space: nowrap; }
 .shelter-bar .base-track { height: 13px; min-width: 70px; }
@@ -1167,8 +1181,9 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .shelter-bar.low { border-color: var(--rose); }
 .shelter-bar.hit { animation: shelter-shake 0.35s linear; }
 @keyframes shelter-shake { 0%, 100% { transform: translateX(-50%); } 20% { transform: translateX(calc(-50% - 4px)); } 40% { transform: translateX(calc(-50% + 4px)); } 60% { transform: translateX(calc(-50% - 3px)); } 80% { transform: translateX(calc(-50% + 3px)); } }
-.mobile-ui .game.mobile .shelter-bar { top: 40px; width: 270px; transform: translateX(-50%) scale(calc(var(--mz) * var(--hs))); transform-origin: top center; }
+.mobile-ui .game.mobile .shelter-bar { top: 40px; bottom: auto; width: 270px; transform: translateX(-50%) scale(calc(var(--mz) * var(--hs))); transform-origin: top center; }
 .mobile-ui .game.mobile .shelter-bar.hit { animation: none; }
+.mobile-ui .game.mobile .shelter-bar.with-room { top: 68px; }
 
 .kill-board { margin-top: 6px; }
 .mobile-ui .game.mobile .kill-board { display: none; }

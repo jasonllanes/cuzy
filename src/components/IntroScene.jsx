@@ -1,84 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
 import '../intro.css';
 import Avatar from './Avatar';
-import V2Sprite from './V2Sprite';
 
-// The opening scene: you arrive by helicopter (Free Roam, Wave Defense) or by car (Survival) while a little bot
-// narrates. It plays on its own, with no buttons to press; Skip (or Esc) ends it early.
+// The opening story. It happens on the real map: your hero walks to the house (or the shelter) by itself while a voice on the
+// radio talks. This is only the caption box; the walking is the game's (see Game.startCutscene). It plays on its own, with
+// no buttons to press; Skip (or Esc) ends it early.
 
 const CHAR_TIME = 0.03; // seconds per typed letter
-const HOLD = 1.5; // how long a finished line stays up
+const HOLD = 1.3; // how long a finished line stays up
 const TAIL = 0.8; // quiet moment before the scene ends
 
 function script(kind, name, fight) {
   if (kind === 'survival') {
     return {
-      bot: '🚗 Driver Rusty-Bot',
+      bot: '📻 The radio',
       lines: [
-        `Wake up, ${name}. Driver Rusty-Bot here. The radio went quiet an hour ago.`,
-        'See that container shelter up ahead? That is home base now.',
-        'Ten waves of the dead are coming, with something big at the very end.',
+        `Wake up, ${name}. The radio went quiet an hour ago.`,
+        'That container shelter up ahead is home base now. Get inside.',
+        'The dead are coming, wave after wave, with something big among them.',
         'Scavenge walls, hire survivors and keep that shelter standing.',
-        'Hold on tight, we are pulling in!',
       ],
     };
   }
   if (kind === 'waves') {
     return {
-      bot: '🚁 Captain Biscuit-Bot',
+      bot: '📻 Biscuit-Bot (radio)',
       lines: [
-        `Good morning, ${name}! Captain Biscuit-Bot here, flying you in.`,
-        'Monsters have been spotted around the old house in the meadow.',
-        'Raise barricades, hire helpers and hold it through ten waves.',
-        `Buckle up, ${name}. Touching down now!`,
+        `Good morning, ${name}! You made it to the meadow. That little house is yours.`,
+        'Go on in and make yourself at home.',
+        'Monsters have been spotted around here. Raise barricades, hire helpers and hold ten waves.',
+        `Good luck, ${name}!`,
       ],
     };
   }
   return {
-    bot: '🚁 Captain Biscuit-Bot',
+    bot: '📻 Biscuit-Bot (radio)',
     lines: [
-      `Good morning, ${name}! Captain Biscuit-Bot here, flying you in.`,
-      'Below us is a cozy meadow, grown from a single little seed.',
+      `Good morning, ${name}! You made it to the meadow. That little house is yours.`,
+      'Go on in and make yourself at home.',
       'Forage, make friends with the chickens and stay clear of the skeleton camps.',
-      fight ? 'Other travellers down there can be a little competitive. Keep your sword handy.' : 'Take your time. There is no rush in the meadow.',
-      `Buckle up, ${name}. Touching down now!`,
+      fight ? 'Other travellers can be a little competitive. Keep your sword handy.' : 'Take your time. There is no rush in the meadow.',
     ],
   };
-}
-
-function Plane() {
-  return (
-    <svg className="intro-plane" viewBox="0 0 120 50" shapeRendering="crispEdges" aria-hidden="true">
-      <rect x="14" y="22" width="84" height="12" rx="5" fill="#f6f2ea" />
-      <rect x="96" y="25" width="14" height="6" rx="3" fill="#f6f2ea" />
-      <rect x="14" y="30" width="84" height="4" fill="#d9d2c4" />
-      <rect x="4" y="10" width="12" height="16" fill="#e8647c" />
-      <rect x="6" y="22" width="14" height="6" fill="#f6f2ea" />
-      <rect x="42" y="30" width="38" height="8" fill="#c9c1b2" />
-      <rect x="46" y="34" width="30" height="6" fill="#e8647c" />
-      {[28, 38, 48, 58, 68, 78].map((x) => <rect key={x} x={x} y="25" width="5" height="4" fill="#79c4ec" />)}
-      <rect x="88" y="24" width="9" height="5" fill="#79c4ec" />
-    </svg>
-  );
-}
-
-function Car() {
-  return (
-    <svg className="intro-car" viewBox="0 0 120 56" shapeRendering="crispEdges" aria-hidden="true">
-      <rect x="6" y="22" width="108" height="20" rx="3" fill="#5b6b5a" />
-      <rect x="26" y="8" width="62" height="18" rx="3" fill="#4a584a" />
-      <rect x="31" y="12" width="24" height="12" fill="#a9d4e0" />
-      <rect x="59" y="12" width="24" height="12" fill="#a9d4e0" />
-      <rect x="6" y="30" width="108" height="4" fill="#3d493d" />
-      <rect x="108" y="26" width="8" height="6" fill="#ffe9a0" />
-      <rect x="4" y="26" width="5" height="6" fill="#e0384a" />
-      <rect x="14" y="4" width="70" height="3" fill="#2f372f" />
-      <circle className="intro-wheel" cx="30" cy="44" r="9" fill="#262b26" />
-      <circle className="intro-wheel" cx="92" cy="44" r="9" fill="#262b26" />
-      <circle cx="30" cy="44" r="4" fill="#9aa39a" />
-      <circle cx="92" cy="44" r="4" fill="#9aa39a" />
-    </svg>
-  );
 }
 
 export default function IntroScene({ kind, name, fight, hero, assets, onDone }) {
@@ -130,37 +93,11 @@ export default function IntroScene({ kind, name, fight, hero, assets, onDone }) 
     if (t >= s) idx = i;
   });
   const typed = Math.min(lines[idx].length, Math.floor((t - starts[idx]) / CHAR_TIME));
-  const arriving = t > total - 3.2; // the ground rises / the bus appears for the last few seconds
 
   return (
-    <div className={`intro ${kind === 'survival' ? 'night' : 'sky'} ${arriving ? 'arriving' : ''}`} role="presentation">
-      <div className="intro-bg" />
-      {kind === 'survival' ? (
-        <>
-          <div className="intro-moon" />
-          <div className="intro-trees far" />
-          <div className="intro-trees near" />
-          <div className="intro-road"><i /></div>
-          <div className="intro-bus v2" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/apoc/bus.png)` }} />
-          <div className="intro-vehicle v2"><V2Sprite theme="vehicles" name="Car_Right_1" scale={3} /><span className="intro-beam" /></div>
-        </>
-      ) : (
-        <>
-          <div className="intro-cloud a" />
-          <div className="intro-cloud b" />
-          <div className="intro-cloud c" />
-          <div className="intro-cloud d" />
-          <div className="intro-vehicle v2"><V2Sprite theme="vehicles" name="Helicopter_1" scale={2} flip /></div>
-          <div className="intro-ground">
-            <div className="intro-town">
-              {[['villas', 'Villa_1', 3, 1], ['camping', 'Tree_157', 17, 1.2], ['shops', 'Market_Big_1', 29, 1], ['camping', 'Tree_159', 45, 1.2], ['villas', 'Villa_3', 56, 1], ['camping', 'Tree_161', 72, 1.2], ['shops', 'Market_Big_3', 82, 1]].map(([th, n, x, sc]) => (
-                <span key={n + x} className="intro-prop" style={{ left: `${x}%` }}><V2Sprite theme={th} name={n} scale={sc} /></span>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-
+    <div className="intro cut" role="presentation">
+      <div className="intro-bar top" />
+      <div className="intro-bar bottom" />
       <div className="intro-talk panel">
         {hero && assets && <span className="intro-hero"><Avatar assets={assets} id={hero} size={56} /></span>}
         <div className="intro-say">
