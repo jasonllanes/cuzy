@@ -21,6 +21,7 @@ import StoragePanel from './StoragePanel';
 import UnlockCards from './UnlockCards';
 import QtyPicker from './QtyPicker';
 import RoomSettings, { Switch, WAVE_START } from './RoomSettings';
+import { WAVE_COUNTS } from '../game/monsters';
 import TouchControls from './TouchControls';
 import { getControls, useControls } from '../game/controls';
 import { COMMANDS } from '../game/commands';
@@ -274,7 +275,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     gameRef.current.touchMode = mobile;
     if (!mobile) gameRef.current.setTouchMove(0, 0);
   }, [mobile]);
-  const [solo, setSolo] = useState(() => ({ allowMelee: true, allowThrow: true, target: 10, cheats: true, waveStart: 'timer' })); // the rules of a game against computer rivals
+  const [solo, setSolo] = useState(() => ({ allowMelee: true, allowThrow: true, target: 10, cheats: true, waveStart: 'timer', waves: profile.waves ?? 10 })); // the rules of a game against computer rivals
   const [onlineOpen, setOnlineOpen] = useState(false); // the "players online" list
   const [onlineCount, setOnlineCount] = useState(() => net.online?.length || 0);
   const [muted, setMuted] = useState(sfx.muted);
@@ -384,6 +385,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       world: new World(profile.seed, { waves, theme: survival ? 'apoc' : 'cozy' }),
       mode,
       difficulty,
+      waves: session ? session.room.waves : profile.waves,
       bots: session ? 0 : Number(profile.bots) || 0,
       winBy: session ? session.room.winBy : profile.winBy,
       onRoundWon: session ? null : () => onRoundWon?.(),
@@ -1012,6 +1014,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <section className="settings-panel">
               <div className="set-grid">
                 <Switch label="Allow cheats?" hint="Chat commands like -gold 100 or -level 5 (press Enter for the list)" on={solo.cheats} onChange={(v) => { setSolo((s) => ({ ...s, cheats: v })); if (gameRef.current) gameRef.current.cheats = v; }} />
+                {waves && (
+                  <div className="set-row">
+                    <div className="set-label"><b>Number of waves</b><small>0 is endless. Monsters and bosses get stronger the further in you are.</small></div>
+                    <select value={solo.waves ?? 10} onChange={(e) => { const v = Number(e.target.value); setSolo((s) => ({ ...s, waves: v })); gameRef.current?.wave?.setWaves(v); }}>
+                      {WAVE_COUNTS.map((n) => <option key={n} value={n}>{n === 0 ? '♾️ Endless' : `${n} waves`}</option>)}
+                    </select>
+                  </div>
+                )}
                 {waves && (
                   <div className="set-row">
                     <div className="set-label"><b>Next wave</b><small>{WAVE_START.find(([id]) => id === solo.waveStart)?.[2]}</small></div>

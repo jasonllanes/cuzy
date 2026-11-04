@@ -1,5 +1,5 @@
 import { TEAMS, TEAM_COUNTS } from '../game/teams';
-import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
+import { DIFFICULTY, DIFFICULTY_IDS, WAVE_COUNTS } from '../game/monsters';
 
 // What starts the next wave in Survival (also used by the solo rules panel)
 export const WAVE_START = [
@@ -59,6 +59,14 @@ export default function RoomSettings({ room, count, editable, onChange }) {
                 <button key={d} type="button" className={room.difficulty === d ? 'on' : ''} disabled={!editable} onClick={() => onChange({ difficulty: d })}>{DIFFICULTY[d].name}</button>
               ))}
             </div>
+          </div>
+        )}
+        {!free && (
+          <div className="set-row">
+            <div className="set-label"><b>Number of waves</b><small>{room.waves === 0 ? 'Endless: no end, the zombies and bosses keep getting stronger.' : `${room.waves ?? 10} waves, with the bosses halfway and at the end. Monsters, and the bosses too, get stronger and higher level as the run goes on. The host can change it at any time.`}</small></div>
+            <select value={room.waves ?? 10} disabled={!editable} onChange={(e) => onChange({ waves: Number(e.target.value) })}>
+              {WAVE_COUNTS.map((n) => <option key={n} value={n}>{n === 0 ? '♾️ Endless' : `${n} waves`}</option>)}
+            </select>
           </div>
         )}
         {!free && (

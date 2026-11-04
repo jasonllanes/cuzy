@@ -1,5 +1,5 @@
 import { T, WATER } from './world';
-import { DIFFICULTY, MONSTERS, MONSTER_IDS, TOTAL_WAVES, endlessList, lvDmg, lvHp, lvSpeed, rollMonsterLevel, rollMonsterLoot, waveCounts, waveList } from './monsters';
+import { DIFFICULTY, MONSTERS, MONSTER_IDS, TOTAL_WAVES, endlessList, progressOf, lvDmg, lvHp, lvSpeed, rollMonsterLevel, rollMonsterLoot, waveCounts, waveList } from './monsters';
 import { ALLIES, ALLY_KINDS, teamCap } from './allies';
 import { MAX_LEVEL } from './upgrades';
 import { apocSize } from './apoc';
@@ -8,7 +8,7 @@ const PREP_FIRST = 20; // seconds to get ready before wave 1
 const PREP_BETWEEN = 14;
 const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
 const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
-const MAX_ALIVE = 45;
+const MAX_ALIVE = 60;
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
 export const BARRICADE_COST = 4; // a Barricade Box from the shop
 export const REPAIR_COST = 2; // per destroyed barricade planted back
@@ -84,7 +84,8 @@ export class WaveSim {
     this.ashots = [];
     this.baseLevel = 0;
     this.lightLevel = 0; // the shelter's lamps (Survival): one level for the whole team
-    this.endless = !!game.world.endless; // Endless Survival: no waves, the zombies just keep coming
+    this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES; // how many waves the run lasts (the host picks it); 0 is endless
+    this.endless = !!game.world.endless || game.waveCount === 0; // Endless Survival: no waves, the zombies just keep coming
     this.elapsed = 0; // seconds of the round so far
     this.startMode = 'timer'; // what starts the next wave: timer | vote | manual (the host) | instant (as soon as the last zombie falls)
     this.votes = new Set(); // who voted to start the next wave
@@ -136,7 +137,7 @@ export class WaveSim {
     const boss = this.monsters.find((m) => MONSTERS[m.type].boss && m.state !== 'dead');
     return {
       wave: this.wave,
-      total: this.endless ? Infinity : TOTAL_WAVES,
+      total: this.endless ? Infinity : this.total,
       endless: this.endless,
       elapsed: Math.floor(this.elapsed),
       startMode: this.endless ? 'timer' : this.startMode,
@@ -169,7 +170,7 @@ export class WaveSim {
   forecast(queued, waveTotal, queuedBy) {
     const nextWave = this.wave + 1;
     return {
-      coming: this.phase === 'prep' && nextWave <= TOTAL_WAVES && !this.endless ? waveCounts(nextWave, this.diff, this.theme, this.g.waveTargets().length) : null,
+      coming: this.phase === 'prep' && nextWave <= this.total && !this.endless ? waveCounts(nextWave, this.diff, this.theme, this.g.waveTargets().length, this.total) : null,
       queued,
       waveTotal,
       queuedBy: this.phase === 'fight' ? queuedBy : null,
@@ -240,14 +241,35 @@ export class WaveSim {
       }
       return;
     }
-    // fight: monsters come in bursts, a whole pack at a time with a pause between, and the bosses last; then wait for the last one to fall
+    // fight: the monsters pour in one after another, a steady crowd (the bosses last, together), then wait for the last one to fall
     this.fightT += dt;
     if (this.theme === 'apoc') this.survivalPressure();
     this.spawnT -= dt;
     if (this.queue.length && this.spawnT <= 0) {
       const alive = this.monsters.filter((m) => m.state !== 'dead').length;
-      const came = alive < MAX_ALIVE && this.spawnBurst(MAX_ALIVE - alive);
-      this.spawnT = came ? this.burstGap : 1; // (nothing could come in, so it tries again in a second)
+      let came = false;
+      if (alive < MAX_ALIVE) {
+        if (MONSTERS[this.queue[this.queue.length - 1]].boss) {
+          // the finale: every boss at once, once the crowd has thinned a little
+          if (alive <= 25 || this.fightT > 90) came = this.spawnBurst(MAX_ALIVE - alive);
+        }
+        else if (this.spawnMonster(this.queue[this.queue.length - 1])) {
+          this.queue.pop();
+          came = true;
+          // now and then a few come in at the very same moment, from the same side
+          if (Math.random() < 0.3) {
+            const together = 1 + Math.floor(Math.random() * 3);
+            const side = Math.random() * Math.PI * 2;
+            for (let k = 0; k < together && this.queue.length && alive + 1 + k < MAX_ALIVE; k++) {
+              const t = this.queue[this.queue.length - 1];
+              if (MONSTERS[t].boss || !this.spawnMonster(t, side + (Math.random() - 0.5) * 0.5)) break;
+              this.queue.pop();
+            }
+          }
+        }
+      }
+      // one by one at random: sometimes right on the heels of the last one, never a long wait
+      this.spawnT = came ? Math.min(1, this.spawnGap * (0.25 + Math.random() * 1.5)) : 0.2; // (nothing could come in just now: it tries again almost at once)
     }
     if (this.endless) {
       // no waves: the next batch follows as soon as the last one is nearly gone (or after a while, whatever is left)
@@ -283,13 +305,11 @@ export class WaveSim {
   startWave() {
     this.wave++;
     const players = this.g.waveTargets().length; // (the Colossus bosses are scaled to the size of the team)
-    const list = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players);
+    const list = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players, this.total);
     // the bosses go last: the queue is spawned from its end
     this.queue = [...list.filter((t) => MONSTERS[t].boss), ...list.filter((t) => !MONSTERS[t].boss)];
     const normals = list.length - this.queue.filter((t) => MONSTERS[t].boss).length;
-    const bursts = this.endless ? 2 : Math.max(3, Math.min(7, 3 + Math.floor(this.wave / 2)));
-    this.burstSize = Math.max(4, Math.ceil(normals / bursts));
-    this.burstGap = this.endless ? 3.5 : Math.max(4.5, 10 - this.wave * 0.45); // seconds between one burst and the next
+    this.burstSize = Math.max(4, Math.ceil(normals / 4)); // (only used for the boss finale and the pressure packs)
     this.votes.clear();
     this.waveTotal = this.queue.length;
     if (this.endless && this.wave > 1) {
@@ -298,9 +318,9 @@ export class WaveSim {
       this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.03);
     }
     this.spawnGap = this.endless
-      ? Math.max(0.3, 1.5 - 0.04 * this.wave)
+      ? Math.max(0.3, 1.2 - 0.04 * this.wave)
       : this.theme === 'apoc'
-      ? Math.min(1.6, Math.max(0.22, (12 + this.wave * 1.5) / this.queue.length)) // Survival: they pour in faster
+      ? Math.min(1.2, Math.max(0.18, (11 + this.wave * 1.2) / Math.max(1, normals))) // Survival: they pour in fast, the whole wave within about 12 seconds
       : Math.min(2, Math.max(0.3, (16 + this.wave * 2) / this.queue.length));
     this.spawnT = 0;
     this.fightT = 0;
@@ -311,11 +331,11 @@ export class WaveSim {
     this.powerAt = Math.random() < 0.75 ? Math.min(7 + Math.floor(Math.random() * 6), Math.max(3, Math.floor(this.waveTotal * 0.6))) : 0;
     this.phase = 'fight';
     const bosses = this.queue.filter((t) => MONSTERS[t].boss).length;
-    this.emit({ type: 'start', wave: this.wave, boss: !this.endless && this.wave === TOTAL_WAVES, bosses, endless: this.endless });
+    this.emit({ type: 'start', wave: this.wave, boss: !this.endless && this.wave === this.total, bosses, endless: this.endless });
   }
 
   finishWave() {
-    if (this.wave >= TOTAL_WAVES) {
+    if (this.wave >= this.total) {
       this.phase = 'victory';
       this.emit({ type: 'win' });
       return;
@@ -359,7 +379,7 @@ export class WaveSim {
   spawnMonster(type, angle = null, extra = false) {
     const def = MONSTERS[type];
     const flyer = def.kind === 'fly' || def.fly;
-    const relax = (this.spawnFail || 0) >= 3;
+    const relax = (this.spawnFail || 0) >= 1; // (one failed try, and it stops being picky about the screen and the shore)
     for (let i = 0; i < 48; i++) {
       const ang = angle ?? Math.random() * Math.PI * 2;
       const r = 210 + Math.random() * 50 + (i > 14 ? (i - 14) * 6 : 0); // (a little further out each time it is turned down)
@@ -371,10 +391,12 @@ export class WaveSim {
       this.spawnFail = 0;
       // in Survival every wave is a little tougher and quicker than the last
       const apoc = this.theme === 'apoc';
-      const lv = def.boss ? 1 : rollMonsterLevel(this.wave);
-      const hp = Math.max(1, Math.round(def.hp * this.diff.hp * lvHp(lv) * (apoc ? 1 + 0.06 * (this.wave - 1) : 1)));
+      // monsters (the bosses too) get stronger the further into the run it is, whatever its length
+      const prog = progressOf(this.wave, this.endless ? 0 : this.total);
+      const lv = def.boss ? Math.min(10, Math.max(1, Math.ceil(prog * 0.8))) : rollMonsterLevel(prog);
+      const hp = Math.max(1, Math.round(def.hp * this.diff.hp * lvHp(lv) * (apoc ? 1 + 0.06 * (prog - 1) : 1)));
       this.monsters.push({
-        lv, sp: (apoc ? Math.min(1.6, 1 + 0.03 * (this.wave - 1)) : 1) * lvSpeed(lv), id: this.nextId++, type, x, y, hp, max: hp, face: 1, state: 'walk', t: 0, anim: Math.random() * 4,
+        lv, sp: (apoc ? Math.min(1.6, 1 + 0.03 * (prog - 1)) : 1) * lvSpeed(lv), id: this.nextId++, type, x, y, hp, max: hp, face: 1, state: 'walk', t: 0, anim: Math.random() * 4,
         cd: 0.5 + Math.random(), atk: 0, kx: 0, ky: 0, stuck: 0, dirv: 0,
       });
       return true;
@@ -907,6 +929,15 @@ export class WaveSim {
     return null;
   }
 
+  // the host changed how many waves the run lasts (0 = endless): it applies from the next wave on
+  setWaves(n) {
+    const k = Math.round(Number(n));
+    if (!Number.isFinite(k) || k < 0 || k > 99) return;
+    this.endless = !!this.g.world.endless || k === 0;
+    if (k > 0) this.total = k;
+    if (this.endless && this.phase === 'fight' && !this.queue.length) this.fightT = Math.max(this.fightT, 0);
+  }
+
   // the base can be made tougher by anyone, and everyone benefits
   upgradeBase() {
     if (this.baseLevel >= MAX_LEVEL && this.theme !== 'apoc') return false; // (Survival's shelter can be upgraded for ever)
@@ -956,6 +987,7 @@ export class WaveSim {
       sl: this.lightLevel || 0,
       el: Math.round(this.elapsed),
       sm: this.startMode,
+      tw: this.endless ? 0 : this.total,
       vl: [...this.votes],
       vn: this.votesNeeded(),
       k: Object.entries(this.kills),
@@ -983,7 +1015,8 @@ export class WaveMirror {
     this.ashots = [];
     this.baseLevel = 0;
     this.lightLevel = 0;
-    this.endless = !!game.world.endless;
+    this.endless = !!game.world.endless || game.waveCount === 0;
+    this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES;
     this.elapsed = 0;
     this.startMode = 'timer';
     this.voteList = [];
@@ -1002,7 +1035,7 @@ export class WaveMirror {
   forecast(queued, waveTotal, queuedBy) {
     const nextWave = this.wave + 1;
     return {
-      coming: this.phase === 'prep' && nextWave <= TOTAL_WAVES && !this.endless ? waveCounts(nextWave, this.diff, this.theme, 1 + this.g.remotes.size) : null,
+      coming: this.phase === 'prep' && nextWave <= this.total && !this.endless ? waveCounts(nextWave, this.diff, this.theme, 1 + this.g.remotes.size, this.total) : null,
       queued,
       waveTotal,
       queuedBy: this.phase === 'fight' ? queuedBy : null,
@@ -1013,7 +1046,7 @@ export class WaveMirror {
     const boss = this.monsters.find((m) => MONSTERS[m.type].boss && m.state !== 'dead');
     return {
       wave: this.wave,
-      total: this.endless ? Infinity : TOTAL_WAVES,
+      total: this.endless ? Infinity : this.total,
       endless: this.endless,
       elapsed: Math.floor(this.elapsed),
       startMode: this.endless ? 'timer' : this.startMode,
@@ -1085,6 +1118,10 @@ export class WaveMirror {
     this.lightLevel = s.sl || 0;
     this.elapsed = s.el || 0;
     this.startMode = s.sm || 'timer';
+    if (s.tw !== undefined) {
+      this.endless = !!this.g.world.endless || s.tw === 0;
+      if (s.tw > 0) this.total = s.tw;
+    }
     this.voteList = s.vl || [];
     this.votesNeeded = s.vn || 1;
     this.kills = Object.fromEntries(s.k || []);
@@ -1115,6 +1152,8 @@ export class WaveMirror {
   setStartMode(mode) {
     if (['timer', 'vote', 'manual', 'instant'].includes(mode)) this.startMode = mode; // (the host's sim is the one that acts on it)
   }
+
+  setWaves() {} // (the host's sim decides, and the snapshots say)
 
   // V: vote for the next wave (the host decides when it is "manual")
   pressStart() {

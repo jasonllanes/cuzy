@@ -61,6 +61,7 @@ export function attachRoomServer(httpServer) {
     allowLate: r.allowLate,
     allowCheats: r.allowCheats,
     allowVisit: r.allowVisit,
+    waves: r.waves,
     allowThrow: r.allowThrow,
     allowMelee: r.allowMelee,
     streakMonsters: r.streakMonsters,
@@ -289,6 +290,7 @@ export function attachRoomServer(httpServer) {
         startMoney: Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0)), // coins everyone starts a round with
         allowLate: m.allowLate !== false, // may people join once the round is under way?
         allowCheats: m.allowCheats === true, // may players type chat commands like -gold 100?
+        waves: Number.isInteger(Number(m.waves)) && Number(m.waves) >= 0 && Number(m.waves) <= 99 ? Number(m.waves) : 10, // how many waves a Survival run lasts (0 = endless)
         allowVisit: m.allowVisit === undefined ? ['waves', 'survival'].includes(m.mode) : m.allowVisit === true, // may players teleport to each other? (on by default in co-op Survival)
         started: false, // a new room waits for its host to press Start
         winning: false,
@@ -491,6 +493,7 @@ export function attachRoomServer(httpServer) {
       if (typeof m.allowLate === 'boolean') room.allowLate = m.allowLate;
       if (typeof m.allowCheats === 'boolean') room.allowCheats = m.allowCheats;
       if (typeof m.allowVisit === 'boolean') room.allowVisit = m.allowVisit;
+      if (m.waves !== undefined && Number.isInteger(Number(m.waves)) && Number(m.waves) >= 0 && Number(m.waves) <= 99) room.waves = Number(m.waves);
       // these can be changed at any time, even in the middle of a round
       if (typeof m.allowThrow === 'boolean') room.allowThrow = m.allowThrow;
       if (typeof m.allowMelee === 'boolean') room.allowMelee = m.allowMelee;

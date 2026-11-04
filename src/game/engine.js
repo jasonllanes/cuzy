@@ -114,7 +114,7 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp }) {
+  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', waves = 10, bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp }) {
     this.canvas = canvas;
     this.onStorage = onStorage;
     this.onOpenStorage = onOpenStorage;
@@ -183,6 +183,7 @@ export class Game {
     // Wave Defense: the room's host (or a solo player) runs the monsters, everyone else mirrors them
     const isHost = !session || session.host === session.you;
     this.theme = world.apoc ? 'apoc' : 'cozy';
+    this.waveCount = Number.isInteger(Number(waves)) && Number(waves) >= 0 ? Number(waves) : 10; // how many waves the run lasts (0 = endless)
     this.wave = (mode === 'waves' || mode === 'survival') && !demo ? (isHost ? new WaveSim(this, difficulty) : new WaveMirror(this, difficulty)) : null;
     this.hostId = session?.host ?? null;
     this.difficultyId = difficulty;
@@ -2850,6 +2851,7 @@ export class Game {
       if (this.mp) this.mp.streakMonsters = !!m.room.streakMonsters;
       if (m.room.difficulty) this.wave?.setDifficulty(m.room.difficulty); // the host can change the difficulty mid-round
       this.wave?.setStartMode(m.room.waveStart); // ...and what starts the next wave
+      if (m.room.waves !== undefined) this.wave?.setWaves(m.room.waves); // ...and how many waves there are
       this.allowVisit = !!m.room.allowVisit;
     } else if (m.t === 'teams') {
       this.teamMap = { ...m.teams };

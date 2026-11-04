@@ -110,10 +110,20 @@ export const endlessBosses = (stage, diff, players = 1) => (stage % 5 === 0 ? Ma
 // Survival's Colossus bosses come on wave 5 and wave 10, and how many depends on the difficulty
 // ...scaled by how many people are defending: alone you face half (but never fewer than one), with three it is the full number, and a bigger team meets more
 export const bossScale = (players = 1) => Math.min(1.5, 0.5 + 0.25 * (Math.max(1, players) - 1));
-export const bossesFor = (wave, diff, players = 1) => {
-  const base = (wave === 5 ? diff.boss5 : wave === 10 ? diff.boss10 : 0) || 0;
+// With a run of another length the bosses keep their places: one halfway, one at the very end, and in a long run one more on the way
+export const WAVE_COUNTS = [5, 10, 15, 20, 30, 50, 0]; // the lengths a host can pick (0 = endless)
+export const bossesFor = (wave, diff, players = 1, total = 10) => {
+  const mid = Math.round(total / 2);
+  const base = (wave === mid ? diff.boss5 : wave === total ? diff.boss10 : total >= 20 && wave === Math.round(total * 0.75) ? Math.ceil(diff.boss5 * 1.5) : 0) || 0;
   return base ? Math.max(1, Math.round(base * bossScale(players))) : 0;
 };
+
+// A run of `total` waves is the ten-wave story stretched (or squeezed): which row of the table a wave uses, and how much more
+// than the last row a long run asks for
+export const stageOf = (wave, total = 10) => (total === 10 ? wave : Math.min(10, Math.max(1, Math.ceil((10 * wave) / total))));
+export const growthOf = (wave, total = 10) => (total > 10 ? Math.min(2.5, 1 + 0.1 * Math.max(0, wave - 10)) : 1);
+// how far into the run it is, on a 0-10 scale: monster levels, health and speed follow it (endless: the wave itself, with no top)
+export const progressOf = (wave, total = 10) => (total > 0 ? (10 * wave) / total : wave);
 
 export const DIFFICULTY = {
   easy: { name: 'Easy', blurb: 'Fewer, softer monsters and a sturdy base.', boss5: 1, boss10: 2, hp: 0.8, count: 0.7, dmg: 0.7, baseHp: 120, barricadeHp: 30, heal: 0.4 },
@@ -124,20 +134,20 @@ export const DIFFICULTY = {
 export const DIFFICULTY_IDS = Object.keys(DIFFICULTY);
 
 // How many of each type a wave brings, as [[type, count], ...] (the same numbers waveList deals out)
-export function waveCounts(wave, diff, theme = 'cozy', players = 1) {
-  const table = (theme === 'apoc' ? WAVES_APOC : WAVES)[wave - 1] || [];
-  const out = table.map(([type, n]) => [type, Math.max(1, Math.round(n * diff.count))]);
-  const bosses = theme === 'apoc' ? bossesFor(wave, diff, players) : 0;
+export function waveCounts(wave, diff, theme = 'cozy', players = 1, total = 10) {
+  const table = (theme === 'apoc' ? WAVES_APOC : WAVES)[stageOf(wave, total) - 1] || [];
+  const out = table.map(([type, n]) => [type, Math.max(1, Math.round(n * diff.count * growthOf(wave, total)))]);
+  const bosses = theme === 'apoc' ? bossesFor(wave, diff, players, total) : 0;
   return bosses ? [['z_boss', bosses], ...out] : out;
 }
 
-export function waveList(wave, diff, theme = 'cozy', players = 1) {
+export function waveList(wave, diff, theme = 'cozy', players = 1, total = 10) {
   const list = [];
-  for (const [type, n] of (theme === 'apoc' ? WAVES_APOC : WAVES)[wave - 1]) {
-    const count = Math.max(1, Math.round(n * diff.count)); // never fewer than one, so bosses always show up
+  for (const [type, n] of (theme === 'apoc' ? WAVES_APOC : WAVES)[stageOf(wave, total) - 1]) {
+    const count = Math.max(1, Math.round(n * diff.count * growthOf(wave, total))); // never fewer than one, so bosses always show up
     for (let i = 0; i < count; i++) list.push(type);
   }
-  if (theme === 'apoc') for (let i = 0; i < bossesFor(wave, diff, players); i++) list.push('z_boss');
+  if (theme === 'apoc') for (let i = 0; i < bossesFor(wave, diff, players, total); i++) list.push('z_boss');
   // shuffle so the strong ones are mixed in with the weak
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -158,7 +168,8 @@ export function rollMonsterLoot(def, diff, theme = 'cozy') {
   roll(heal, def.boss ? 1 : big ? Math.min(1, diff.heal * 2.2 * scarce) : diff.heal * scarce);
   if (def.boss) roll(heal, 1);
   // coins pay for upgrades and recruits
-  roll('coin', def.boss ? 1 : big ? 1 : 0.6 * scarce, def.boss ? 8 : big ? 2 : 1, def.boss ? 12 : big ? (theme === 'apoc' ? 4 : 5) : 3);
+  // (coins: a lot more than they were: nearly every monster pays, the big ones and the bosses a good deal)
+  roll('coin', def.boss ? 1 : big ? 1 : theme === 'apoc' ? 0.8 : 0.9, def.boss ? 20 : big ? 4 : 2, def.boss ? 32 : big ? 9 : theme === 'apoc' ? 4 : 5);
   if (theme === 'apoc') {
     // scavenged supplies instead of trinkets
     roll('soupcan', big ? 0.5 : 0.1);

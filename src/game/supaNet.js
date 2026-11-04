@@ -31,7 +31,7 @@ const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'waveStart', 'allowVisit'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'waveStart', 'allowVisit', 'waves'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -306,7 +306,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, streakMonsters, teams, target, startMoney, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, streakMonsters, teams, target, startMoney, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -329,6 +329,7 @@ export class SupaNet {
       allowLate: allowLate !== false,
       startMoney: Math.min(99999, Math.max(0, Math.round(Number(startMoney)) || 0)), // coins everyone starts a round with
       allowVisit: allowVisit === undefined ? !free : allowVisit === true, // may players teleport to each other? (on by default in co-op Survival, off in Free Roam fights)
+      waves: Number.isInteger(Number(waves)) && Number(waves) >= 0 && Number(waves) <= 99 ? Number(waves) : 10, // how many waves a Survival run lasts (0 = endless)
       waveStart: 'timer', // what starts the next wave in Survival: timer | vote | manual | instant (kept in the channel, not in the rooms table)
       allowCheats: allowCheats === true, // chat commands like -gold 100 (kept in the channel, not in the rooms table)
     };
@@ -1126,6 +1127,7 @@ export class SupaNet {
     if (typeof m.allowLate === 'boolean') cfg.allowLate = m.allowLate;
     if (typeof m.allowCheats === 'boolean') cfg.allowCheats = m.allowCheats;
     if (typeof m.allowVisit === 'boolean') cfg.allowVisit = m.allowVisit;
+    if (m.waves !== undefined && Number.isInteger(Number(m.waves)) && Number(m.waves) >= 0 && Number(m.waves) <= 99) cfg.waves = Number(m.waves);
     if (['timer', 'vote', 'manual', 'instant'].includes(m.waveStart)) cfg.waveStart = m.waveStart;
     // these can be changed at any time, even in the middle of a round
     if (typeof m.allowThrow === 'boolean') cfg.allowThrow = m.allowThrow;

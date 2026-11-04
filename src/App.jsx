@@ -81,6 +81,7 @@ function initialProfile() {
     seed: q.get('seed') || saved.seed || 'sunny-meadow-101',
     mode: q.get('mode') || saved.mode || 'free',
     difficulty: q.get('difficulty') || saved.difficulty || 'medium',
+    waves: q.has('waves') ? Number(q.get('waves')) : Number.isInteger(saved.waves) ? saved.waves : 10,
     bots: Number(q.get('bots')) || saved.bots || 0,
     winBy: q.get('winBy') || saved.winBy || 'duel',
   };

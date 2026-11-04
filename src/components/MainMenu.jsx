@@ -3,14 +3,14 @@ import { RETRO_COUNT, SURVIVOR_COLORS, V2_CHARS, heroById, isRetro, isSurvivor, 
 import { randomName } from '../game/rng';
 import SpritePreview from './SpritePreview';
 import WorldBackdrop from './WorldBackdrop';
-import { DIFFICULTY, DIFFICULTY_IDS } from '../game/monsters';
+import { DIFFICULTY, DIFFICULTY_IDS, WAVE_COUNTS } from '../game/monsters';
 import MenuHome from './MenuHome';
 import MultiMenu from './MultiMenu';
 import MusicButton from './MusicButton';
 import V2Sprite from './V2Sprite';
 import Avatar from './Avatar';
 import MapPreview from './MapPreview';
-import { ENDLESS_TAG, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
+import { FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
 
@@ -95,8 +95,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const newRoll = () => Math.random().toString(36).slice(2, 6);
   const [pv, setPv] = useState(null); // the map preview: { roll } while it is open (roll null: the map exactly as it is)
   // Free Roam V2 is the same world with the Modern Exteriors props on top: its seed ends in ~v2
-  const [endless, setEndless] = useState(isEndlessSeed(initial.seed)); // Survival without waves: the zombies just keep coming
-  const tag = v2 && gameMode === 'free' ? '~v2' : gameMode === 'survival' && endless ? ENDLESS_TAG : '';
+  // how many waves a Survival run lasts (the host can change it in the room settings): 0 is endless, no waves and no end
+  const [survWaves, setSurvWaves] = useState(Number.isInteger(initial.waves) ? initial.waves : isEndlessSeed(initial.seed) ? 0 : 10);
+  const endless = survWaves === 0;
+  const tag = v2 && gameMode === 'free' ? '~v2' : '';
   const rolledSeed = (!fresh ? seed : gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${roll}`, survPick) : `${seed}@${roll}`) + tag;
   // the seed the preview shows: the map as it will be played, or (after "Generate another") a freshly rolled layout of it
   const previewSeed = (pv ? (pv.roll ? (gameMode === 'survival' ? joinSeed(`${SURVIVAL_BASE}@${pv.roll}`, survPick) : `${seed}@${pv.roll}`) : seed) : seed) + tag;
@@ -115,7 +117,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
 
   // `hero` is what the game uses; the other picks are remembered so switching game type does not lose them
   const fullSeed = () => rolledSeed;
-  const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed: fullSeed(), mode: gameMode, difficulty, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
+  const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed: fullSeed(), mode: gameMode, difficulty, waves: survWaves, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
   const myName = () => name.trim() || 'Friend';
 
   const go = (next) => {
@@ -148,7 +150,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const create = () =>
     run(
       net
-        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, winBy, allowLate: lateJoin, player: { name: myName(), hero: activeHeroId } })
+        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, player: { name: myName(), hero: activeHeroId } })
         .then((joined) => {
           // a room server that was started before Wave Defense existed quietly makes an ordinary room
           if (gameMode !== 'free' && joined.room.mode !== gameMode) {
@@ -165,7 +167,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     setError('');
     try {
       const surv = gameMode === 'survival';
-      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, winBy, allowLate: true, allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
+      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
     } catch (err) {
       // no room available (offline, or the rooms table is not set up): say so, and play without one if asked again
       if (noRoomOk) {
@@ -513,17 +515,15 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <p className="hint">
                   {endless
                     ? <>Hold the shelter for as long as you can{mode === 'together' ? ', everyone defending the same base' : ''}. There are no waves: the zombies never stop, and every batch is harder than the last. 👹 A <b>Colossus</b> turns up every 5th batch.</>
-                    : <>Survive <b>10 waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. 👹 <b>Colossus</b> bosses: {DIFFICULTY[difficulty].boss5} on wave 5, {DIFFICULTY[difficulty].boss10} on wave 10.</>} The difficulty can be changed in the room settings.
+                    : <>Survive <b>{survWaves} waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. They and the 👹 <b>Colossus</b> bosses get stronger and higher level the further you get.</>} The difficulty and the number of waves can be changed in the room settings.
                 </p>
-                <div className="diff-row" role="radiogroup" aria-label="Survival style">
-                  <button type="button" role="radio" aria-checked={!endless} className={`diff-chip ${!endless ? 'on' : ''}`} onClick={() => setEndless(false)}>
-                    <b>🌊 10 waves</b>
-                    <small>Wave after wave, with a breather between them, and a win at the end.</small>
-                  </button>
-                  <button type="button" role="radio" aria-checked={endless} className={`diff-chip ${endless ? 'on' : ''}`} onClick={() => setEndless(true)}>
-                    <b>♾️ Endless</b>
-                    <small>No waves and no end: survive as long as you can.</small>
-                  </button>
+                <div className="diff-row" role="radiogroup" aria-label="How many waves">
+                  {WAVE_COUNTS.map((n) => (
+                    <button key={n} type="button" role="radio" aria-checked={survWaves === n} className={`diff-chip ${survWaves === n ? 'on' : ''}`} onClick={() => setSurvWaves(n)}>
+                      <b>{n === 0 ? '♾️ Endless' : `🌊 ${n} waves`}</b>
+                      <small>{n === 0 ? 'No end: as long as you can' : n <= 5 ? 'A short run' : n === 10 ? 'The classic' : 'A long run'}</small>
+                    </button>
+                  ))}
                 </div>
               <div className="diff-row" role="radiogroup" aria-label="Difficulty">
                   {DIFFICULTY_IDS.map((id) => (

@@ -60,7 +60,7 @@ const RANGED_EXTRA = { eye: { range: 72, rate: 2.6 }, ghastly: { range: 80, rate
 // [item, chance, min, max]
 const WILD_LOOT = [
   ['heart', 0.15, 1, 1],
-  ['coin', 0.55, 1, 2],
+  ['coin', 0.9, 2, 5],
   ['acorn', 0.2, 1, 2],
   ['egg', 0.08, 1, 1],
 ];
@@ -166,7 +166,7 @@ const ANIMS = {
 // [item, chance, min, max]
 const SKELETON_LOOT = [
   ['heart', 0.18, 1, 1], // now and then, a heart
-  ['coin', 0.6, 1, 3],
+  ['coin', 0.9, 2, 5],
   ['acorn', 0.25, 1, 2],
   ['rock', 0.2, 1, 1],
   ['gold', 0.1, 1, 1],
@@ -2288,18 +2288,18 @@ export class Combat {
       this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss || w.miniBoss) * lvXp(w.lv || 1) * (w.minionOf ? 0.3 : 1)), !!(def.boss || w.nightBoss || w.miniBoss), { x: w.x, y: w.y });
       if (w.miniBoss) {
         // a mini boss is worth the trouble
-        this.shareCoins(w.x, w.y, 6 + Math.floor(Math.random() * 6), 3);
+        this.shareCoins(w.x, w.y, 14 + Math.floor(Math.random() * 10), 4);
         for (const [id, qty] of [['gem', 1], ['gold', 2], ['wood', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
         this.g.onToast?.(w.guardian ? `🌀 The realm's guardian, ${def.name}, is down! Loot the chests.` : `⚔️ The mini boss ${def.name} is down! Its zone is quiet for a while.`);
       }
       if (w.nightBoss) {
         // slain before dawn: a real prize (the coins can be picked up by everyone in the room)
-        this.shareCoins(w.x, w.y, 10 + Math.floor(Math.random() * 8), 4);
+        this.shareCoins(w.x, w.y, 24 + Math.floor(Math.random() * 14), 5);
         for (const [id, qty] of [['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
       }
       for (const [id, chance, min, max] of w.minionOf ? [] : WILD_LOOT) {
         if (Math.random() < chance) {
-          const qty = min + Math.floor(Math.random() * (max - min + 1));
+          const qty = min + Math.floor(Math.random() * (max - min + 1)) + (id === 'coin' ? Math.floor((w.lv || 1) / 3) : 0); // (higher levels pay more)
           if (id === 'coin' && this.g.mp) this.shareCoins(w.x, w.y, qty, 1);
           else this.drops.push({ x: w.x + (Math.random() - 0.5) * 12, y: w.y + (Math.random() - 0.5) * 6, id, qty, age: 0 });
         }
