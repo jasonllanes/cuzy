@@ -1,4 +1,5 @@
 import { CHUNK_PX, GRASS, SAND, T, WATER } from './world';
+import { PETS, PetSystem } from './pets';
 import { ITEMS, LOOT_APOC, isConsumable, rollLoot, sellPrice, sellValue, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
@@ -14,7 +15,7 @@ import { sfx } from './sfx';
 import { TEAMS } from './teams';
 import { store } from './store';
 import { loadedThemes } from '../v2/assets';
-import { AIR_SUPPORT, REPAIR_HEAL, mendCost, repairKitCost, FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, WOOD_SHOP, emptyUpgrades, upgradeCost } from './upgrades';
+import { AIR_SUPPORT, REPAIR_HEAL, mendCost, repairKitCost, FREE_UPGRADES, BOAT_COST, MAX_LEVEL, REVIVE, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, WOOD_SHOP, emptyUpgrades, upgradeCost } from './upgrades';
 
 // how far above the feet a hero's name tag floats; the villager is shorter than the others
 const tagHeight = (hero) => (hero.kind === 'v2' ? 36 : hero.kind === 'retro' ? 26 : hero.kind === 'dev' ? 30 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
@@ -51,7 +52,7 @@ const SURVIVAL_HOUR = 23; // Survival never leaves the night...
 const DAWN_LEFT = 10; // ...until the last wave is nearly beaten: with this many enemies left the sun starts to rise
 const DAWN_SECONDS = 40; // and it takes this long to come up
 const SKY_PACE = 0.4; // Survival's weather moves on slower than a Free Roam day, so a storm is a moment, not a mood
-export const GRENADE_COSTS = { truffle: 8, stungrenade: 9, smokegrenade: 7 };
+export const GRENADE_COSTS = { truffle: 8, stungrenade: 9, smokegrenade: 7, landmine: 10, beartrap: 8 };
 
 // Which sides of a wall (N 1, E 2, S 4, W 8) touch another one in `list`: the pieces of the fence join up by it
 function wallJoins(a, list) {
@@ -215,6 +216,13 @@ export class Game {
     this.camY = 0;
     this.chunkCanvases = new Map();
     this.animals = [];
+    this.boats = []; // rowing boats on the water (random ones, and the one you bought)
+    this.boatSpawned = new Set();
+    this.boatT = 0;
+    this.boat = null; // the boat you are sailing
+    this.seat = null; // the seesaw end you are sitting on: { o, side }
+    this.crows = []; // crows passing over Survival
+    this.crowT = 8;
     this.spawned = new Set();
     this.t = 0;
     this.zoom = 3;
@@ -255,6 +263,11 @@ export class Game {
     // coins live in a purse, not in the backpack (older saves had them as items: move them over)
     this.coins = Math.max(0, Math.floor(Number(saved?.coins) || 0));
     this.wood = Math.max(0, Math.floor(Number(saved?.wood) || 0)); // wood for crafting weapons, in a purse like the coins
+    this.revives = Math.max(0, Math.min(REVIVE.cap, Math.floor(Number(saved?.revives) || 0))); // Resurrection Crosses you carry
+    this.pets = new PetSystem(this, saved?.pets); // your pet(s)
+    this.glideTile = false; // a seagull is carrying you over the water
+    this.reviveFxs = []; // the light and rings of someone rising again (yours and other players')
+    this.reviveFlash = 0;
     if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
     // bets on a duel are placed by the ones who are not in it (see placeBet)
     this.duelCall = null; // a duel is about to start: { left, bet, kind }
@@ -343,8 +356,11 @@ export class Game {
         e.preventDefault();
         if (!e.repeat) {
           this.spaceDown = true;
-          if (this.mount) this.dismount();
-          else this.interactPressed = true;
+          if (this.boat) this.leaveBoat();
+          else if (this.seat) this.leaveSeat();
+          else if (this.pets.pet?.rid) this.pets.dismount();
+          else if (this.mount) this.dismount();
+          else if (!this.pets.tryRide()) this.interactPressed = true;
         }
       } else if (e.code === 'Space') {
         e.preventDefault();
@@ -569,6 +585,9 @@ export class Game {
           inventory: this.inventory,
           coins: this.coins,
           wood: this.wood,
+          revives: this.revives,
+      pets: this.pets.hud(),
+          pets: this.pets.save(),
           felled: [...this.world.felled].slice(-4000),
           kills: this.combat?.kills || 0,
           upgrades: this.upgrades,
@@ -982,25 +1001,9 @@ export class Game {
     }
   }
 
-  // Skills come with the character level (Dash 6, Grapple 8, Shield 10, Invisibility 15). `relock` also takes back the ones above your level.
-  syncSkills(announce = false, relock = false) {
-    const unlocked = [];
-    if (this.wave) return unlocked;
-    for (const s of SKILL_SHOP) {
-      if (this.level >= s.level && !this.skills[s.id]) {
-        this.skills[s.id] = true;
-        const slot = s.sword ? 'equipped' : 'equippedUtil';
-        const other = SKILL_SHOP.some((o) => o !== s && o.group === s.group && this.skills[o.id]);
-        if (!other || !this.skills[this.skills[slot]]) this.skills[slot] = s.id; // the first of its kind is equipped for you; later ones are yours to choose
-        unlocked.push(s);
-        if (announce && !this.onLevelUp) this.onToast?.(`${s.icon} You've unlocked ${s.name}! Open the shop (B) to equip it and upgrade it.`);
-      } else if (relock && this.level < s.level && this.skills[s.id]) {
-        this.skills[s.id] = false;
-        if (this.skills.equipped === s.id) this.skills.equipped = null;
-        if (this.skills.equippedUtil === s.id) this.skills.equippedUtil = null;
-      }
-    }
-    return unlocked;
+  // Skills are bought in the shop now, not unlocked by level (what you already own stays yours).
+  syncSkills() {
+    return [];
   }
 
   // the celebration for gaining a level: a pillar of light and rings around you, and a card for each skill that just unlocked
@@ -1188,6 +1191,9 @@ export class Game {
 
   // how high a rider sits above the ground
   rideLift() {
+    if (this.boat) return 3;
+    if (this.glideTile) return 9;
+    if (this.pets.pet?.rid) return 6;
     return this.mount ? (this.mount.type === 'chicken' ? 5 : 11) : 0;
   }
 
@@ -1417,6 +1423,248 @@ export class Game {
     }
   }
 
+  // ---------- boats, the seesaw and the crows ----------
+
+  // boats float in the open sea now and then (where the world has one) and wait for you
+  updateBoats(dt) {
+    this.boatT -= dt;
+    for (const b of this.boats) b.t += dt;
+    if (this.boatT > 0) return;
+    this.boatT = 1;
+    const ccx = Math.floor(this.cam.x / CHUNK_PX);
+    const ccy = Math.floor(this.cam.y / CHUNK_PX);
+    for (let j = -2; j <= 2; j++) {
+      for (let i = -2; i <= 2; i++) {
+        const key = `${ccx + i},${ccy + j}`;
+        if (this.boatSpawned.has(key)) continue;
+        this.boatSpawned.add(key);
+        const spot = this.world.boatAt(ccx + i, ccy + j);
+        if (spot) this.boats.push({ id: `b${key}`, x: spot.x, y: spot.y, dir: Math.random() < 0.5 ? 'left' : 'right', t: Math.random() * 3 });
+      }
+    }
+    if (this.boats.length > 30) this.boats = this.boats.filter((b) => b === this.boat || Math.hypot(b.x - this.player.x, b.y - this.player.y) < 1500);
+  }
+
+  boatNear() {
+    if (this.dead || this.mount || this.inside || this.wave) return null;
+    const p = this.player;
+    let best = null;
+    let bd = 30;
+    for (const b of this.boats) {
+      const d = Math.hypot(b.x - p.x, b.y - p.y);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  boardBoat(b) {
+    if (!b || this.boat) return;
+    this.dismount();
+    const p = this.player;
+    this.boat = b;
+    p.x = b.x;
+    p.y = b.y;
+    this.keys.clear();
+    this.onToast?.('⛵ You are in the boat: sail across the water. Press F near the shore to hop out.');
+  }
+
+  leaveBoat() {
+    const b = this.boat;
+    if (!b) return;
+    const p = this.player;
+    // the nearest bit of dry land
+    for (const r of [18, 26, 34, 46, 60]) {
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        const x = p.x + Math.cos(a) * r;
+        const y = p.y + Math.sin(a) * r;
+        if (this.world.type(Math.floor(x / T), Math.floor((y - 2) / T)) !== WATER && !this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true)) {
+          b.x = p.x;
+          b.y = p.y;
+          this.boat = null;
+          p.x = x;
+          p.y = y;
+          this.onToast?.('You hop out of the boat. It stays where it is.');
+          return;
+        }
+      }
+    }
+    this.onToast?.('Sail up to the shore to get out.');
+  }
+
+  // A rowing boat from the animated sheets: left and right are 64x32 frames, up and down 32x64
+  drawBoatSprite(ctx, x, y, dir, t) {
+    const d = ['left', 'right', 'up', 'down'].includes(dir) ? dir : 'left';
+    const sheet = this.img[`critters/boat_${d}`];
+    if (!sheet) return;
+    const f = Math.floor(t * 6) % 8;
+    const bob = Math.round(Math.sin(t * 2.4) * 0.8);
+    x = Math.round(x);
+    y = Math.round(y);
+    ctx.fillStyle = 'rgba(20,50,70,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 1, 22, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (d === 'left' || d === 'right') ctx.drawImage(sheet, f * 64, 0, 64, 32, x - 32, y - 23 + bob, 64, 32);
+    else ctx.drawImage(sheet, f * 32, 0, 32, 64, x - 16, y - 40 + bob, 32, 64);
+  }
+
+  // Buy a rowing boat: it appears on the nearest open water
+  buyBoat() {
+    if (this.wave || this.dead || this.inside) return;
+    const p = this.player;
+    let spot = null;
+    for (let r = 20; r <= 200 && !spot; r += 12) {
+      for (let k = 0; k < 24 && !spot; k++) {
+        const a = (k / 24) * Math.PI * 2;
+        const x = p.x + Math.cos(a) * r;
+        const y = p.y + Math.sin(a) * r;
+        const tx = Math.floor(x / T);
+        const ty = Math.floor(y / T);
+        let ok = !this.world.lavaAt(tx, ty);
+        for (let dy = -2; dy <= 2 && ok; dy++) for (let dx = -2; dx <= 2 && ok; dx++) if (this.world.type(tx + dx, ty + dy) !== WATER) ok = false;
+        if (ok) spot = { x: tx * T + 8, y: ty * T + 8 };
+      }
+    }
+    if (!spot) {
+      this.onToast?.('There is no open water close enough. Come to the shore, then buy the boat.');
+      return;
+    }
+    if (!this.spendCoins(BOAT_COST)) {
+      sfx.play('nope');
+      this.onToast?.(`A boat costs ${BOAT_COST} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    this.boats.push({ id: `bought${Date.now()}`, x: spot.x, y: spot.y, dir: 'left', t: 0 });
+    sfx.play('buy');
+    this.onToast?.('⛵ Your boat is on the water by the shore. Walk up to it and press F.');
+    this.save();
+  }
+
+  // the seesaw rocks by itself: this is how far along its animation it is (8 frames)
+  seesawPhase(o) {
+    return ((this.t * 4 + o.x * 0.1) % 8 + 8) % 8;
+  }
+
+  // where each end of the seesaw is: the end handles' height in each frame of the sheet (the other end is half a cycle behind)
+  seatPos(o, side) {
+    const L = [19.4, 20.0, 20.4, 20.0, 19.4, 18.7, 18.1, 18.7];
+    const ph = this.seesawPhase(o);
+    const f0 = Math.floor(ph);
+    const k = ph - f0;
+    const at = (f) => (side < 0 ? L[f % 8] : L[(f + 4) % 8]);
+    const cy = at(f0) * (1 - k) + at(f0 + 1) * k;
+    return { x: o.x + (side < 0 ? -7.2 : 6.3), y: o.by - 32 + cy + 4.5 };
+  }
+
+  sitSeesaw(o) {
+    if (this.seat || this.boat || this.dead || this.inside) return;
+    if (this.mount) this.dismount();
+    const p = this.player;
+    const taken = (side) => {
+      const sp = this.seatPos(o, side);
+      for (const r of this.remotes.values()) if (!r.hidden && Math.hypot(r.x - sp.x, r.y - sp.y) < 9) return true;
+      return false;
+    };
+    let side = p.x < o.x ? -1 : 1;
+    if (taken(side)) side = -side;
+    if (taken(side)) {
+      this.onToast?.('Both ends of the seesaw are taken.');
+      return;
+    }
+    this.seat = { o, side };
+    this.keys.clear();
+    p.dir = 'down';
+    this.onToast?.(taken(-side) ? 'You sit on the seesaw. Press F (or move) to hop off.' : 'You sit on the seesaw. A friend can take the other end! Press F (or move) to hop off.');
+  }
+
+  seatUpdate() {
+    const { o, side } = this.seat;
+    const sp = this.seatPos(o, side);
+    const p = this.player;
+    p.x = sp.x;
+    p.y = sp.y;
+    p.moving = false;
+    p.dir = 'down';
+    this.cam.x += (p.x - this.cam.x) * 0.1;
+  }
+
+  leaveSeat() {
+    const s = this.seat;
+    if (!s) return;
+    this.seat = null;
+    const p = this.player;
+    for (const [ox, oy] of [[s.side < 0 ? -16 : 16, 8], [s.side < 0 ? -16 : 16, -2], [0, 14], [s.side < 0 ? -22 : 22, 12]]) {
+      const x = s.o.x + ox;
+      const y = s.o.by + oy;
+      if (!this.blocked(x, y)) {
+        p.x = x;
+        p.y = y;
+        return;
+      }
+    }
+    p.y = s.o.by + 16;
+  }
+
+  // Crows pass over Survival now and then, a few at a time, flapping across the sky
+  updateCrows(dt) {
+    if (!(this.wave && this.world.apoc) || this.demo) return;
+    this.crowT -= dt;
+    if (this.crowT <= 0) {
+      this.crowT = 14 + Math.random() * 22;
+      const n = 1 + (Math.random() < 0.45 ? 1 : 0) + (Math.random() < 0.2 ? 1 : 0);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const y0 = this.cam.y - this.viewH / 2 + Math.random() * this.viewH;
+      for (let k = 0; k < n; k++) {
+        this.crows.push({ x: this.cam.x - side * (this.viewW / 2 + 30 + k * 24), y: y0 + (Math.random() - 0.5) * 40 + k * 8, vx: side * (46 + Math.random() * 26), vy: (Math.random() - 0.5) * 12, t: Math.random() * 3 });
+      }
+    }
+    for (const c of this.crows) {
+      c.t += dt;
+      c.x += c.vx * dt;
+      c.y += (c.vy + Math.sin(c.t * 2) * 7) * dt;
+    }
+    if (this.crows.length) this.crows = this.crows.filter((c) => Math.abs(c.x - this.cam.x) < this.viewW / 2 + 160);
+  }
+
+  drawCrows(ctx) {
+    const sheet = this.img['critters/crow'];
+    if (!sheet) return;
+    for (const c of this.crows) {
+      const f = Math.floor(c.t * 10) % 6;
+      const x = Math.round(c.x);
+      const y = Math.round(c.y);
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.beginPath();
+      ctx.ellipse(x, y + 26, 7, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.translate(x, y - 6);
+      if (c.vx > 0) ctx.scale(-1, 1); // (the sheet faces left)
+      ctx.drawImage(sheet, f * 32, 0, 32, 32, -16, -16, 32, 32);
+      ctx.restore();
+    }
+  }
+
+  // ---------- pets ----------
+
+  buyPet(kind, v = 0) {
+    if (this.dead) return;
+    this.pets.buy(kind, v);
+  }
+
+  callPet(kind) {
+    this.pets.call(kind);
+    if (kind) this.onToast?.(`${PETS[kind].icon} ${PETS[kind].name} is with you.`);
+  }
+
+  recolorPet(kind, v) {
+    this.pets.recolor(kind, v);
+  }
+
   // ---------- being downed ----------
 
   // A hero who is defeated by another loses a random share of their coins (never more than 70%) on the spot,
@@ -1450,9 +1698,123 @@ export class Game {
     }
   }
 
+  buyRevive() {
+    if (this.revives >= REVIVE.cap) {
+      this.onToast?.(`You can only carry ${REVIVE.cap} Resurrection Crosses.`);
+      return;
+    }
+    if (!this.spendCoins(REVIVE.cost)) {
+      sfx.play('nope');
+      this.onToast?.(`The Resurrection Cross costs ${REVIVE.cost} coins. You have ${this.coinCount()}.`);
+      return;
+    }
+    this.revives++;
+    sfx.play('levelup');
+    this.onToast?.(`💍 Resurrection Cross bought: if you fall, you rise again. (${this.revives}/${REVIVE.cap})`);
+    this.save();
+  }
+
+  // You were about to fall: a Resurrection Cross shatters, and you rise again on the spot with full health and a few seconds of safety.
+  useRevive() {
+    if (this.revives < 1 || this.demo || this.duelActive() || this.dead || this.celeb) return false;
+    this.revives--;
+    const p = this.player;
+    const c = this.combat;
+    c.hp = c.maxHp;
+    c.invuln = Math.max(c.invuln, REVIVE.safe);
+    c.cancelHold();
+    c.dash = null;
+    this.stamina = 1;
+    this.exhausted = false;
+    this.reviveFxs.push({ x: p.x, y: p.y, t: 0, mine: true });
+    this.reviveFlash = 1;
+    c.floaters.push({ x: p.x, y: p.y - 56, text: 'RESURRECTED!', color: '#ffe27a', t: 0 });
+    sfx.play('levelup');
+    sfx.play('respawn');
+    this.mp?.net.send({ t: 'fx', kind: 'revive', x: Math.round(p.x), y: Math.round(p.y) });
+    this.onToast?.(`💍 Your Resurrection Cross shattered: you rise again! (${this.revives} left)`);
+    this.save();
+    return true;
+  }
+
+  // the light that rises when someone is resurrected: a pillar, rings, the cross turning and breaking, and a golden glow for the seconds of safety
+  drawReviveFxs(ctx) {
+    const cross = this.img['items/revive_ring'];
+    for (const f of this.reviveFxs) {
+      const t = f.t;
+      const x = Math.round(f.mine ? this.player.x : f.x);
+      const y = Math.round(f.mine ? this.player.y : f.y);
+      ctx.save();
+      const k = Math.min(1, t / 0.3) * (t < 1.8 ? 1 : Math.max(0, 1 - (t - 1.8) / 0.5));
+      if (k > 0) {
+        const g = ctx.createLinearGradient(0, y - 110, 0, y);
+        g.addColorStop(0, 'rgba(255,240,170,0)');
+        g.addColorStop(1, `rgba(255,226,120,${0.6 * k})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(x - 11, y - 110, 22, 110);
+        ctx.fillStyle = `rgba(255,236,150,${0.25 * k})`;
+        ctx.beginPath();
+        ctx.ellipse(x, y, 26, 11, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (let i = 0; i < 3; i++) {
+        const tt = t - i * 0.25;
+        if (tt <= 0 || tt >= 1.2) continue;
+        ctx.globalAlpha = 1 - tt / 1.2;
+        ctx.strokeStyle = i % 2 ? '#fff6c8' : '#ffc94d';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(x, y, 8 + tt * 46, (8 + tt * 46) * 0.45, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      if (cross && t < 1.5) {
+        // the cross rises, spins a little and breaks into light
+        const a = t < 1.0 ? 1 : Math.max(0, 1 - (t - 1.0) / 0.5);
+        const lift = 22 + t * 26;
+        const sc = (1 + 0.12 * Math.sin(t * 16)) * (t > 1.0 ? 1 + (t - 1.0) * 1.6 : 1);
+        ctx.globalAlpha = a * 0.5;
+        ctx.fillStyle = '#ffe27a';
+        ctx.beginPath();
+        ctx.arc(x, y - lift, 18 * sc, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.translate(x, y - lift);
+        ctx.scale(Math.cos(t * 9) * 0.35 + 0.65, 1);
+        ctx.drawImage(cross, -16 * sc, -16 * sc, 32 * sc, 32 * sc);
+        ctx.setTransform(this.zoom, 0, 0, this.zoom, -this.camX * this.zoom, -this.camY * this.zoom);
+        ctx.globalAlpha = 1;
+      }
+      if (t < 2.2) {
+        ctx.fillStyle = '#fff3b0';
+        for (let i = 0; i < 18; i++) {
+          const ph = (t * 0.9 + i * 0.137) % 1;
+          const a = i * 2.4;
+          ctx.globalAlpha = Math.max(0, 1 - ph) * Math.min(1, (2.2 - t) / 0.6);
+          ctx.fillRect(Math.round(x + Math.cos(a) * (6 + ph * 18)), Math.round(y - ph * 70), 2, 2);
+        }
+        ctx.globalAlpha = 1;
+      }
+      if (f.mine && t > 1.4) {
+        // the seconds of safety: a soft golden shimmer round you
+        const left = 5 - t;
+        ctx.globalAlpha = Math.min(1, left / 0.8) * (0.55 + 0.25 * Math.sin(t * 10));
+        ctx.strokeStyle = '#ffe27a';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(x, y - 8, 11, 16, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,230,140,0.14)';
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   // Called when your hearts run out. You sit out a short respawn timer, watching whoever did it.
   die(by) {
     if (this.dead) return;
+    if (this.useRevive()) return; // (a Resurrection Cross: no falling at all)
     const c = this.combat;
     c.cancelHold();
     c.dash = null;
@@ -1937,6 +2299,16 @@ export class Game {
       if (!pack || !pay(pack.cost, `${pack.qty} wood`)) return;
       this.giveWood(pack.qty);
       sfx.play('buy');
+    } else if (kind === 'skill') {
+      const info = SKILL_SHOP.find((s) => s.id === id);
+      if (!info || this.skills[id]) return;
+      if (!pay(info.cost, info.name)) return;
+      this.skills[id] = true;
+      const slot = info.sword ? 'equipped' : 'equippedUtil';
+      if (!this.skills[this.skills[slot]]) this.skills[slot] = id; // (your first of its kind is equipped for you)
+      sfx.play('levelup');
+      this.onToast?.(`${info.icon} ${info.name} is yours! ${this.skills[slot] === id ? 'It is equipped.' : 'Equip it in the shop.'}`);
+      this.save();
     } else if (kind === 'equip') {
       const info = SKILL_SHOP.find((s) => s.id === id);
       if (!this.skills[id]) return;
@@ -2672,6 +3044,32 @@ export class Game {
     if (boss) this.drawBossSlash(ctx, m, def);
   }
 
+  // a beach crab: the crab sheet (red or blue, 32x16 frames), scuttling sideways, and a small health bar once it is hurt
+  drawCrab(ctx, m) {
+    const sheet = this.img['critters/crabs'];
+    if (!sheet) return;
+    const dead = m.state === 'dead';
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    const row = (m.variant || 0) + (dead ? 1 : 0);
+    const frames = dead ? 6 : 10;
+    const frame = dead ? Math.min(5, Math.floor(m.t * 10)) : Math.floor(m.anim * 10) % frames;
+    ctx.fillStyle = 'rgba(40,24,30,0.22)';
+    ctx.fillRect(x - 7, y - 1, 14, 3);
+    ctx.save();
+    if (dead) ctx.globalAlpha = Math.max(0, 1 - m.t * 1.8);
+    ctx.translate(x, y);
+    if (m.face < 0) ctx.scale(-1, 1);
+    ctx.drawImage(sheet, frame * 32, row * 16, 32, 16, -16, -14, 32, 16);
+    ctx.restore();
+    if (!dead && m.hp < m.max) {
+      ctx.fillStyle = 'rgba(60,40,30,0.7)';
+      ctx.fillRect(x - 7, y - 20, 14, 3);
+      ctx.fillStyle = '#ff7a8f';
+      ctx.fillRect(x - 6, y - 19, Math.round(12 * (m.hp / m.max)), 1);
+    }
+  }
+
   // The Tiny RPG monsters: a full animation set, chosen by what it is doing right now
   drawTiny(ctx, m, def) {
     const info = TINY.chars[def.tiny];
@@ -2791,6 +3189,10 @@ export class Game {
     const def = MONSTERS[m.type];
     if (def.apoc) {
       this.drawZombie(ctx, m, def);
+      return;
+    }
+    if (def.crab) {
+      this.drawCrab(ctx, m);
       return;
     }
     if (def.tiny) {
@@ -3260,6 +3662,7 @@ export class Game {
 
   // how high another player's mount lifts them
   remoteLift(r) {
+    if (r.pet?.rid) return 6;
     return r.mt === 'cow' ? 11 : r.mt === 'chicken' ? 5 : 0;
   }
 
@@ -3351,6 +3754,7 @@ export class Game {
       if (m.lv) r.lv = m.lv;
       if (m.mhp) r.max = m.mhp;
       r.mt = m.mt || '';
+      r.pet = PetSystem.remote(r.pet, m.pet);
       r.hidden = !!m.hidden;
     } else if (m.t === 'hit') {
       this.combat.hitByPlayer(m);
@@ -3403,6 +3807,13 @@ export class Game {
       this.combat.remoteFlame(m);
       const burner = this.remotes.get(m.id);
       if (burner) burner.gunFx = { g: 'fireplasma', a: m.a, t: 0 };
+    } else if (m.t === 'fx' && m.kind === 'revive') {
+      if (Number.isFinite(m.x) && Number.isFinite(m.y)) {
+        this.reviveFxs.push({ x: m.x, y: m.y, t: 0, mine: false });
+        sfx.play('respawn', 0.5);
+      }
+    } else if (m.t === 'fx' && m.kind === 'petfx') {
+      if (Number.isFinite(m.x) && Number.isFinite(m.y)) this.pets.addFx(m.x, m.y, m.k);
     } else if (m.t === 'fx' && m.kind === 'aim') {
       this.combat.remoteAim(m);
     } else if (m.t === 'fx' && m.kind === 'zap') {
@@ -3429,7 +3840,7 @@ export class Game {
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
       const at = this.inside ? this.inside.out : p; // indoors you are not in the world: friends just stop seeing you
-      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating, mt: this.mount?.type || '' });
+      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating, mt: this.mount?.type || (this.boat ? 'boat' : ''), pet: this.pets.netState() });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -3443,6 +3854,7 @@ export class Game {
         r.y += (r.ty - r.y) * k;
       }
       r.animT += dt;
+      if (r.pet) PetSystem.lerpRemote(r.pet, dt);
       if (r.bubble && (r.bubble.t += dt) > 5) r.bubble = null;
       if (r.swing && (r.swing.t += dt) > 0.24) r.swing = null;
       if (r.gunFx && (r.gunFx.t += dt) > 0.7) r.gunFx = null;
@@ -3579,6 +3991,11 @@ export class Game {
   blocked(x, y, who) {
     // heroes can wade through water, so only trees, walls and the like stop them
     if (this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true)) return true;
+    if (this.boat) {
+      const tx = Math.floor(x / T);
+      const ty = Math.floor((y - 2) / T);
+      if (this.world.type(tx, ty) !== WATER || this.world.lavaAt(tx, ty)) return true; // a boat does not go on land (or into lava)
+    }
     if (this.mount) {
       // farm animals will not swim or go indoors
       if (this.world.type(Math.floor(x / T), Math.floor((y - 2) / T)) === WATER) return true;
@@ -3619,13 +4036,19 @@ export class Game {
     } else if (this.inside) {
       this.moveInside(dt);
     } else {
-      const still = this.dead || this.celeb || this.fade;
+      if (this.seat) {
+        if (this.dead || this.keys.has('left') || this.keys.has('right') || this.keys.has('up') || this.keys.has('down')) this.leaveSeat();
+        else this.seatUpdate(dt);
+      }
+      const still = this.dead || this.celeb || this.fade || !!this.seat;
       let dx = still ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
       let dy = still ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
       const dashing = !!this.combat.dash; // the dash moves the hero itself
       p.moving = dashing || dx !== 0 || dy !== 0;
       // wading is slow going, and too splashy to sprint
-      this.inWater = this.world.type(Math.floor(p.x / T), Math.floor((p.y - 2) / T)) === WATER;
+      const waterHere = this.world.type(Math.floor(p.x / T), Math.floor((p.y - 2) / T)) === WATER;
+      this.glideTile = waterHere && !this.boat && this.pets.gliding(); // (a seagull carries you over the water: no slowing down)
+      this.inWater = !this.boat && !this.glideTile && waterHere; // (in a boat you float on top of it)
       // a mount has its own, bigger stamina pool: sprinting tires the animal and spares you
       const m = this.mount;
       const tired = m ? m.exhausted : this.exhausted;
@@ -3664,7 +4087,7 @@ export class Game {
         this.stamina = Math.min(1, this.stamina + (p.moving ? 0.12 : 0.3) * (1 + 0.25 * this.upgrades.stamina) * dt);
         if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
       }
-      const ride = this.mount ? (this.mount.type === 'chicken' ? 1.35 : 1.15) : 1; // a chicken hurries, a cow ambles along
+      const ride = this.boat ? 1.4 : this.pets.pet?.rid ? 1.3 : this.mount ? (this.mount.type === 'chicken' ? 1.35 : 1.15) : 1; // a chicken hurries, a cow ambles along
       const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1) * (this.cutscene ? 0.5 : 1); // (a stroll in the story)
       this.animT += dt * (this.sprinting ? 1.7 : 1);
       if (p.moving && !dashing) {
@@ -3701,6 +4124,11 @@ export class Game {
         if (Math.hypot(this.push.vx, this.push.vy) < 12) this.push = null;
       }
       this.updateMount(dt);
+      if (this.boat) {
+        this.boat.x = p.x;
+        this.boat.y = p.y;
+        this.boat.dir = p.dir;
+      }
       // walking through your own front door takes you into your room
       if (!this.fade && !this.dead && this.canHaveInterior()) {
         const door = this.world.doorAt(p.x, p.y);
@@ -3716,6 +4144,9 @@ export class Game {
     }
 
     if (!this.inside && !this.dungeon) this.updateAnimals(dt);
+    if (!this.inside && !this.dungeon && !this.wave && !this.demo) this.updateBoats(dt);
+    if (!this.demo) this.pets.update(dt);
+    this.updateCrows(dt);
     if (!this.demo) {
       if (!this.dead) {
         if (this.inside) this.updateInsideInteraction();
@@ -3727,6 +4158,9 @@ export class Game {
       // still holding left click when the last throw, shot or cast is over: the charge bar starts again by itself
       if (this.mouseHeld[0] && !this.dead && !this.celeb && !this.wave && !this.combat.hold && !this.combat.dash && !this.combat.spin && !this.combat.thrown && !this.paused && this.rules?.melee !== false && this.combat.canFight()) this.combat.holdStart();
       this.updateCelebration(dt);
+      for (const f of this.reviveFxs) f.t += dt;
+      if (this.reviveFxs.length) this.reviveFxs = this.reviveFxs.filter((f) => f.t < (f.mine ? 5 : 2.4));
+      if (this.reviveFlash > 0) this.reviveFlash = Math.max(0, this.reviveFlash - dt * 1.3);
       this.updateWallHold(dt);
       this.combat.update(dt);
       this.trackHurt(dt);
@@ -3851,6 +4285,7 @@ export class Game {
       invisCd: this.combat.invisCd,
       coins: this.coinCount(),
       wood: this.wood,
+      revives: this.revives,
       tEnergy: this.combat.tEnergy,
       tLocked: this.combat.tLocked,
       gun: this.combat.gun,
@@ -3890,15 +4325,20 @@ export class Game {
     let best = null;
     let bestD = 22;
     for (const o of this.nearbyObjects(cx, cy)) {
-      if (!o.inter || this.looted(o)) continue;
-      const d = Math.hypot(o.x - p.x, o.y - 4 - p.y);
+      if (!o.inter || this.looted(o) || (o.hidden && !this.pets.sees(o))) continue;
+      const d = Math.hypot(o.x - p.x, (o.iy ?? o.y - 4) - p.y);
       if (d < bestD) {
         bestD = d;
         best = o;
       }
     }
+    if (!best && !this.boat && !this.seat) {
+      const bt = this.boatNear();
+      if (bt) best = { inter: 'boat', x: bt.x, y: bt.y + 6, label: 'F · board the boat', boat: bt };
+    }
+    if (this.boat || this.seat) best = null; // (nothing else to do while you sail or sit)
     if (!best && this.wave) best = this.nearBarricade();
-    if (!best) best = this.waterAhead();
+    if (!best && !this.boat && !this.seat) best = this.waterAhead();
     this.prompt = best;
     if (this.interactPressed && best?.inter === 'water') {
       this.stamina = Math.min(1, this.stamina + 0.3);
@@ -3913,6 +4353,10 @@ export class Game {
       this.enterBuilding(best.b);
     } else if (this.interactPressed && best?.inter === 'dexit') {
       this.exitDungeon();
+    } else if (this.interactPressed && best?.inter === 'boat') {
+      this.boardBoat(best.boat);
+    } else if (this.interactPressed && best?.inter === 'seesaw') {
+      this.sitSeesaw(best);
     } else if (this.interactPressed && best?.inter === 'chest') {
       this.burstChest(best);
     } else if (this.interactPressed && best) {
@@ -3938,6 +4382,12 @@ export class Game {
 
   // A chest or fridge pops open and the loot flies out onto the ground around it: walk over the pieces to pick them up
   burstChest(o) {
+    // the guardian's own chest stays sealed while it still stands
+    if (o.boss && o.gear && this.dungeon && this.combat.wilds.some((w) => w.guardian && w.state !== 'dead')) {
+      sfx.play('nope');
+      this.onToast?.('🔒 The chest is sealed while the realm\'s guardian still stands.');
+      return;
+    }
     const seed = this.world.seed;
     const loot = this.world.apoc ? LOOT_APOC : undefined;
     const epoch = Math.floor(this.day / 3); // dungeon chests fill up again every three days
@@ -3952,6 +4402,14 @@ export class Game {
     this.collected.add(o.rich ? `${o.id}@${epoch}` : o.id);
     this.treasures++;
     sfx.play('chest');
+    if (o.gear) this.gearLoot(o);
+    if (o.vault) {
+      // a hidden chest is a treasure: lots of coins and the good things
+      for (const r of [{ item: 'coin', qty: 30 + Math.floor(Math.random() * 30) }, { item: 'gem', qty: 2 + Math.floor(Math.random() * 2) }, { item: 'gold', qty: 3 + Math.floor(Math.random() * 3) }, rollLoot(hash2(o.x, 5, sd + 11), hash2(5, o.y, sd + 11), loot), rollLoot(hash2(o.x, 6, sd + 13), hash2(6, o.y, sd + 13), loot)]) {
+        const n = Math.min(r.qty, 6);
+        for (let i = 0; i < n; i++) this.combat.drops.push({ x: o.x + (Math.random() - 0.5) * 12, y: o.y - 4, z: 8, vx: (Math.random() - 0.5) * 60, vy: (Math.random() - 0.5) * 36, vz: 120 + Math.random() * 60, fly: true, burst: true, id: r.item, qty: Math.floor(r.qty / n) + (i < r.qty % n ? 1 : 0), age: 0 });
+      }
+    }
     const pieces = [];
     for (const r of rolls) {
       const n = Math.min(r.qty, 5); // a pile of coins flies out as a few separate pieces
@@ -3965,6 +4423,23 @@ export class Game {
     this.combat.floaters.push({ x: o.x, y: o.y - 22, text: o.lootKind ? 'Clack!' : 'Pop!', color: '#ffb347', t: 0 });
     this.onToast?.(this.world.apoc ? 'The fridge swings open and supplies spill out! Walk over them to pick them up.' : o.lootKind ? V2_OPEN_TEXT[o.lootKind] || 'You rummage through it and the loot spills out!' : 'The chest bursts open! Walk over the loot to pick it up.');
     this.save();
+  }
+
+  // The better chests hold a weapon: a better chest, a better weapon. (Every weapon you already own is skipped; once you have them all, coins.)
+  gearLoot(o) {
+    const rank = (o.skin ?? 0) & 3;
+    if (!o.boss && hash2(o.x, o.y, this.world.seed + 777) > 0.45) return; // (the guardian's and a fallen boss's chests always hold one)
+    const left = WEAPONS.filter((w) => w.id !== 'trusty' && !this.weapons.owned[w.id]).sort((a, b) => a.cost - b.cost);
+    if (!left.length) {
+      this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: 10, vy: 6, vz: 120, fly: true, burst: true, id: 'coin', qty: 20 + rank * 10, age: 0, ins: !!this.inside });
+      return;
+    }
+    const pos = Math.min(left.length - 1, Math.floor(((rank / 3) * 0.7 + Math.random() * 0.45) * left.length));
+    const w = left[pos];
+    this.weapons.owned[w.id] = true;
+    sfx.play('levelup');
+    this.combat.floaters.push({ x: o.x, y: o.y - 34, text: `⚔️ ${w.name}!`, color: '#ffe27a', t: 0 });
+    this.onToast?.(`⚔️ The chest held the ${w.name}! Equip it in the shop (B).`);
   }
 
   // ---------- weather ----------
@@ -5024,6 +5499,10 @@ export class Game {
     const w = canvas.width;
     const h = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.reviveFlash > 0) {
+      ctx.fillStyle = `rgba(255,244,190,${0.5 * this.reviveFlash})`; // a flash of light as you rise
+      ctx.fillRect(0, 0, w, h);
+    }
     if (this.lowHp) {
       // low health: the edges of the screen blink red, a little faster the lower you are
       const lo = 0.5 + 0.5 * Math.sin(this.t * 6.5);
@@ -5153,6 +5632,8 @@ export class Game {
         for (const o of this.world.getChunk(cx, cy).objects) {
           if (o.ground) {
             if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, o.ox, o.oy, o.sw, o.sh);
+          } else if (o.hidden && !this.pets.sees(o)) {
+            // (a hidden chest: nobody sees it without a pigeon)
           } else if (!(o.inter === 'forage' && this.collected.has(o.id))) {
             drawList.push(o);
           }
@@ -5160,11 +5641,17 @@ export class Game {
       }
     }
     for (const a of this.animals) drawList.push({ kind: 'animal', a, y: a.y });
+    for (const b of this.boats) drawList.push({ kind: 'boat', b, y: b.y - 8 });
+    if (!this.demo) this.pets.collect(drawList);
     if (!this.demo) {
       if (!this.spectating) drawList.push({ kind: 'player', y: this.player.y + (this.mount ? 0.2 : 0) });
       this.combat.collect(drawList);
       this.balls?.collect(drawList);
-      for (const r of this.remotes.values()) if (!r.hidden) drawList.push({ kind: 'remote', r, y: r.y });
+      for (const r of this.remotes.values()) {
+        if (r.hidden) continue;
+        drawList.push({ kind: 'remote', r, y: r.y });
+        if (r.pet) drawList.push({ kind: 'rpet', p: r.pet, y: r.pet.y - (r.pet.rid ? 1 : 0) });
+      }
       if (this.bots) for (const s of this.bots.shots) drawList.push({ kind: 'projectile', p: { x: s.x, y: s.y, id: 'rock', rot: s.rot }, y: s.y + 6 });
     }
     if (this.wave) {
@@ -5243,8 +5730,42 @@ export class Game {
           this.drawSmoke(o.ox + 12, o.oy + 12);
           this.glows.push([o.ox + 22, o.oy + 68, 26], [o.ox + 36, o.oy + 47, 22], [o.ox + 48, o.oy + 78, 20]);
           break;
+        case 'pet':
+        case 'rpet':
+          PetSystem.draw(ctx, img, o.p, this.t);
+          break;
+        case 'petfx':
+          PetSystem.drawFx(ctx, o.f);
+          break;
+        case 'bush':
+          if (img[o.sheet]) ctx.drawImage(img[o.sheet], Math.round(o.x - o.sw / 2), Math.round(o.y - 3 - o.sh));
+          break;
+        case 'seesaw': {
+          const sheet = img[`critters/seesaw${o.v}`];
+          if (sheet) ctx.drawImage(sheet, (Math.floor(this.seesawPhase(o)) % 8) * 48, 0, 48, 32, Math.round(o.x - 24), Math.round(o.by - 32), 48, 32);
+          break;
+        }
+        case 'boat':
+          this.drawBoatSprite(ctx, o.b.x, o.b.y, o.b.dir, o.b.t);
+          break;
         case 'chest':
-          if (o.sheet) {
+          if (o.hidden) {
+            // seen through the pigeon's eyes: a golden shimmer
+            ctx.save();
+            ctx.globalAlpha = 0.35 + 0.25 * Math.sin(this.t * 6);
+            ctx.fillStyle = '#ffe27a';
+            ctx.beginPath();
+            ctx.ellipse(Math.round(o.x), Math.round(o.y - 6), 13, 9, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+          if (o.skin !== undefined && img['chests/gear']) {
+            // one of the chest sheet's styles: shut (a little shimmer), or standing open once it has been emptied
+            const set = o.skin >> 2;
+            const col = (o.skin & 3) * 3 + (Math.floor(this.t * 3 + o.x) % 3);
+            const row = set * 4 + (this.looted(o) ? 3 : Math.floor(this.t * 1.5 + o.y) % 2);
+            ctx.drawImage(img['chests/gear'], col * 18, row * 32, 18, 32, Math.round(o.x - 9), Math.round(o.y - 29), 18, 32);
+          } else if (o.sheet) {
             // a V2 container (bin, crate, ATM...): dimmed once it has been searched
             if (!img[o.sheet]) break;
             if (this.looted(o)) ctx.globalAlpha = 0.5;
@@ -5291,7 +5812,7 @@ export class Game {
             break;
           }
           if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
-          ctx.globalAlpha = this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
+          ctx.globalAlpha = this.combat.inBush && this.combat.hidden ? 0.45 : this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
           if (this.stunnedT > 0) this.combat.drawStun(ctx, this.player.x, this.player.y - 26, '#ffe36b');
@@ -5303,7 +5824,8 @@ export class Game {
           const lift = this.remoteLift(o.r);
           this.drawTeamRing(ctx, o.r.x, o.r.y, this.teamOf(o.r));
           // riding: the animal under them, and they sit a little higher
-          if (o.r.mt) this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
+          if (o.r.mt === 'boat') this.drawBoatSprite(ctx, o.r.x, o.r.y, o.r.dir, o.r.animT);
+          else if (o.r.mt) this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
           this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
           if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, { ...o.r, y: o.r.y - lift, teamColor: this.teamCount ? this.peerColor(o.r) : null });
           if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y - lift, o.r.shield);
@@ -5337,6 +5859,8 @@ export class Game {
           this.drawAir(ctx, o.air);
           break;
         case 'skeleton': // (the Decrepit Bones: drawn by the combat code, like the other things that fight)
+        case 'mine':
+        case 'minefx':
         case 'projectile':
         case 'drop':
         case 'swing':
@@ -5349,7 +5873,9 @@ export class Game {
       }
     }
 
+    if (this.crows.length) this.drawCrows(ctx);
     if (this.xpOrbs.length) this.drawXpOrbs(ctx);
+    if (this.reviveFxs.length) this.drawReviveFxs(ctx);
     if (this.wave) this.drawWaveExtras(ctx);
     this.drawCloudShadows(camX, camY);
 

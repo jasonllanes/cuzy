@@ -186,7 +186,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
               <select value={pick} disabled={duelLocked} onChange={(e) => onChange({ duelPick: e.target.value })}>
                 <option value="pick">🖐 Host picks</option>
                 <option value="random">🎲 Random</option>
-                <option value="streak">🏆 Winner stays (loser sits out)</option>
+                <option value="streak">🏆 Winner stays</option>
                 <option value="robin">🔁 Round robin</option>
               </select>
             </div>

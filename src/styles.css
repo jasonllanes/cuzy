@@ -1735,3 +1735,32 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .bet-amount { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .bet-amount input[type=range] { flex: 1; min-width: 90px; accent-color: var(--rose); }
 .bet-amount input[type=number] { width: 84px; padding: 3px 6px; }
+
+/* the room before the game: a short header, one column of settings, and rows that keep their labels readable */
+.set-label { flex: 1 1 0; min-width: 0; }
+.set-row select { flex: 0 1 auto; max-width: 52%; min-width: 0; text-overflow: ellipsis; }
+.waiting-card { padding: 10px 22px 12px; }
+.waiting-card .logo { margin: 0; gap: 10px; }
+.waiting-card .logo h1 { font-size: 1.55rem; line-height: 1.1; }
+.waiting-card .logo-spark { transform: scale(0.75); }
+.wait-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px; }
+.wait-head .tagline { margin: 0; flex: 1 1 300px; text-align: left; font-size: 0.85rem; }
+.wait-head .room-code-row { margin: 0; justify-content: flex-end; }
+.waiting-card .room-code.big { font-size: 1.15rem; padding: 2px 12px; }
+.waiting-card .wait-tip { font-size: 0.78rem; }
+.waiting-card .set-grid { grid-template-columns: 1fr; gap: 0; }
+.waiting-card .set-row { padding: 4px 0; border-bottom: 1px dashed rgba(127, 127, 127, 0.22); }
+.waiting-card .set-grid .set-row:last-child { border-bottom: 0; }
+.waiting-card .set-section > summary { padding: 5px 10px; font-size: 0.92rem; }
+.waiting-card .set-section { margin: 4px 0; }
+.waiting-card .set-label small { font-size: 0.72rem; }
+.waiting-card .set-row.wide input[type=range] { max-width: 50%; }
+.waiting-card .seg select { max-width: 150px; }
+
+/* the pet shop */
+.pet-thumb { display: inline-block; image-rendering: pixelated; background-repeat: no-repeat; flex: none; }
+.pet-swatches { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.pet-sw { padding: 0; border: 2px solid var(--wood); border-radius: 8px; background: #fff; cursor: pointer; line-height: 0; }
+.pet-sw.on { border-color: var(--rose); box-shadow: 0 0 0 2px #ffd94a; }
+.pet-row.is-active { box-shadow: 0 0 0 3px var(--rose) inset; border-radius: 12px; }
+.pet-row .upg-icon { display: grid; place-items: center; }

@@ -1,4 +1,4 @@
-import { CHUNK_PX, WATER } from './world';
+import { CHUNK_PX, SAND, WATER } from './world';
 import { sfx } from './sfx';
 import { BOSS_WIND, POWER_SLOW_TIME, bossDashHalf } from './waves';
 import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
@@ -33,7 +33,12 @@ export const BIOME_FOES = {
 };
 // the region a spot belongs to (the open world is a patchwork of all of them)
 export const biomeOf = (world, x, y) => (world.mixed ? world.biomeAt(Math.floor(x / 16), Math.floor(y / 16)) : world.tileset) || 'clover';
-const foesAt = (world, x, y) => BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover;
+// every kind of monster of every region: a single map has all of them (only the open world keeps each region to its own)
+const ALL_FOES = (() => {
+  const all = (k) => [...new Set(Object.values(BIOME_FOES).flatMap((b) => b[k]))];
+  return { day: all('day'), night: all('night'), boss: all('boss'), mini: all('mini') };
+})();
+const foesAt = (world, x, y) => (world.mixed ? BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover : ALL_FOES);
 
 // Who fights whom: monsters of different camps attack each other when they meet. A type that is in no camp stays out of it.
 const CAMPS = {
@@ -57,6 +62,10 @@ function inFan(w, p, reach) {
 }
 const pickOf = (a) => a[Math.floor(Math.random() * a.length)];
 const MINION = 't_skeleton';
+// laid on the ground: a landmine blows up, a trap stuns (both when something steps on them)
+const MINES = { landmine: { kind: 'mine', R: 42 }, beartrap: { kind: 'trap', R: 34 } };
+const MINE_ARM = 1.2; // seconds until a laid mine is armed
+const CRAB_LOOT = [['coin', 1, 5, 10], ['egg', 0.12, 1, 1]];
 // some flyers that spit from a distance, besides the shooters in MONSTERS
 const RANGED_EXTRA = { eye: { range: 72, rate: 2.6 }, ghastly: { range: 80, rate: 2.8 } };
 // [item, chance, min, max]
@@ -227,6 +236,12 @@ export class Combat {
     this.smokes = []; // clouds from smoke grenades: { x, y, t, life, R }
     this.blasts = []; // the flash of one going off
     this.remoteShots = [];
+    this.lastHitBy = null;
+    this.mines = []; // landmines and traps you laid: { id, x, y, kind, item, t, armed }
+    this.remoteMines = new Map(); // other players' (for show; their games set them off)
+    this.mineFx = [];
+    this.crabT = 4;
+    this.inBush = false;
     this.remoteAims = new Map(); // where other players are aiming their staffs (id -> { x, y, r, color, t })
     this.aimSendT = 0;
     this.aimOn = false;
@@ -798,7 +813,7 @@ export class Combat {
     if (!this.g.activeSkill()) {
       if (this.g.t - (this.skillToastAt ?? -9) > 2) {
         this.skillToastAt = this.g.t;
-        this.g.onToast?.('💨 Dash unlocks at level 6, Spiral Sword at level 8.');
+        this.g.onToast?.('💨 Buy Dash or the Grapple Hook in the shop (B).');
       }
       return;
     }
@@ -1232,7 +1247,7 @@ export class Combat {
   activateShield() {
     if (this.shieldCd > 0) return;
     if (this.g.activeUtil() !== 'shield') {
-      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'The Shield unlocks at level 10.');
+      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'Buy the Shield in the shop (B).');
       return;
     }
     this.shieldT = SHIELD_DUR;
@@ -1246,7 +1261,7 @@ export class Combat {
   activateInvis() {
     if (this.invisCd > 0 || this.invisT > 0) return;
     if (this.g.activeUtil() !== 'invis') {
-      this.g.onToast?.(this.g.skills.invis ? 'Equip Invisibility in the shop (B).' : 'Invisibility unlocks at level 15.');
+      this.g.onToast?.(this.g.skills.invis ? 'Equip Invisibility in the shop (B).' : 'Buy Invisibility in the shop (B).');
       return;
     }
     this.invisT = INVIS_DUR;
@@ -1261,6 +1276,10 @@ export class Combat {
     if (this.throwCd > 0) return;
     if (GRENADES[this.g.inventory[slot]?.id]) {
       this.throwGrenade(slot);
+      return;
+    }
+    if (MINES[this.g.inventory[slot]?.id]) {
+      this.placeMine(slot);
       return;
     }
     if (this.tLocked) {
@@ -1335,6 +1354,118 @@ export class Combat {
     this.throwCd = 0.4;
     this.g.mp?.net.send({ t: 'fx', kind: 'bomb', item, tx: Math.round(tx), ty: Math.round(ty), x0: Math.round(x0), y0: Math.round(y0), fl: Math.round(flight * 100) / 100 }); // the others see it fly, the circle and the blast too
     this.faceAim(a);
+  }
+
+  // Lay a landmine or a trap on the ground a little way in front of you (where the cursor points, up to a short reach)
+  placeMine(slot) {
+    const inv = this.g.inventory;
+    const item = inv[slot]?.id;
+    const def = MINES[item];
+    if (!def) return;
+    const a = this.aim();
+    const [cx, cy] = this.center();
+    let dist = 30;
+    if (!this.g.touchMode && this.g.aimOverride == null) {
+      const m = this.g.mouseWorld();
+      dist = Math.min(58, Math.max(14, Math.hypot(m.x - cx, m.y - cy)));
+    }
+    const x = cx + Math.cos(a) * dist;
+    const y = cy + Math.sin(a) * dist + 6;
+    if (this.g.world.isBlocked(x - 5, y - 5, 10, 5)) {
+      this.g.onToast?.('You can’t lay it there.');
+      this.throwCd = 0.2;
+      return;
+    }
+    removeFromSlot(inv, slot, 1);
+    this.g.emitInventory();
+    const id = `${this.g.mp?.you ?? 'me'}-m${Date.now().toString(36)}${Math.floor(Math.random() * 99)}`;
+    this.mines.push({ id, x, y, kind: def.kind, item, t: 0, armed: false, R: def.R });
+    sfx.play('throw', 0.6);
+    this.throwCd = 0.35;
+    this.faceAim(a);
+    this.g.mp?.net.send({ t: 'fx', kind: 'mine', lid: id, x: Math.round(x), y: Math.round(y), k: def.kind });
+  }
+
+  // anything stepping on an armed mine sets it off: monsters (not the flying ones), skeletons and, in a fight room, rival heroes
+  mineTriggered(m) {
+    const near = (x, y, r) => Math.hypot(x - m.x, y - m.y) < r;
+    for (const w of [...(this.g.wave?.monsters || []), ...this.wilds]) {
+      if (w.state === 'dead') continue;
+      const def = MONSTERS[w.type];
+      if (def.kind === 'fly' || def.fly) continue;
+      if (near(w.x, w.y, 9 + 4 * (w.scale || def.scale || 1))) return true;
+    }
+    for (const s of this.skeletons) if (s.state !== 'dead' && near(s.x, s.y, 11)) return true;
+    if (this.g.fight) {
+      for (const r of this.g.remotes.values()) if (!r.hidden && !this.g.sameTeam(r) && near(r.x, r.y, 10)) return true;
+    }
+    return false;
+  }
+
+  updateMines(dt) {
+    for (const r of this.remoteMines.values()) r.t += dt;
+    for (let i = this.mineFx.length - 1; i >= 0; i--) if ((this.mineFx[i].t += dt) > 0.75) this.mineFx.splice(i, 1);
+    if (!this.mines.length) return;
+    this.mines = this.mines.filter((m) => {
+      m.t += dt;
+      if (!m.armed) {
+        if (m.t < MINE_ARM) return true;
+        m.armed = true;
+      }
+      if (!this.mineTriggered(m)) return true;
+      if (m.kind === 'mine') {
+        this.explode({ x: m.x, y: m.y - 6, R: BOMB_R, kind: 'blast' });
+        this.mineFx.push({ x: m.x, y: m.y, t: 0 });
+      } else {
+        this.explode({ x: m.x, y: m.y - 4, R: m.R, kind: 'stun' });
+        this.floaters.push({ x: m.x, y: m.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
+      }
+      this.g.mp?.net.send({ t: 'fx', kind: 'minegone', lid: m.id, k: m.kind });
+      return false;
+    });
+  }
+
+  remoteMine(m) {
+    if (!m.lid || !Number.isFinite(m.x) || !Number.isFinite(m.y)) return;
+    if (this.remoteMines.size > 40) this.remoteMines.delete(this.remoteMines.keys().next().value);
+    this.remoteMines.set(m.lid, { x: m.x, y: m.y, kind: m.k === 'trap' ? 'trap' : 'mine', t: 0 });
+  }
+
+  remoteMineGone(m) {
+    const r = this.remoteMines.get(m.lid);
+    this.remoteMines.delete(m.lid);
+    if (!r) return;
+    if (r.kind === 'mine') {
+      this.blasts.push({ x: r.x, y: r.y - 6, t: 0, R: BOMB_R });
+      this.mineFx.push({ x: r.x, y: r.y, t: 0 });
+      sfx.play('boom', 0.5);
+    } else {
+      this.blasts.push({ x: r.x, y: r.y - 4, t: 0, R: 34, tone: 'stun' });
+      this.floaters.push({ x: r.x, y: r.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
+    }
+  }
+
+  // crabs scuttle about on the beach now and then (up to three at a time) and pay in coins
+  updateCrabs(dt) {
+    this.crabT -= dt;
+    if (this.crabT > 0 || this.g.world.arena) return;
+    this.crabT = 5 + Math.random() * 6;
+    if (this.wilds.filter((w) => w.type === 'crab' && w.state !== 'dead').length >= 3) return;
+    const { world, player: p } = this.g;
+    for (let i = 0; i < 24; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const d = 130 + Math.random() * 180;
+      const x = p.x + Math.cos(ang) * d;
+      const y = p.y + Math.sin(ang) * d;
+      const tx = Math.floor(x / 16);
+      const ty = Math.floor(y / 16);
+      if (world.type(tx, ty) !== SAND || !world.isOpenSand?.(tx, ty)) continue;
+      if (this.g.seenFrom(x, y) || world.isBlocked(x - 4, y - 4, 8, 4)) continue;
+      const w = this.makeWild('crab', x, y, 1);
+      w.variant = Math.random() < 0.5 ? 0 : 2;
+      this.wilds.push(w);
+      return;
+    }
   }
 
   // another player's grenade: the circle on the ground that fills up, then the blast (for show; their game does the damage)
@@ -1710,6 +1841,10 @@ export class Combat {
       this.throwGrenade(slot);
       return;
     }
+    if (MINES[stack.id]) {
+      this.placeMine(slot);
+      return;
+    }
     const def = ITEMS[stack.id];
     const a = this.aim();
     const [cx, cy] = this.center();
@@ -1749,7 +1884,10 @@ export class Combat {
     this.insideId = room?.id ?? null;
     const pl = this.g.player;
     const inSmoke = this.smokes.some((s) => Math.hypot(pl.x - s.x, pl.y - 4 - s.y) < s.R);
-    this.hidden = this.g.dead ? true : (!!room || this.invisT > 0 || inSmoke) && this.revealT <= 0;
+    this.inBush = !this.g.inside && !this.g.dead && this.g.world.bushAt(pl.x, pl.y - 2);
+    this.hidden = this.g.dead ? true : (!!room || this.invisT > 0 || inSmoke || this.inBush) && this.revealT <= 0;
+    if (this.inBush && !this.wasInBush && this.hidden) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the bush', color: '#9fd88a', t: 0 });
+    this.wasInBush = this.inBush;
     if (inSmoke && !this.wasInSmoke && !this.g.dead) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the smoke', color: '#cfd6e0', t: 0 });
     this.wasInSmoke = inSmoke;
     if (this.hidden && !wasHidden && !this.g.dead && room && !this.g.inside) this.g.onToast?.('Hiding indoors: skeletons and rivals can’t see you.');
@@ -1812,12 +1950,14 @@ export class Combat {
         this.updateSpawns(dt);
         this.updateCamps(dt);
         this.updateDens(dt);
+        this.updateCrabs(dt);
       }
       this.updateWilds(dt); // (underground it only moves the monsters that wait in the rooms: nothing new turns up)
     }
     this.updateRemoteTridents(dt);
     this.updateRemoteBombs(dt);
     this.updateAimShare(dt);
+    this.updateMines(dt);
     this.updateSpells(dt); // (in every mode: Survival and the inside of a house too, or the circles of a staff stay on the screen)
     this.skeletons = this.skeletons.filter((s) => this.updateSkeleton(s, dt));
     this.projectiles = this.projectiles.filter((p) => this.updateProjectile(p, dt));
@@ -2126,6 +2266,18 @@ export class Combat {
       this.wilds.push(this.makeWild(type, x, y, rollMonsterLevel(this.dayLevel())));
       return;
     }
+  }
+
+  // A chest (with a weapon in it) appears where a mini boss or a boss fell. `rank`: 2 = red and gold, 3 = jewelled.
+  spawnRewardChest(x, y, rank) {
+    const { world } = this.g;
+    const chunk = world.getChunk(Math.floor(x / CHUNK_PX), Math.floor(y / CHUNK_PX));
+    const id = `rc${Math.round(x)},${Math.round(y)}`;
+    chunk.objects.push({ kind: 'chest', inter: 'chest', rich: true, boss: true, gear: true, skin: (Math.random() < 0.5 ? 0 : 4) + rank, id, x: Math.round(x), y: Math.round(y) + 6 });
+    chunk.rects.push({ x: Math.round(x) - 7, y: Math.round(y) + 1, w: 14, h: 7 });
+    this.floaters.push({ x, y: y - 24, text: '🎁 A chest!', color: '#ffd24a', t: 0 });
+    this.g.onToast?.('🎁 A chest appeared where it fell! It holds a weapon.');
+    sfx.play('chest');
   }
 
   // returns false once the creature should be removed
@@ -2519,6 +2671,7 @@ export class Combat {
       if (quiet) return;
       this.kills++;
       this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss || w.miniBoss) * lvXp(w.lv || 1) * (w.minionOf ? 0.3 : 1)), !!(def.boss || w.nightBoss || w.miniBoss), { x: w.x, y: w.y });
+      if ((w.miniBoss || (w.zone && def.boss)) && !w.guardian && !this.g.dungeon) this.spawnRewardChest(w.x, w.y, w.miniBoss ? 2 : 3);
       if (w.miniBoss) {
         // a mini boss is worth the trouble
         this.shareCoins(w.x, w.y, 14 + Math.floor(Math.random() * 10), 4);
@@ -2530,7 +2683,7 @@ export class Combat {
         this.shareCoins(w.x, w.y, 24 + Math.floor(Math.random() * 14), 5);
         for (const [id, qty] of [['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
       }
-      for (const [id, chance, min, max] of w.minionOf ? [] : WILD_LOOT) {
+      for (const [id, chance, min, max] of w.minionOf ? [] : def.crab ? CRAB_LOOT : WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1)) + (id === 'coin' ? Math.floor((w.lv || 1) / 3) : 0); // (higher levels pay more)
           if (id === 'coin' && this.g.mp) this.shareCoins(w.x, w.y, qty, 1);
@@ -2976,6 +3129,7 @@ export class Combat {
   hurtPlayer(n, fromX, fromY, { killer = null, invuln = 1.1, by = null, knock = true } = {}) {
     if (this.invuln > 0 || this.hidden) return;
     const p = this.g.player;
+    if (by) this.lastHitBy = { kind: by.kind, id: by.id, at: this.g.t }; // (your pet goes for whoever it was)
     if (!this.g.wave) n *= 1 - 0.06 * this.up('armor'); // Armor upgrade
     if (this.shieldT > 0) {
       this.floaters.push({ x: p.x, y: p.y - 34, text: 'blocked!', color: '#5aaee8', t: 0 });
@@ -2983,6 +3137,7 @@ export class Combat {
       this.invuln = 0.25;
       return;
     }
+    n = this.g.pets.guard(n); // (a pet beside you takes part of it; a ridden sheep takes most)
     if (this.g.mount) {
       // the animal takes the hit for you
       this.g.hurtMount(n);
@@ -3006,6 +3161,7 @@ export class Combat {
       }
     }
     if (this.hp <= 0) {
+      if (this.g.useRevive()) return; // (a Resurrection Cross: you rise again, and nobody gets the kill)
       if (killer !== null || this.g.duelActive()) this.g.mp?.net.send({ t: 'died', killer: killer ?? '' }); // (a duel needs to hear about every fall)
       this.g.die(by || (killer !== null ? { kind: 'player', id: killer } : null));
     }
@@ -3339,6 +3495,9 @@ export class Combat {
   // ---------- drawing ----------
 
   collect(list) {
+    for (const m of this.mines) list.push({ kind: 'mine', m, y: m.y - 2 });
+    for (const m of this.remoteMines.values()) list.push({ kind: 'mine', m, y: m.y - 2 });
+    for (const f of this.mineFx) list.push({ kind: 'minefx', f, y: f.y + 8 });
     for (const s of this.skeletons) list.push({ kind: 'skeleton', s, y: s.y });
     for (const w of this.wilds) list.push({ kind: 'monster', m: w, y: w.y });
     for (const p of this.projectiles) list.push({ kind: 'projectile', p, y: p.y + 6 });
@@ -3392,7 +3551,28 @@ export class Combat {
   }
 
   drawEntity(ctx, o, t) {
-    if (o.kind === 'skeleton') this.drawSkeleton(ctx, o.s);
+    if (o.kind === 'mine') {
+      const m = o.m;
+      const x = Math.round(m.x);
+      const y = Math.round(m.y);
+      ctx.save();
+      ctx.fillStyle = 'rgba(40,24,30,0.25)';
+      ctx.fillRect(x - 8, y - 2, 16, 3);
+      if (m.kind === 'trap') {
+        const img = this.img['items/beartrap'];
+        if (img) ctx.drawImage(img, x - 10, y - 11);
+      } else {
+        const sheet = this.img['critters/mine_sheet'];
+        const armed = m.armed !== false && m.t >= MINE_ARM;
+        if (!armed) ctx.globalAlpha = 0.55 + 0.35 * Math.sin(m.t * 18); // (it blinks until it is armed)
+        if (sheet) ctx.drawImage(sheet, (Math.floor(t * 4) % 9) * 32, 0, 32, 32, x - 16, y - 27, 32, 32);
+      }
+      ctx.restore();
+    } else if (o.kind === 'minefx') {
+      const sheet = this.img['critters/mine_boom'];
+      const fr = Math.min(10, Math.floor(o.f.t * 16));
+      if (sheet) ctx.drawImage(sheet, fr * 48, 0, 48, 48, Math.round(o.f.x - 24), Math.round(o.f.y - 38), 48, 48);
+    } else if (o.kind === 'skeleton') this.drawSkeleton(ctx, o.s);
     else if (o.kind === 'projectile' && o.p.id === 'bullet' && (o.p.plasma || o.p.pl)) {
       // a plasma bolt: a glowing blue streak
       ctx.save();

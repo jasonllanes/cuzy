@@ -120,15 +120,18 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <h1>{room.name}</h1>
           <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_2" scale={3} /></span>
         </header>
+        <div className="wait-head">
         <p className="tagline">
           {MODE_LABEL[room.mode] || MODE_LABEL.free}
-          {room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''} · 👥 {ordered.length}/{room.max}
+          {room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''}
+          {!room.duel && room.mode === 'free' && room.duelEvery > 0 ? ` · ⚔️ a duel every ${room.duelEvery} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : ''} · 👥 {ordered.length}/{room.max}
         </p>
 
         <div className="room-code-row">
           <span className="room-code big">{room.code}</span>
           <button type="button" className="btn small-btn" onClick={() => doCopy('code', room.code)}>{copied === 'code' ? 'Copied!' : 'Copy code'}</button>
           <button type="button" className="btn small-btn" onClick={() => doCopy('link', inviteLink(room.code, lan))}>{copied === 'link' ? 'Link copied!' : '✉️ Invite link'}</button>
+        </div>
         </div>
 
         <p className="hint wait-tip">

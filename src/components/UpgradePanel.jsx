@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { ALLIES, ALLY_KINDS, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
-import { AIR_SUPPORT, MAX_LEVEL, REPAIR_HEAL, UPGRADES, mendCost, repairKitCost, upgradeCost } from '../game/upgrades';
+import { AIR_SUPPORT, MAX_LEVEL, REPAIR_HEAL, REVIVE, UPGRADES, mendCost, repairKitCost, upgradeCost } from '../game/upgrades';
 import { ITEMS, RARITIES, rarityByCost, rarityOf, sellPrice } from '../game/items';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
 import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
 import { GRENADE_COSTS } from '../game/engine';
 import ItemIcon from './ItemIcon';
 import SellPanel from './SellPanel';
+import PetShop from './PetShop';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
 export default function UpgradePanel({ hud, game, onClose, inventory = [], survival = false }) {
@@ -15,7 +16,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
   const cap = hud.wave?.teamCap ?? teamCap(hud.wave?.baseLevel || 0);
   const [tab, setTab] = useState('shelter');
   const tabs = survival
-    ? [['shelter', '🏚️ Shelter & Stats'], ['defense', '🧱 Barricades & Grenades'], ['melee', '⚔️ Weapons'], ['guns', '🔫 Guns'], ['people', '🧑‍🤝‍🧑 Backup'], ['air', '✈️ Air support'], ['sell', '💰 Sell']]
+    ? [['shelter', '🏚️ Shelter & Stats'], ['defense', '🧱 Barricades & Grenades'], ['melee', '⚔️ Weapons'], ['guns', '🔫 Guns'], ['people', '🧑‍🤝‍🧑 Backup'], ['air', '✈️ Air support'], ['pets', '🐾 Pets'], ['sell', '💰 Sell']]
     : [['shelter', '📊 Upgrades'], ['defense', '🧱 Barricades & Grenades'], ['people', '🪙 Helpers'], ['sell', '💰 Sell']];
   const levelOf = (id) => (id === 'house' ? hud.wave?.baseLevel || 0 : hud.upg?.[id] || 0);
 
@@ -66,6 +67,16 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
 
         {tab === 'shelter' && survival && (
           <div className="upg-list">
+              <div className="upg-row">
+                <div className="upg-icon rar rar-legendary"><img src={`${import.meta.env.BASE_URL}assets/items/revive_ring.png`} alt="" width="32" height="32" style={{ imageRendering: 'pixelated' }} /></div>
+                <div className="upg-info">
+                  <h3>Resurrection Cross <small>carrying {hud.revives || 0}/{REVIVE.cap}</small></h3>
+                  <p>If you fall, it shatters and you rise again on the spot with full health and a few seconds of safety.</p>
+                </div>
+                <button className="btn go small-btn" disabled={(hud.revives || 0) >= REVIVE.cap || hud.coins < REVIVE.cost} onClick={() => game.buyRevive()}>
+                  {(hud.revives || 0) >= REVIVE.cap ? 'Full' : `🪙 ${REVIVE.cost}`}
+                </button>
+              </div>
             <div className="upg-row">
               <div className="upg-icon">🔧</div>
               <div className="upg-info">
@@ -91,6 +102,8 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
           </div>
         )}
 
+        {tab === 'pets' && survival && <PetShop hud={hud} game={game} />}
+
         {tab === 'air' && survival && (
           <div className="recruit-note">
             <b>✈️ Air support</b> (buy it any time, as often as you like)
@@ -115,7 +128,9 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
             </div>
             {[['truffle', 'Throw it: it sticks to an enemy and explodes after a few seconds (a red circle shows the blast).'],
               ['stungrenade', 'Throw it: after a moment it flashes and stuns every monster nearby for a few seconds (a blue circle shows how far).'],
-              ['smokegrenade', 'Throw it: a thick cloud for several seconds. Stand in it and the zombies cannot see you.']].map(([item, blurb]) => (
+              ['smokegrenade', 'Throw it: a thick cloud for several seconds. Stand in it and the zombies cannot see you.'],
+              ['landmine', 'Lay it on the ground (right-click): the first zombie to walk over it sets off a big blast.'],
+              ['beartrap', 'Set it on the ground (right-click): whatever steps in it is stunned for a few seconds.']].map(([item, blurb]) => (
               <div className={`recruit-chip hire rar rar-${rarityOf(item)}`} key={item}>
                 <span><b><ItemIcon id={item} scale={2} /> {ITEMS[item].name}</b><small>{blurb}</small></span>
                 <button className="btn go small-btn" disabled={hud.coins < GRENADE_COSTS[item]} onClick={() => game.buyGrenade(item)}>🪙 {GRENADE_COSTS[item]}</button>

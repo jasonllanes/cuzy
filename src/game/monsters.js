@@ -14,6 +14,7 @@ export const MONSTERS = {
   redcap: { name: 'Red Cap', sprite: 'RedCap', kind: 'walk', hp: 3, speed: 31, dmg: 1, sd: 2 },
   jelly: { name: 'Ochre Jelly', sprite: 'OchreJelly', kind: 'walk', hp: 4, speed: 16, dmg: 1, sd: 2 },
   slime: { name: 'Death Slime', sprite: 'DeathSlime', kind: 'walk', hp: 6, speed: 14, dmg: 1, sd: 3 },
+  crab: { name: 'Beach Crab', kind: 'walk', hp: 3, speed: 30, dmg: 0.5, sd: 1, crab: true, scale: 1 }, // (drawn from the crab sheet, and it pays in coins)
   hand: { name: 'Skittering Hand', sprite: 'SkitteringHand', kind: 'walk', hp: 2, speed: 46, dmg: 1, sd: 1 },
   hound: { name: 'Toxic Hound', sprite: 'ToxicHound', kind: 'walk', hp: 4, speed: 40, dmg: 1, sd: 2 },
   scarab: { name: 'Royal Scarab', sprite: 'RoyalScarab', kind: 'walk', hp: 3, speed: 38, dmg: 1, sd: 2 },

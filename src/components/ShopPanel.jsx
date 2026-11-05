@@ -1,5 +1,6 @@
+import PetShop from './PetShop';
 import { useState } from 'react';
-import { FREE_UPGRADES, MAX_LEVEL, SKILL_SHOP, SUPPLY_SHOP, THROW_SHOP, WOOD_SHOP } from '../game/upgrades';
+import { BOAT_COST, FREE_UPGRADES, MAX_LEVEL, REVIVE, SKILL_SHOP, SUPPLY_SHOP, THROW_SHOP, WOOD_SHOP } from '../game/upgrades';
 import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
 import { ITEMS, RARITIES, rarityOf, sellPrice, throwDamage, throwRange, throwWeight } from '../game/items';
 import ItemIcon from './ItemIcon';
@@ -50,7 +51,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
         </header>
         <p className="hint">Coins turn up in chests and when you defeat skeletons.</p>
         <div className="shop-tabs" role="tablist">
-          {[['stats', '📊 Stats'], ['skills', '✨ Skill Upgrade'], ['supplies', '🎒 Supplies & Throwables'], ['swords', '⚔️ Weapons'], ['sell', '💰 Sell']].map(([id, label]) => (
+          {[['stats', '📊 Stats'], ['skills', '✨ Skill Upgrade'], ['supplies', '🎒 Supplies & Throwables'], ['swords', '⚔️ Weapons'], ['pets', '🐾 Pets'], ['sell', '💰 Sell']].map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id} className={`shop-tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>{label}</button>
           ))}
         </div>
@@ -104,9 +105,11 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
           </div>
         )}
 
+        {tab === 'pets' && <PetShop hud={hud} game={game} />}
+
         {tab === 'skills' && (
           <div>
-            <p className="hint">Skills unlock with your level (Dash 6, Grapple Hook 8, Shield 10, Invisibility 15). Equip one sword skill (Space) and one utility skill (R), and upgrade them here. The whirlwind spin is on the axes.</p>
+            <p className="hint">Buy skills with coins. Equip one sword skill (Space) and one utility skill (R), and upgrade them here. The whirlwind spin is on the axes.</p>
             <div className="upg-list skill-grid">
               {SKILL_SHOP.map((s) => {
                 const have = !!skills[s.id];
@@ -115,9 +118,9 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                 return (
                   <div className={`skill-card ${equipped ? 'is-equipped' : ''} ${have ? '' : 'is-locked'}`} key={s.id}>
                     <div className="skill-head">
-                      <div className="upg-icon">{have ? s.icon : '🔒'}</div>
+                      <div className="upg-icon">{s.icon}</div>
                       <div className="upg-info">
-                        <h3>{s.name} {have ? <small>{equipped ? 'equipped' : 'unlocked'}</small> : <small>level {s.level}</small>}</h3>
+                        <h3>{s.name} {have ? <small>{equipped ? 'equipped' : 'owned'}</small> : <small>🪙 {s.cost}</small>}</h3>
                         <p>{s.desc}</p>
                       </div>
                       <span className="row-btns">
@@ -126,13 +129,13 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                             {equipped ? 'Equipped' : 'Equip'}
                           </button>
                         ) : (
-                          <button className="btn small-btn" disabled>🔒 Level {s.level}</button>
+                          <button className="btn go small-btn" disabled={(hud.coins || 0) < s.cost} onClick={() => game.buyShop('skill', s.id)}>🪙 {s.cost}</button>
                         )}
                       </span>
                     </div>
                     {/* once unlocked, a sword skill's own upgrades appear right here */}
                     {have && upgrades.map((u) => upgradeRow(u, true))}
-                    {!have && s.sword && <p className="need-skill">You are level {hud.level || 1}. Its upgrades appear here once it unlocks.</p>}
+                    {!have && s.sword && <p className="need-skill">Its upgrades appear here once you buy it.</p>}
                   </div>
                 );
               })}
@@ -159,6 +162,24 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                   </div>
                 );
               })}
+              <div className="upg-row">
+                <div className="upg-icon rar rar-legendary"><img src={`${import.meta.env.BASE_URL}assets/items/revive_ring.png`} alt="" width="32" height="32" style={{ imageRendering: 'pixelated' }} /></div>
+                <div className="upg-info">
+                  <h3>Resurrection Cross <small>carrying {hud.revives || 0}/{REVIVE.cap}</small></h3>
+                  <p>If you fall, it shatters and you rise again on the spot with full health and a few seconds of safety.</p>
+                </div>
+                <button className="btn go small-btn" disabled={(hud.revives || 0) >= REVIVE.cap || coins < REVIVE.cost} onClick={() => game.buyRevive()}>
+                  {(hud.revives || 0) >= REVIVE.cap ? 'Full' : `🪙 ${REVIVE.cost}`}
+                </button>
+              </div>
+              <div className="upg-row">
+                <div className="upg-icon rar rar-rare">⛵</div>
+                <div className="upg-info">
+                  <h3>Rowing boat</h3>
+                  <p>It floats on the nearest open water. Walk up to it, press F, and sail across the sea (F again near the shore to get out). Random boats drift in the ocean too.</p>
+                </div>
+                <button className="btn go small-btn" disabled={coins < BOAT_COST} onClick={() => game.buyBoat()}>🪙 {BOAT_COST}</button>
+              </div>
               {WOOD_SHOP.map((w) => (
                 <div className="upg-row" key={`wood${w.qty}`}>
                   <div className="upg-icon rar rar-common"><ItemIcon id="wood" scale={2} /></div>

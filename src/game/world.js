@@ -284,7 +284,15 @@ export class World {
     }
     const here = (p) => Math.floor(p.x / (CHUNK * T)) === cx && Math.floor(p.y / (CHUNK * T)) === cy;
     if (here(L.exit)) chunk.objects.push({ kind: 'dexit', inter: 'dexit', id: `dx${z.rx},${z.ry}`, label: 'Space · leave the dungeon', x: L.exit.x, y: L.exit.y });
-    for (const c of L.chests) if (here(c)) chunk.objects.push({ kind: 'chest', inter: 'chest', rich: true, boss: c.boss, id: `dc${z.rx},${z.ry}-${c.k}`, x: c.x, y: c.y });
+    const tier = this.dungeonTier(z.rx, z.ry);
+    for (const c of L.chests) {
+      if (!here(c)) continue;
+      // each chest has its own look (wood, silver, red and gold, jewelled...): the better ones are deeper in, and the guardian's is the best
+      const hv = hash2(c.k, z.rx * 31 + z.ry, this.seed + 6100);
+      const group = c.boss ? Math.min(3, 1 + tier) : Math.min(2, Math.floor(hv * (1 + tier * 0.8)));
+      const skin = (hash2(c.k, z.ry, this.seed + 6101) < 0.5 ? 0 : 4) + group;
+      chunk.objects.push({ kind: 'chest', inter: 'chest', rich: true, boss: c.boss, gear: true, skin, id: `dc${z.rx},${z.ry}-${c.k}`, x: c.x, y: c.y });
+    }
     for (const t of L.torches) if (here(t)) chunk.objects.push({ kind: 'torch', x: t.x, y: t.y, y2: t.y });
     return chunk;
   }
@@ -627,6 +635,11 @@ export class World {
     if (this.v2 && !this.apoc && !this.waveMode) addV2Chunk(this, chunk, cx, cy);
     const den = this.denAt(cx, cy);
     if (den) chunk.decor.push({ kind: 'den', x: den.x, y: den.y });
+    if (!this.apoc && !this.waveMode) {
+      this.addBushes(chunk, x0, y0);
+      this.addSeesaw(chunk, cx, cy);
+      this.addVault(chunk, cx, cy);
+    }
 
     // Cottage + its stepping-stone path
     const rx = Math.floor(cx * CHUNK / REGION);
@@ -960,6 +973,88 @@ export class World {
       }
     }
     return out;
+  }
+
+  // Bushes to hide in: small groves of one to three, here and there on the grass (not by the water, not by a house). Stand in one and nobody
+  // can see you, on the map either, until you attack. Each lists the patch of ground that hides you (chunk.bushes).
+  addBushes(chunk, x0, y0) {
+    const s = this.seed;
+    chunk.bushes = [];
+    for (let ty = y0; ty < y0 + CHUNK; ty += 4) {
+      for (let tx = x0; tx < x0 + CHUNK; tx += 4) {
+        if (hash2(tx, ty, s + 6300) > 0.07) continue;
+        const bx = tx + Math.floor(hash2(tx, ty, s + 6301) * 3);
+        const by = ty + Math.floor(hash2(tx, ty, s + 6302) * 3);
+        if (this.type(bx, by) !== GRASS || this.treeAt(bx >> 1, by >> 1) || this.isCleared(bx, by) || this.nearArena(bx, by, 2)) continue;
+        if ([[2, 0], [-2, 0], [0, 2], [0, -2]].some(([dx, dy]) => this.type(bx + dx, by + dy) !== GRASS)) continue;
+        const n = 1 + Math.floor(hash2(tx, ty, s + 6303) * 3);
+        for (let k = 0; k < n; k++) {
+          const pick = Math.floor(hash2(tx + k, ty, s + 6304) * 6);
+          const num = [18, 19, 20, 21, 22, 23][pick];
+          const sw = num >= 22 ? 48 : 32;
+          const sh = 32;
+          const px = bx * T + 8 + Math.round((hash2(tx, ty + k, s + 6305) - 0.5) * 20) + k * 7;
+          const py = by * T + 14 + Math.round((hash2(tx + k, ty + k, s + 6306) - 0.5) * 8);
+          chunk.objects.push({ kind: 'bush', sheet: `bush/b${num}`, sw, sh, x: px, y: py + 3 });
+          chunk.bushes.push({ x: px, y: py - sh * 0.28, rx: sw * 0.32, ry: sh * 0.24 });
+        }
+      }
+    }
+  }
+
+  // is this spot hidden by a bush?
+  bushAt(px, py) {
+    const ccx = Math.floor(px / CHUNK_PX);
+    const ccy = Math.floor(py / CHUNK_PX);
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        for (const b of this.getChunk(ccx + i, ccy + j).bushes || []) {
+          const ex = (px - b.x) / b.rx;
+          const ey = (py - b.y) / b.ry;
+          if (ex * ex + ey * ey < 1) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // A hidden chest, rarely: it cannot be seen (or opened) unless a pet pigeon is close. It holds a lot, and always a weapon.
+  addVault(chunk, cx, cy) {
+    const s = this.seed;
+    if (hash2(cx, cy, s + 6600) > 0.06) return;
+    const tx = cx * CHUNK + 2 + Math.floor(hash2(cx, cy, s + 6601) * (CHUNK - 4));
+    const ty = cy * CHUNK + 2 + Math.floor(hash2(cx, cy, s + 6602) * (CHUNK - 4));
+    if (Math.hypot(tx, ty) < 20 || this.nearArena(tx, ty, 6) || this.type(tx, ty) !== GRASS || this.treeAt(tx >> 1, ty >> 1) || this.isCleared(tx, ty)) return;
+    chunk.objects.push({ kind: 'chest', inter: 'chest', hidden: true, vault: true, rich: true, boss: true, gear: true, skin: 3 + (hash2(cx, cy, s + 6603) < 0.5 ? 0 : 4), id: `vt${cx},${cy}`, x: tx * T + 8, y: ty * T + 14 });
+  }
+
+  // A seesaw, now and then in an open meadow: two people can sit on it (one on each end) and it rocks up and down by itself.
+  addSeesaw(chunk, cx, cy) {
+    const s = this.seed;
+    if (hash2(cx, cy, s + 6400) > 0.06) return;
+    const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, s + 6401) * (CHUNK - 8));
+    const ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy, s + 6402) * (CHUNK - 8));
+    if (Math.hypot(tx, ty) < 14 || this.nearArena(tx, ty, 6) || !this.isOpenMeadow(tx, ty) || this.isCleared(tx, ty) || this.type(tx + 3, ty) !== GRASS || this.type(tx - 3, ty) !== GRASS) return;
+    const x = tx * T + 8;
+    const y = ty * T + 14;
+    // (it is sorted a little behind its base, so a hero sitting on it is drawn in front of the board)
+    chunk.objects.push({ kind: 'seesaw', inter: 'seesaw', id: `ss${cx},${cy}`, v: hash2(cx, cy, s + 6403) < 0.5 ? 1 : 2, label: 'F · sit on the seesaw', x, y: y - 16, by: y, iy: y - 6 });
+    chunk.rects.push({ x: x - 4, y: y - 9, w: 8, h: 6 });
+  }
+
+  // a few tiles of sand with sand all round (a crab has room to scuttle)
+  isOpenSand(tx, ty) {
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (this.type(tx + i, ty + j) === WATER) return false;
+    return true;
+  }
+
+  // A boat floating in the open sea, now and then (a spot of deep water with water all round it)
+  boatAt(cx, cy) {
+    if (this.arena || this.apoc || this.waveMode || this.lava || hash2(cx, cy, this.seed + 6500) > 0.16) return null;
+    const tx = cx * CHUNK + 3 + Math.floor(hash2(cx, cy, this.seed + 6501) * (CHUNK - 6));
+    const ty = cy * CHUNK + 3 + Math.floor(hash2(cx, cy, this.seed + 6502) * (CHUNK - 6));
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (this.type(tx + dx, ty + dy) !== WATER) return null;
+    return { x: tx * T + 8, y: ty * T + 8 };
   }
 
   // A monster den, if this chunk has one: a marked patch of ground where monsters wait, a few at a time, for you to come close. They

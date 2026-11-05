@@ -803,6 +803,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         </div>
         <div className="coin-row">
           <button type="button" className="coin-chip coin-drop" onClick={() => hud.coins > 0 && setQty({ kind: 'coins', max: hud.coins, id: 'coin' })} title={`${waves ? 'Coins for upgrades and helpers' : 'Coins for the shop'}. Click to drop some on the ground.`}>🪙 {hud.coins}</button>
+ {hud.revives > 0 && <span className="coin-chip" title="Resurrection Crosses: if you fall, you rise again on the spot"><img src={`${import.meta.env.BASE_URL}assets/items/revive_ring.png`} alt="" width="16" height="16" style={{ imageRendering: 'pixelated', verticalAlign: '-3px' }} /> {hud.revives}</span>}
           {!waves && <span className="coin-chip wood-chip" title="Wood from the trees you chop: weapons are crafted from it at the shop (B)">🪵 {hud.wood || 0}</span>}
         </div>
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
@@ -847,7 +848,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           className={`skill ${hud.shieldT > 0 ? 'active' : ''} ${hud.shieldCd > 0 ? 'cooling' : 'ready'}`}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => gameRef.current?.combat?.activateShield()}
-          title={!waves && !hud.util ? 'Utility skill: the Shield unlocks at level 10, Invisibility at level 15 (R)' : 'Shield: blocks all damage for 3 seconds (10 second cooldown)'}
+          title={!waves && !hud.util ? 'Utility skill: buy the Shield or Invisibility in the shop (B), then press R' : 'Shield: blocks all damage for 3 seconds (10 second cooldown)'}
         >
           <span className="skill-icon">{!waves && !hud.util ? '🔒' : '🛡️'}</span>
           <kbd>{waves ? 'Space' : 'R'}</kbd>

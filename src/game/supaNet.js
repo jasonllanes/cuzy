@@ -987,6 +987,9 @@ export class SupaNet {
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
         else if (m.kind === 'flame') this.bcast({ t: 'fx', id: this.me, kind: 'flame', x: num(m.x), y: num(m.y), a: num(m.a) });
         else if (m.kind === 'aim') this.bcast(m.off ? { t: 'fx', id: this.me, kind: 'aim', off: 1 } : { t: 'fx', id: this.me, kind: 'aim', x: num(m.x), y: num(m.y), r: num(m.r), color: clean(m.color, 12) });
+        else if (m.kind === 'mine') this.bcast({ t: 'fx', id: this.me, kind: 'mine', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), k: m.k === 'trap' ? 'trap' : 'mine' });
+        else if (m.kind === 'minegone') this.bcast({ t: 'fx', id: this.me, kind: 'minegone', lid: clean(m.lid, 40), k: m.k === 'trap' ? 'trap' : 'mine' });
+        else if (m.kind === 'petfx') this.bcast({ t: 'fx', id: this.me, kind: 'petfx', x: num(m.x), y: num(m.y), k: ['bite', 'poison', 'bleed', 'slam'].includes(m.k) ? m.k : 'bite' });
         else if (m.kind === 'zap') this.bcast({ t: 'fx', id: this.me, kind: 'zap', x1: num(m.x1), y1: num(m.y1), x2: num(m.x2), y2: num(m.y2) });
         else if (m.kind === 'grapple') this.bcast({ t: 'fx', id: this.me, kind: 'grapple', a: num(m.a), len: num(m.len), hit: m.hit ? 1 : 0 });
         else if (m.kind === 'bomb') this.bcast({ t: 'fx', id: this.me, kind: 'bomb', item: clean(m.item, 20), tx: num(m.tx), ty: num(m.ty), x0: num(m.x0), y0: num(m.y0), fl: num(m.fl) });
@@ -1015,7 +1018,8 @@ export class SupaNet {
       hp: Math.max(0, Math.min(40, Math.round((Number(m.hp) || 0) * 10) / 10)),
       mhp: Math.max(1, Math.min(40, Math.round((Number(m.mhp) || 6) * 10) / 10)), // max health, in hearts
       lv: Math.max(1, Math.min(99, Math.round(Number(m.lv)) || 1)), // character level, shown next to the health bar
-      mt: m.mt === 'chicken' || m.mt === 'cow' ? m.mt : '', // what they are riding
+      mt: m.mt === 'chicken' || m.mt === 'cow' || m.mt === 'boat' ? m.mt : '', // what they are riding
+      pet: m.pet && typeof m.pet === 'object' ? { s: clean(m.pet.s, 8), v: Math.max(0, Math.min(9, Math.round(Number(m.pet.v)) || 0)), x: num(m.pet.x), y: num(m.pet.y), d: Math.max(0, Math.min(3, Math.round(Number(m.pet.d)) || 0)), st: Math.max(0, Math.min(2, Math.round(Number(m.pet.st)) || 0)), mv: m.pet.mv ? 1 : 0, rd: m.pet.rd ? 1 : 0 } : null, // their pet
     };
     // (who we are rides along with every position, so a player who is somehow missing from someone's list is put back by it)
     const me = this.members.get(this.me);

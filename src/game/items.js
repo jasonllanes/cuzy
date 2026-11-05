@@ -27,6 +27,8 @@ export const ITEMS = {
   // (the id stays "truffle" so old saves keep working)
   truffle: { name: 'Sticky Grenade', desc: 'Throw it: it sticks to whatever it hits and explodes a few seconds later. A red circle on the ground shows the blast.', icon: single('grenade', 12, 14), stack: 10, throw: 2, bomb: true },
   stungrenade: { name: 'Stun Grenade', desc: 'Throw it: after a moment it flashes and stuns every monster nearby for a few seconds. A blue circle on the ground shows how far it reaches.', icon: single('grenade_stun', 12, 14), stack: 10, throw: 1, bomb: true },
+  landmine: { name: 'Landmine', desc: 'Right-click to lay it on the ground. After a moment it arms, and the first enemy that walks over it sets off a big blast. Rival heroes set it off too, so mind where you step.', icon: single('landmine', 19, 18), stack: 10 },
+  beartrap: { name: 'Stun Trap', desc: 'Right-click to set it on the ground. Whatever steps into it, a monster or a rival hero, is stunned for a few seconds.', icon: single('beartrap', 20, 12), stack: 10 },
   smokegrenade: { name: 'Smoke Grenade', desc: 'Throw it: it puffs out a thick cloud for several seconds. Stand inside and enemies cannot see you (attacking gives you away for a moment).', icon: single('grenade_smoke', 12, 14), stack: 10, throw: 1, bomb: true },
   sword: { name: 'Sword', desc: 'Select this slot, then left-click to swing (hold to charge a dash). Select another slot and left-click does whatever that slot is for.', icon: { file: 'sword', sx: 0, sy: 0, sw: 14, sh: 14, sheetW: 14, sheetH: 14 }, stack: 1, wave: true },
   barricade: { name: 'Barricade Box', desc: 'Select it and left-click where you want the wall (or press Q). Hold left-click to lock it, move the mouse to turn it, release to place. Pick one up again with Space.', icon: single('crate_top', 16, 14), stack: 9, wave: true },
@@ -171,7 +173,7 @@ export const RARITIES = {
 };
 const RARITY_OF = {
   tuber: 'uncommon', mushroom_red: 'uncommon', milk: 'uncommon', honey: 'uncommon', jam: 'uncommon', soup: 'uncommon', barricade: 'uncommon', hppack: 'uncommon', soupcan: 'uncommon',
-  mushroom_blue: 'rare', gold: 'rare', truffle: 'rare', stungrenade: 'rare', smokegrenade: 'rare', medkit: 'rare', sword: 'uncommon',
+  mushroom_blue: 'rare', gold: 'rare', truffle: 'rare', stungrenade: 'rare', smokegrenade: 'rare', landmine: 'rare', beartrap: 'rare', medkit: 'rare', sword: 'uncommon',
   gem: 'epic',
 };
 export const rarityOf = (id) => RARITY_OF[id] || 'common';
@@ -199,7 +201,7 @@ export const rarityByCost = (cost) => (cost <= 14 ? 'common' : cost <= 28 ? 'unc
 // What a shop pays when you sell something back. Items without a price here can't be sold.
 const SELL = {
   berry: 1, leek: 1, tuber: 2, mushroom_red: 1, mushroom_blue: 2, acorn: 1, honey: 3, jam: 3, milk: 2, egg: 1, gold: 8, gem: 12,
-  rock: 1, mug: 2, wool: 1, stungrenade: 4, smokegrenade: 3, truffle: 4, barricade: 2, bandage: 2, canned: 2, soup: 2, medkit: 5, seeds: 1,
+  rock: 1, mug: 2, wool: 1, stungrenade: 4, smokegrenade: 3, landmine: 5, beartrap: 4, truffle: 4, barricade: 2, bandage: 2, canned: 2, soup: 2, medkit: 5, seeds: 1,
 };
 export const sellValue = (id) => SELL[id] || 0;
 // Swords, guns and shop supplies go back for half of what they cost

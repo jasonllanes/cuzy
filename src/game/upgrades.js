@@ -99,11 +99,12 @@ export const SUPPLY_SHOP = [
 // You use ONE from each group:
 //   sword   - Dash or Grapple Hook (the Space skill). The spiral spin now belongs to the axes: hold left click with one.
 //   utility - Shield or Invisibility
+// Skills are bought in the shop (Free Roam)
 export const SKILL_SHOP = [
-  { id: 'dash', icon: '💨', name: 'Dash', group: 'sword', level: 6, sword: true, desc: 'Press Space (hold it to charge) to dash through enemies. Upgrade distance and damage in the shop.' },
-  { id: 'grapple', icon: '🪝', name: 'Grapple Hook', group: 'sword', level: 8, sword: true, desc: 'Press Space (hold it to charge how far it reaches) to fire a hook. It catches a tree, a wall, a house, a creature or a player, and pulls you straight to it. Upgrade its range in the shop.' },
-  { id: 'shield', icon: '🛡️', name: 'Shield', group: 'utility', level: 10, desc: 'Press R: blocks all damage for 3 seconds. 10 second cooldown.' },
-  { id: 'invis', icon: '👻', name: 'Invisibility', group: 'utility', level: 15, desc: 'Press R: enemies can no longer see you for 4 seconds (attacking reveals you). 25 second cooldown.' },
+  { id: 'dash', icon: '💨', name: 'Dash', group: 'sword', cost: 20, sword: true, desc: 'Press Space (hold it to charge) to dash through enemies. Upgrade distance and damage in the shop.' },
+  { id: 'grapple', icon: '🪝', name: 'Grapple Hook', group: 'sword', cost: 35, sword: true, desc: 'Press Space (hold it to charge how far it reaches) to fire a hook. It catches a tree, a wall, a house, a creature or a player, and pulls you straight to it. Upgrade its range in the shop.' },
+  { id: 'shield', icon: '🛡️', name: 'Shield', group: 'utility', cost: 30, desc: 'Press R: blocks all damage for 3 seconds. 10 second cooldown.' },
+  { id: 'invis', icon: '👻', name: 'Invisibility', group: 'utility', cost: 50, desc: 'Press R: enemies can no longer see you for 4 seconds (attacking reveals you). 25 second cooldown.' },
 ];
 
 // Wood for crafting weapons: [how much, price]
@@ -123,4 +124,12 @@ export const THROW_SHOP = [
   { item: 'truffle', qty: 2, cost: 8 },
   { item: 'stungrenade', qty: 2, cost: 9 },
   { item: 'smokegrenade', qty: 2, cost: 7 },
+  { item: 'landmine', qty: 2, cost: 10 },
+  { item: 'beartrap', qty: 2, cost: 8 },
 ];
+
+// A rowing boat, bought in the Free Roam shop: it floats by the nearest water, and you can sail it across the sea
+export const BOAT_COST = 120;
+
+// The Resurrection Cross: if you fall while you carry one, it shatters and you rise again on the spot, with a few seconds of safety
+export const REVIVE = { cost: 150, cap: 3, safe: 5 };
