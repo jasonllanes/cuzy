@@ -401,6 +401,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       onInventory: setInventory,
       onStorage: setBox,
       onOpenStorage: () => setStoreOpen(true),
+      onGet: (card) => setUnlocks((u) => [...u.slice(-2), { ...card, key: Math.random() }]), // a new weapon, or a rare find
       onLevelUp: ({ level, unlocked }) => {
         const key = Math.random();
         setLevelFlash({ level, key });
@@ -770,9 +771,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             ))}
           </div>
         )}
-        {pvp && !hud.duel && (
+        {session && (pvp || hud.nextDuel || scores.some((s) => s.dw > 0 || s.dl > 0)) && !hud.duel && (
           <div className="scoreboard panel small">
-            <div className="score-title">{(live || session.room).winBy === 'monsters' ? '👹' : '⚔️'} First to {(live || session.room).target} {(live || session.room).winBy === 'monsters' ? 'monster ' : ''}kills</div>
+            <div className="score-title">{!pvp ? '👥 Players' : <>{(live || session.room).winBy === 'monsters' ? '👹' : '⚔️'} First to {(live || session.room).target} {(live || session.room).winBy === 'monsters' ? 'monster ' : ''}kills</>}</div>
             {(live || session.room).teams > 0 && TEAMS.slice(0, (live || session.room).teams).map((t, i) => {
               const total = scores.filter((s) => s.team === i).reduce((n, s) => n + s.kills, 0);
               return (
@@ -784,8 +785,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               );
             })}
             {[...scores].sort((a, b) => b.kills - a.kills).map((s) => (
-              <div key={s.id} className={`score-row ${s.id === session.you ? 'me' : ''}`} style={s.team !== null && s.team !== undefined && TEAMS[s.team] ? { borderLeft: `4px solid ${TEAMS[s.team].color}` } : undefined}>
-                <span className="score-who"><Avatar assets={assets} id={heroOf(s.id)} />{s.name}</span>
+              <div key={s.id} className={`score-row ${s.id === session.you ? 'me' : ''} ${(hud.marks || []).includes(String(s.id)) ? 'next-duel-row' : ''}`} style={s.team !== null && s.team !== undefined && TEAMS[s.team] ? { borderLeft: `4px solid ${TEAMS[s.team].color}` } : undefined}>
+                <span className="score-who"><Avatar assets={assets} id={heroOf(s.id)} />{(hud.marks || []).includes(String(s.id)) ? '⚔️ ' : ''}{s.name}</span>
+                {(s.dw > 0 || s.dl > 0) && <small className="score-duel" title="Duel wins and losses">⚔️ <em className="w">{s.dw || 0}W</em>·<em className="l">{s.dl || 0}L</em></small>}
                 <b>{s.kills}</b>
                 <i style={{ width: `${Math.min(100, (s.kills / (live || session.room).target) * 100)}%` }} />
               </div>
@@ -806,6 +808,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
  {hud.revives > 0 && <span className="coin-chip" title="Resurrection Crosses: if you fall, you rise again on the spot"><img src={`${import.meta.env.BASE_URL}assets/items/revive_ring.png`} alt="" width="16" height="16" style={{ imageRendering: 'pixelated', verticalAlign: '-3px' }} /> {hud.revives}</span>}
           {!waves && <span className="coin-chip wood-chip" title="Wood from the trees you chop: weapons are crafted from it at the shop (B)">🪵 {hud.wood || 0}</span>}
         </div>
+ {hud.pets?.kind && (
+            <span className={`coin-chip pet-chip ${hud.pets.rest ? 'asleep' : ''}`} title="Your pet's health. Heal it with an HP Pack (or a few coins), here or with F next to it.">
+              <span className="pet-hp"><i style={{ width: `${Math.max(0, Math.min(100, (hud.pets.hp / Math.max(1, hud.pets.max)) * 100))}%` }} /></span>
+              {hud.pets.rest ? '💤' : '🐾'} {Math.ceil(hud.pets.hp * 10) / 10}/{hud.pets.max}
+              <button type="button" className="btn small-btn pet-heal" disabled={!hud.pets.rest && hud.pets.hp >= hud.pets.max - 0.05} onClick={() => gameRef.current?.healPet()}>❤ Heal {hud.pets.packs > 0 ? `(${hud.pets.packs})` : `🪙${hud.pets.healCost}`}</button>
+            </span>
+          )}
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
         {(!mobile || hudMenuOpen) && (
           <>
@@ -980,7 +989,22 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         </div>
       )}
       {hud.duel && <BetPanel duel={hud.duel} game={gameRef.current} />}
-      {!hud.duel && hud.duelNext !== null && hud.duelNext !== undefined && (
+      {!hud.duel && hud.nextDuel && (
+        <div className="next-duel panel small">
+          <div className={`nd-head ${hud.nextDuel.left <= 10 ? 'soon' : ''}`}>⚔️ Next duel in {Math.floor(hud.nextDuel.left / 60)}:{String(Math.floor(hud.nextDuel.left % 60)).padStart(2, '0')}</div>
+          <div className="nd-vs">
+            {hud.nextDuel.units.map((u, i) => (
+              <span key={u.key} className="nd-side">
+                {i === 1 && <b className="nd-v">VS</b>}
+                <span className="nd-who">{u.hero ? <Avatar assets={assets} id={u.hero} /> : null}<b>{u.name}{u.me ? ' (you)' : ''}</b></span>
+              </span>
+            ))}
+          </div>
+          {hud.nextDuel.mine && <small className="nd-note">You are one of the fighters.</small>}
+          {hud.nextDuel.bet && !hud.nextDuel.mine && <BetPanel duel={{ units: hud.nextDuel.units, pool: hud.nextDuel.pool, myBet: hud.nextDuel.myBet, coins: hud.nextDuel.coins, canBet: hud.nextDuel.canBet, call: hud.nextDuel.left }} game={gameRef.current} advance />}
+        </div>
+      )}
+      {!hud.duel && !hud.nextDuel && hud.duelNext !== null && hud.duelNext !== undefined && (
         <div className={`duel-next panel small ${hud.duelNext <= 10 ? 'soon' : ''}`}>⚔️ Next duel in {Math.floor(hud.duelNext / 60)}:{String(Math.floor(hud.duelNext % 60)).padStart(2, '0')}</div>
       )}
       {hud.target && (
@@ -1033,6 +1057,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div key="round-flash" className="levelup-flash round-flash" aria-hidden="true">
           <span className="levelup-glow" />
           <b>{hud.celeb.draw ? '🤝 A draw!' : `🏆 ${hud.celeb.mine ? 'You win' : `${hud.celeb.name} wins`}!`}</b>
+          {hud.celeb.gold !== 0 && <strong className={`celeb-gold ${hud.celeb.gold > 0 ? 'up' : 'down'}`}>{hud.celeb.gold > 0 ? '+' : ''}{hud.celeb.gold} 🪙</strong>}
           {hud.celeb.sub && <small>{hud.celeb.sub}</small>}
         </div>
       )}

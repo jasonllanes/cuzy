@@ -104,6 +104,7 @@ export class SupaNet {
     this.lobbyCh = null;
     this.lobbyReady = false;
     this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0, duel: 0, duelEvent: 0, duelPrep: 0 };
+    this.record = new Map(); // duel wins and losses for the whole stay in this room: player id -> { w, l }
     this.bets = new Map(); // the bets of the ones who are not fighting: player id -> { on: the side they back, amt }
     this.duelPrep = null; // the few seconds before a duel when bets can be placed: { left }
     this.resetDuel();
@@ -145,6 +146,7 @@ export class SupaNet {
     this.duelPrep = null;
     this.duelNext = null;
     this.bets = new Map();
+    this.record = new Map();
     this.resetDuel?.();
     this.resetMatches?.();
     this.channel = null;
@@ -638,7 +640,7 @@ export class SupaNet {
   }
 
   scoreList() {
-    return [...this.members.values()].map((m) => ({ id: m.id, name: m.name, kills: this.kills.get(m.id) || 0, team: this.teamMap[m.id] ?? null }));
+    return [...this.members.values()].map((m) => ({ id: m.id, name: m.name, kills: this.kills.get(m.id) || 0, team: this.teamMap[m.id] ?? null, dw: this.record.get(m.id)?.w || 0, dl: this.record.get(m.id)?.l || 0 }));
   }
 
   summary() {
@@ -786,7 +788,9 @@ export class SupaNet {
       this.emit({ t: 'peer_leave', id: m.id, name: m.name, host: this.hostId });
       if (this.isHost) {
         if (wasHost) this.takeOver();
-        if (this.duelPrep && this.fighters.has(m.id)) {
+        if (this.nextPair && this.nextPair.includes(m.id) && !this.duelPrep) {
+          this.voidPlan(); // a fighter of the planned duel left: the advance bets come back and a new pair is drawn
+        } else if (this.duelPrep && this.fighters.has(m.id)) {
           // a fighter left before the fight: it is off, and the bets come back
           clearTimeout(this.timers.duelPrep);
           this.duelPrep = null;
@@ -989,8 +993,10 @@ export class SupaNet {
         else if (m.kind === 'flame') this.bcast({ t: 'fx', id: this.me, kind: 'flame', x: num(m.x), y: num(m.y), a: num(m.a) });
         else if (m.kind === 'aim') this.bcast(m.off ? { t: 'fx', id: this.me, kind: 'aim', off: 1 } : { t: 'fx', id: this.me, kind: 'aim', x: num(m.x), y: num(m.y), r: num(m.r), color: clean(m.color, 12) });
         else if (m.kind === 'mine') this.bcast({ t: 'fx', id: this.me, kind: 'mine', lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), k: m.k === 'trap' ? 'trap' : 'mine' });
-        else if (m.kind === 'minegone') this.bcast({ t: 'fx', id: this.me, kind: 'minegone', lid: clean(m.lid, 40), k: m.k === 'trap' ? 'trap' : 'mine' });
-        else if (m.kind === 'petfx') this.bcast({ t: 'fx', id: this.me, kind: 'petfx', x: num(m.x), y: num(m.y), k: ['bite', 'poison', 'bleed', 'slam'].includes(m.k) ? m.k : 'bite' });
+        else if (m.kind === 'minegone') this.bcast({ t: 'fx', id: this.me, kind: 'minegone', lid: clean(m.lid, 40), k: m.k === 'trap' ? 'trap' : 'mine', who: clean(m.who, 24) });
+        else if (m.kind === 'petfx') this.bcast({ t: 'fx', id: this.me, kind: 'petfx', x: num(m.x), y: num(m.y), k: ['bite', 'poison', 'bleed', 'slam', 'heal'].includes(m.k) ? m.k : 'bite' });
+        else if (m.kind === 'boatride') this.bcast({ t: 'fx', id: this.me, kind: 'boatride', bid: clean(m.bid, 30) });
+        else if (m.kind === 'boatset') this.bcast({ t: 'fx', id: this.me, kind: 'boatset', bid: clean(m.bid, 30), x: num(m.x), y: num(m.y), d: clean(m.d, 6) });
         else if (m.kind === 'zap') this.bcast({ t: 'fx', id: this.me, kind: 'zap', x1: num(m.x1), y1: num(m.y1), x2: num(m.x2), y2: num(m.y2) });
         else if (m.kind === 'grapple') this.bcast({ t: 'fx', id: this.me, kind: 'grapple', a: num(m.a), len: num(m.len), hit: m.hit ? 1 : 0 });
         else if (m.kind === 'bomb') this.bcast({ t: 'fx', id: this.me, kind: 'bomb', item: clean(m.item, 20), tx: num(m.tx), ty: num(m.ty), x0: num(m.x0), y0: num(m.y0), fl: num(m.fl) });
@@ -1019,8 +1025,8 @@ export class SupaNet {
       hp: Math.max(0, Math.min(40, Math.round((Number(m.hp) || 0) * 10) / 10)),
       mhp: Math.max(1, Math.min(40, Math.round((Number(m.mhp) || 6) * 10) / 10)), // max health, in hearts
       lv: Math.max(1, Math.min(99, Math.round(Number(m.lv)) || 1)), // character level, shown next to the health bar
-      mt: m.mt === 'chicken' || m.mt === 'cow' || m.mt === 'boat' ? m.mt : '', // what they are riding
-      pet: m.pet && typeof m.pet === 'object' ? { s: clean(m.pet.s, 8), v: Math.max(0, Math.min(9, Math.round(Number(m.pet.v)) || 0)), x: num(m.pet.x), y: num(m.pet.y), d: Math.max(0, Math.min(3, Math.round(Number(m.pet.d)) || 0)), st: Math.max(0, Math.min(2, Math.round(Number(m.pet.st)) || 0)), mv: m.pet.mv ? 1 : 0, rd: m.pet.rd ? 1 : 0 } : null, // their pet
+      mt: m.mt === 'chicken' || m.mt === 'cow' || m.mt === 'boat' || m.mt === 'boatp' ? m.mt : '', // what they are riding
+      pet: m.pet && typeof m.pet === 'object' ? { s: clean(m.pet.s, 8), v: Math.max(0, Math.min(9, Math.round(Number(m.pet.v)) || 0)), x: num(m.pet.x), y: num(m.pet.y), d: Math.max(0, Math.min(3, Math.round(Number(m.pet.d)) || 0)), st: Math.max(0, Math.min(2, Math.round(Number(m.pet.st)) || 0)), mv: m.pet.mv ? 1 : 0, rd: m.pet.rd ? 1 : 0, h: Math.max(0, Math.min(100, Math.round(Number(m.pet.h)) || 0)) } : null, // their pet
     };
     // (who we are rides along with every position, so a player who is somehow missing from someone's list is put back by it)
     const me = this.members.get(this.me);
@@ -1081,7 +1087,7 @@ export class SupaNet {
       case 'duelgo':
       case 'duelcancel':
         this.duelPrep = null;
-        if (msg.t === 'duelcancel') this.resetDuel();
+        if (msg.t === 'duelcancel' && !msg.pre) this.resetDuel();
         break;
       case 'duelstart':
         this.duelPrep = null;
@@ -1500,13 +1506,18 @@ export class SupaNet {
     const teamed = !event && this.cfg.teams;
     const team = unit && teamed ? this.teamMap[winners[0]] ?? Number(String(unit).slice(1)) : null;
     const name = !unit ? 'Nobody' : team !== null && teamed ? `${TEAMS[team]?.name || 'A'} team` : this.members.get(winners[0])?.name || 'Someone';
-    this.out({ t: event ? 'duelend' : 'win', id: winners[0] ?? null, name, team: team ?? null, target: 1, duel: true, draw: !unit, reason, winners, losers, fighters: ids, unit: unit ?? null, bets: this.betList(), hearts });
+    if (unit) {
+      for (const id of winners) this.record.set(id, { w: (this.record.get(id)?.w || 0) + 1, l: this.record.get(id)?.l || 0 });
+      for (const id of losers) this.record.set(id, { w: this.record.get(id)?.w || 0, l: (this.record.get(id)?.l || 0) + 1 });
+    }
+    this.sendScores();
+    this.out({ t: event ? 'duelend' : 'win', did: this.duelSeq || 0, id: winners[0] ?? null, name, team: team ?? null, target: 1, duel: true, draw: !unit, reason, winners, losers, fighters: ids, unit: unit ?? null, bets: this.betList(), hearts });
     this.bets = new Map();
     if (event) {
       this.resetDuel();
       if (this.cfg.duelEvery > 0 && !this.cfg.duel) {
         this.duelNext = this.cfg.duelEvery * 60;
-        this.out({ t: 'duelnext', left: this.duelNext });
+        this.planNext(); // (who fights next is known right away, and bets are open again)
       }
       return;
     }
@@ -1523,12 +1534,39 @@ export class SupaNet {
     if (!this.isHost || !this.channel) return;
     if (!this.started || cfg.duel || cfg.mode !== 'free' || !(cfg.duelEvery > 0)) {
       this.duelNext = null;
-      this.out({ t: 'duelnext', left: null });
+      this.voidPlan(false);
+      this.out({ t: 'duelnext', left: null, fighters: null });
       return;
     }
     this.duelNext = cfg.duelEvery * 60;
     this.timers.duelEvent = setInterval(() => this.eventTick(), 1000);
-    this.out({ t: 'duelnext', left: this.duelNext });
+    this.planNext();
+  }
+
+  // Pick the next pair now, so everyone can see who fights next and bets can be placed in advance.
+  planNext() {
+    const cfg = this.cfg;
+    if (!this.started || cfg.duel || cfg.mode !== 'free' || !(cfg.duelEvery > 0)) {
+      this.nextPair = null;
+      this.out({ t: 'duelnext', left: this.duelNext ?? null, fighters: null });
+      return;
+    }
+    const pair = this.eventPair();
+    this.nextPair = pair && pair.length === 2 ? [...pair] : null;
+    this.sendNext();
+  }
+
+  sendNext() {
+    this.out({ t: 'duelnext', left: this.duelNext, fighters: this.nextPair, bet: !!this.cfg.bet });
+  }
+
+  // the planned pair is off (a fighter left, or the rule changed): the advance bets come back
+  voidPlan(replan = true) {
+    const had = this.bets.size > 0;
+    this.bets = new Map();
+    if (had) this.out({ t: 'duelcancel', pre: true });
+    this.nextPair = null;
+    if (replan && this.started && !this.duelLive && !this.duelPrep) this.planNext();
   }
 
   eventTick() {
@@ -1539,7 +1577,8 @@ export class SupaNet {
     if (this.duelLive || this.duelPrep || this.paused || this.introOpen) return;
     this.duelNext -= 1;
     if (this.duelNext <= 0) return this.startDuelEvent();
-    if (this.duelNext % 5 === 0 || this.duelNext <= 10) this.out({ t: 'duelnext', left: this.duelNext });
+    if (this.nextPair && !this.nextPair.every((id) => this.members.get(id) && !this.members.get(id).ai)) this.voidPlan();
+    if (this.duelNext % 5 === 0 || this.duelNext <= 10) this.sendNext();
   }
 
   // two players who are not on the same team: the host's pick, or by the matchup rule (random, winner stays, round robin)
@@ -1552,17 +1591,21 @@ export class SupaNet {
   }
 
   startDuelEvent() {
-    const pair = this.eventPair();
+    const planned = this.nextPair && this.nextPair.every((id) => this.members.get(id) && !this.members.get(id).ai) ? this.nextPair : null;
+    if (!planned && this.bets.size) this.voidPlan(false);
+    const pair = planned || this.eventPair();
+    this.nextPair = null;
     if (!pair || this.winning) {
       this.duelNext = 30; // nobody to pit against each other: try again soon
-      this.out({ t: 'duelnext', left: 30 });
+      this.nextPair = null;
+      this.out({ t: 'duelnext', left: 30, fighters: null });
       return;
     }
     this.fighters = new Set(pair);
     this.fighterUnit = new Map(pair.map((id) => [id, id]));
     this.fallen = new Set();
-    this.bets = new Map();
     this.duelRound += 1;
+    this.duelSeq = Math.max((this.duelSeq || 0) + 1, Date.now()); // (every duel has its own number, also across a change of host)
     for (const id of pair) this.lastFought.set(id, this.duelRound);
     this.duelPlayed.add([...pair].sort().join('|'));
     this.openBets('event');
@@ -1579,13 +1622,13 @@ export class SupaNet {
       if (!this.started || this.winning) return;
       if (kind === 'event') {
         this.duelLive = true;
-        this.out({ t: 'duelstart', fighters: [...this.fighters], units: Object.fromEntries(this.fighterUnit), bets: this.betList(), left: Math.max(1, Number(this.cfg.duelMins) || 3) * 60 });
+        this.out({ t: 'duelstart', did: this.duelSeq || 0, fighters: [...this.fighters], units: Object.fromEntries(this.fighterUnit), bets: this.betList(), left: Math.max(1, Number(this.cfg.duelMins) || 3) * 60 });
       } else this.out({ t: 'duelgo', bets: this.betList() });
       this.startDuelClock();
     };
     if (!window) return go();
     this.duelPrep = { left: window };
-    this.out({ t: 'duelcall', kind, fighters: [...this.fighters], units: Object.fromEntries(this.fighterUnit), window, bet: betting });
+    this.out({ t: 'duelcall', did: this.duelSeq || 0, kind, fighters: [...this.fighters], units: Object.fromEntries(this.fighterUnit), window, bet: betting });
     clearTimeout(this.timers.duelPrep);
     this.timers.duelPrep = setTimeout(go, window * 1000);
   }
@@ -1596,8 +1639,12 @@ export class SupaNet {
 
   // someone who is not in the duel backs a side (or takes the bet back, with 0)
   hBet(from, m) {
-    if (!this.duelPrep || !this.cfg.bet || this.fighters.has(from)) return;
-    const units = new Set(this.fighterUnit.values());
+    // open from the moment the next pair is known (in advance), and through the last seconds before the fight
+    const pre = !this.duelPrep && !this.duelLive && this.nextPair;
+    if ((!this.duelPrep && !pre) || !this.cfg.bet) return;
+    const side = pre ? this.nextPair : [...this.fighters];
+    if (side.includes(from)) return;
+    const units = new Set(pre ? this.nextPair : this.fighterUnit.values());
     const amt = Math.max(0, Math.min(9999999, Math.round(Number(m.amt)) || 0));
     if (!amt) this.bets.delete(from);
     else if (units.has(String(m.on))) this.bets.set(from, { on: String(m.on), amt });

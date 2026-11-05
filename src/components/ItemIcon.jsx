@@ -5,6 +5,8 @@ export default function ItemIcon({ id, scale = 4 }) {
   const icon = iconOf(id);
   // a big picture (a gun) is shrunk to fit a box instead of being drawn at its own size
   if (icon.fit) scale = (icon.fit * (scale / 3)) / Math.max(icon.sw, icon.sh);
+  // ...and so is anything bigger than 22px (only a really big picture): it is shrunk a little. Anything smaller keeps its size, and its box grows to hold it
+  else if (Math.max(icon.sw, icon.sh) > 22) scale = (scale * 22) / Math.max(icon.sw, icon.sh);
   return (
     <span
       className="item-icon"

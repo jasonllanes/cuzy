@@ -7,7 +7,7 @@ import { addItem, removeFromSlot } from './inventory';
 import { MONSTERS, lvDmg, lvHp, lvXp, rollMonsterLevel } from './monsters';
 import { TINY } from './tiny';
 import { SUPPLY_CAP } from './upgrades';
-import { swingTime, weaponById, weaponIconFile } from './weapons';
+import { swingTime, weaponById, weaponIconFile, weaponRarity } from './weapons';
 import { DMG_PER_LEVEL, HP_PER_HEART, HP_PER_UPGRADE, hp100, maxHearts, monsterXp, XP } from './stats';
 
 // Skeleton camps: three guards that chase you, but give up beyond LEASH and walk home to heal
@@ -608,7 +608,7 @@ export class Combat {
       // opened and thrown like a glider: out in a curve, then round and back to you
       const L = this.tridentRange(w, t);
       this.thrown = {
-        fan: true, x: cx, y: cy, a, u: 0, T: 1 + L / 210, L, W: L * 0.42, side: Math.random() < 0.5 ? 1 : -1, hit: new Set(), rot: a, age: 0,
+        fan: true, x: cx, y: cy, a, u: 0, T: 1 + L / 210, L, W: L * 0.42, side: this.fanSide || 1, hit: new Set(), rot: a, age: 0,
         dmg: this.meleeDmg() * 1.1, w: w.id, effect: w.effect, ox: cx, oy: cy,
       };
       this.swingCd = Math.max(this.swingCd, 0.25);
@@ -848,6 +848,7 @@ export class Combat {
     }
     if (['trident', 'fan'].includes(this.weapon()?.kind) && this.thrown) return; // it is still out there
     this.hold = { t: 0 };
+    this.fanSide = Math.random() < 0.5 ? 1 : -1; // which way a fan will curve (fixed while you charge, so the preview is what it does)
   }
 
   cancelHold() {
@@ -1387,19 +1388,20 @@ export class Combat {
   }
 
   // anything stepping on an armed mine sets it off: monsters (not the flying ones), skeletons and, in a fight room, rival heroes
+  // returns who set it off ({ rem: the player's id } for a rival hero, {} for a monster), or null
   mineTriggered(m) {
     const near = (x, y, r) => Math.hypot(x - m.x, y - m.y) < r;
     for (const w of [...(this.g.wave?.monsters || []), ...this.wilds]) {
       if (w.state === 'dead') continue;
       const def = MONSTERS[w.type];
       if (def.kind === 'fly' || def.fly) continue;
-      if (near(w.x, w.y, 9 + 4 * (w.scale || def.scale || 1))) return true;
+      if (near(w.x, w.y, 9 + 4 * (w.scale || def.scale || 1))) return {};
     }
-    for (const s of this.skeletons) if (s.state !== 'dead' && near(s.x, s.y, 11)) return true;
+    for (const s of this.skeletons) if (s.state !== 'dead' && near(s.x, s.y, 11)) return {};
     if (this.g.fight) {
-      for (const r of this.g.remotes.values()) if (!r.hidden && !this.g.sameTeam(r) && near(r.x, r.y, 10)) return true;
+      for (const r of this.g.remotes.values()) if (!r.hidden && !this.g.sameTeam(r) && near(r.x, r.y, 10)) return { rem: r };
     }
-    return false;
+    return null;
   }
 
   updateMines(dt) {
@@ -1412,7 +1414,9 @@ export class Combat {
         if (m.t < MINE_ARM) return true;
         m.armed = true;
       }
-      if (!this.mineTriggered(m)) return true;
+      const who = this.mineTriggered(m);
+      if (!who) return true;
+      if (who.rem) this.announceStep(who.rem, m.kind); // (a rival hero stepped on it: everyone is told)
       if (m.kind === 'mine') {
         this.explode({ x: m.x, y: m.y - 6, R: BOMB_R, kind: 'blast' });
         this.mineFx.push({ x: m.x, y: m.y, t: 0 });
@@ -1420,9 +1424,16 @@ export class Combat {
         this.explode({ x: m.x, y: m.y - 4, R: m.R, kind: 'stun' });
         this.floaters.push({ x: m.x, y: m.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
       }
-      this.g.mp?.net.send({ t: 'fx', kind: 'minegone', lid: m.id, k: m.kind });
+      this.g.mp?.net.send({ t: 'fx', kind: 'minegone', lid: m.id, k: m.kind, who: who.rem ? String(who.rem.id) : '' });
       return false;
     });
+  }
+
+  // a hero stepped on a landmine or a trap: a big callout over them, and the trap's stun shows on them
+  announceStep(r, kind, victimIsMe = false) {
+    const name = victimIsMe ? 'You' : r.name || 'Someone';
+    this.floaters.push({ x: r.x, y: r.y - 38, text: kind === 'mine' ? `💥 ${name} stepped on a mine!` : `🪤 ${name} got caught in a trap!`, color: kind === 'mine' ? '#ff8a3c' : '#ffe36b', t: 0, big: true });
+    if (kind === 'trap' && !victimIsMe) r.stunT = 2.4; // (their stars show for everyone)
   }
 
   remoteMine(m) {
@@ -1435,6 +1446,16 @@ export class Combat {
     const r = this.remoteMines.get(m.lid);
     this.remoteMines.delete(m.lid);
     if (!r) return;
+    if (m.who) {
+      // someone stepped on it: if that was you, you are told; everyone else sees who
+      if (String(m.who) === String(this.g.mp?.you)) {
+        this.announceStep(this.g.player, r.kind, true);
+        this.g.onToast?.(r.kind === 'mine' ? '💥 You stepped on a landmine!' : '🪤 You stepped in a trap: you are stunned!');
+      } else {
+        const v = this.g.remotes.get(String(m.who));
+        if (v) this.announceStep(v, r.kind);
+      }
+    }
     if (r.kind === 'mine') {
       this.blasts.push({ x: r.x, y: r.y - 6, t: 0, R: BOMB_R });
       this.mineFx.push({ x: r.x, y: r.y, t: 0 });
@@ -1970,7 +1991,7 @@ export class Combat {
       return (p.life -= dt) > 0;
     });
     this.drops = this.drops.filter((d) => this.updateDrop(d, dt));
-    this.floaters = this.floaters.filter((f) => (f.t += dt) < 1);
+    this.floaters = this.floaters.filter((f) => (f.t += dt / (f.big ? 2.2 : 1)) < 1); // (a big callout stays up about twice as long)
     // in Survival the blood stays where it fell; elsewhere it fades after a moment
     this.decals = this.decals.filter((d) => (d.t += dt) < SPLAT_LIFE || d.keep);
 
@@ -2669,6 +2690,13 @@ export class Combat {
       w.t = 0;
       if (w.den) this.denLost(w, true);
       if (quiet) return;
+      if (!this.g.wave && !this.g.dungeon) {
+        const big = w.nightBoss || w.miniBoss || def.boss;
+        if (big || Math.random() < 0.025) {
+          const wid = this.g.pickWeapon(w.nightBoss || def.boss ? 3 : w.miniBoss ? 2 : 0);
+          if (wid) this.drops.push({ x: w.x, y: w.y - 4, z: 8, vx: 14, vy: 6, vz: 120, fly: true, burst: true, id: 'weapon', wid, qty: 1, age: 0, nopick: 0.5 }); // (a weapon falls)
+        }
+      }
       this.kills++;
       this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss || w.miniBoss) * lvXp(w.lv || 1) * (w.minionOf ? 0.3 : 1)), !!(def.boss || w.nightBoss || w.miniBoss), { x: w.x, y: w.y });
       if ((w.miniBoss || (w.zone && def.boss)) && !w.guardian && !this.g.dungeon) this.spawnRewardChest(w.x, w.y, w.miniBoss ? 2 : 3);
@@ -3442,6 +3470,16 @@ export class Combat {
       }
       return true;
     }
+    if (d.wid) {
+      // a weapon on the ground: walk into it and it is yours (and in your hand, if it is better than what you carry)
+      if (d.age > 400) return false;
+      this.magnet(d, dx, dy, dist, dt);
+      if (dist < 10) {
+        this.g.gainWeapon(d.wid);
+        return false;
+      }
+      return true;
+    }
     if (d.pw) {
       // a power-up: walk into it and it goes off (for everybody in the wave)
       if (d.age > 30) return false;
@@ -3480,6 +3518,7 @@ export class Combat {
     }
     if (dist < 10) {
       const left = this.g.stow(d.id, d.qty);
+      if (left < d.qty) this.g.lootCard(d.id, d.qty - left);
       if (left === 0 && d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
       if (left < d.qty) {
         this.g.emitInventory();
@@ -3828,6 +3867,26 @@ export class Combat {
       return;
     }
     const ly = d.y - 4 - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 1.2);
+    if (d.wid) {
+      // a weapon: its picture, in a glowing box of its rarity
+      const wp = weaponById(d.wid);
+      const icon = this.img[weaponIconFile(wp)];
+      const col = RARITIES[weaponRarity(wp)].color;
+      ctx.save();
+      ctx.translate(Math.round(d.x), Math.round(ly - 4));
+      ctx.globalAlpha = 0.25 + 0.15 * Math.sin(t * 5);
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-9, -9, 18, 18);
+      if (icon) ctx.drawImage(icon, -10, -10, 20, 20);
+      ctx.restore();
+      return;
+    }
     if (d.id !== 'coin' && ITEMS[d.id]) this.drawRarityFrame(ctx, d.id, d.x, ly);
     this.drawIcon(ctx, d.id, d.x, ly);
   }
@@ -4034,6 +4093,45 @@ export class Combat {
       const [cx, cy] = this.center();
       const a = this.aim();
       const range = this.tridentRange(w, this.hold.t);
+      if (wk === 'fan') {
+        // a fan does not fly straight: it loops out to one side and comes back round to you, so show that whole route
+        const path = { a, L: range, W: range * 0.42, side: this.fanSide || 1 };
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,250,240,0.9)';
+        ctx.lineWidth = zoom * 0.9;
+        ctx.setLineDash([zoom * 2.4, zoom * 2]);
+        ctx.beginPath();
+        for (let i = 0; i <= 48; i++) {
+          const [px, py] = this.fanPoint(path, i / 48, cx, cy);
+          if (i === 0) ctx.moveTo((px - camX) * zoom, (py - camY) * zoom);
+          else ctx.lineTo((px - camX) * zoom, (py - camY) * zoom);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // the arrowheads along the way out, and a mark at the far end of the loop
+        ctx.fillStyle = this.hold.t >= 1.1 ? '#fff0a8' : w.tint;
+        for (const u of [0.12, 0.3, 0.42]) {
+          const [px, py] = this.fanPoint(path, u, cx, cy);
+          const [qx, qy] = this.fanPoint(path, u + 0.02, cx, cy);
+          const ang = Math.atan2(qy - py, qx - px);
+          ctx.save();
+          ctx.translate((px - camX) * zoom, (py - camY) * zoom);
+          ctx.rotate(ang);
+          ctx.beginPath();
+          ctx.moveTo(zoom * 3, 0);
+          ctx.lineTo(-zoom * 1.5, -zoom * 2);
+          ctx.lineTo(-zoom * 1.5, zoom * 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        const [fx, fy] = this.fanPoint(path, 0.5, cx, cy);
+        ctx.beginPath();
+        ctx.arc((fx - camX) * zoom, (fy - camY) * zoom, zoom * 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
       ctx.save();
       ctx.strokeStyle = 'rgba(255,250,240,0.85)';
       ctx.lineWidth = zoom * 0.9;
@@ -4168,9 +4266,10 @@ export class Combat {
     ctx.font = `700 ${zoom * 4.5}px "Pixelify Sans", monospace`;
     for (const f of this.floaters) {
       const sx = (f.x - camX) * zoom;
-      const sy = (f.y - f.t * 14 - camY) * zoom;
+      const sy = (f.y - f.t * (f.big ? 8 : 14) - camY) * zoom;
       ctx.globalAlpha = Math.min(1, (1 - f.t) * 2);
-      ctx.lineWidth = zoom;
+      ctx.font = `700 ${zoom * (f.big ? 5.5 : 4.5)}px "Pixelify Sans", monospace`;
+      ctx.lineWidth = zoom * (f.big ? 1.4 : 1);
       ctx.strokeStyle = 'rgba(255,250,240,0.95)';
       ctx.strokeText(f.text, sx, sy);
       ctx.fillStyle = f.color;

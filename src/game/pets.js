@@ -16,6 +16,7 @@ export const PETS = {
   wolf: { name: 'Wolf', icon: '🐺', cost: 160, hp: 9, dmg: 1.6, cd: 0.9, speed: 100, reach: 11, scale: 1.15, bleed: true, blocks: b4([[0, 24], [4, 24], [8, 24], [12, 24], [0, 27], [4, 27]]), blurb: 'Fast, and its bites open wounds that keep bleeding.' },
 };
 export const PET_KINDS = Object.keys(PETS);
+const HEAL_COINS = 12; // what a heal costs when you have no HP Pack
 const REST_TIME = 55; // seconds a knocked-out pet sleeps where it fell
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -36,7 +37,49 @@ export class PetSystem {
   }
 
   hud() {
-    return { owned: { ...this.owned }, active: this.active, rest: this.pet?.state === 'rest', ride: !!this.pet?.rid };
+    const P = this.pet;
+    return { owned: { ...this.owned }, active: this.active, rest: P?.state === 'rest', ride: !!P?.rid, hp: P ? Math.max(0, P.hp) : 0, max: P ? PETS[P.kind].hp : 0, kind: P?.kind || null, packs: this.g.supplies?.hp || 0, healCost: HEAL_COINS };
+  }
+
+  // Heal your pet: an HP Pack does it (or a few coins, when you have none). A sleeping pet wakes up, half healed.
+  heal() {
+    const P = this.pet;
+    const g = this.g;
+    if (!P) return false;
+    const def = PETS[P.kind];
+    if (P.state !== 'rest' && P.hp >= def.hp - 0.05) {
+      g.onToast?.(`Your ${def.name} is already in perfect health.`);
+      return false;
+    }
+    if ((g.supplies?.hp || 0) > 0) g.supplies.hp--;
+    else if (!g.spendCoins(HEAL_COINS)) {
+      sfx.play('nope');
+      g.onToast?.(`Healing your ${def.name} takes an HP Pack, or ${HEAL_COINS} coins. You have neither.`);
+      return false;
+    }
+    const was = P.state === 'rest';
+    P.hp = was ? def.hp * 0.5 : Math.min(def.hp, P.hp + def.hp * 0.6);
+    if (was) {
+      P.state = 'follow';
+      P.restT = 0;
+      g.onToast?.(`${def.icon} Your ${def.name} wakes up!`);
+    }
+    g.combat.floaters.push({ x: P.x, y: P.y - 24, text: `+${Math.round(def.hp * (was ? 0.5 : 0.6) * 10) / 10} ❤`, color: '#5fd16a', t: 0 });
+    sfx.play('heal');
+    this.addFx(P.x, P.y - 8, 'heal');
+    g.mp?.net.send({ t: 'fx', kind: 'petfx', x: Math.round(P.x), y: Math.round(P.y - 8), k: 'heal' });
+    g.save();
+    return true;
+  }
+
+  // is your pet close enough (and hurt enough) to be offered a heal with F?
+  healNear() {
+    const P = this.pet;
+    if (!P || P.rid || this.g.inside) return null;
+    const def = PETS[P.kind];
+    if (def.ride) return null; // (the sheep is healed from the pet card)
+    if (P.state !== 'rest' && P.hp >= def.hp - 0.05) return null;
+    return Math.hypot(P.x - this.g.player.x, P.y - this.g.player.y) < 26 ? P : null;
   }
 
   // ---------- owning ----------
@@ -177,6 +220,11 @@ export class PetSystem {
       gy = target.t.y;
       P.state = 'attack';
       speed *= 1.25;
+    } else if (g.seat) {
+      // while you sit on the seesaw the pet waits in front of it, not on top of you
+      P.state = 'follow';
+      gx = g.seat.o.x;
+      gy = g.seat.o.by + 22;
     } else {
       P.state = 'follow';
       const back = { left: 1, right: -1, up: 0, down: 0 }[pl.dir] ?? 0;
@@ -319,7 +367,7 @@ export class PetSystem {
   netState() {
     const P = this.pet;
     if (!P || this.g.inside) return null;
-    return { s: P.kind, v: P.v, x: Math.round(P.x), y: Math.round(P.y), d: { left: 0, right: 1, up: 2, down: 3 }[P.dir] ?? 1, st: P.state === 'rest' ? 2 : P.state === 'attack' ? 1 : 0, mv: P.moving ? 1 : 0, rd: P.rid ? 1 : 0 };
+    return { s: P.kind, v: P.v, x: Math.round(P.x), y: Math.round(P.y), d: { left: 0, right: 1, up: 2, down: 3 }[P.dir] ?? 1, st: P.state === 'rest' ? 2 : P.state === 'attack' ? 1 : 0, mv: P.moving ? 1 : 0, rd: P.rid ? 1 : 0, h: Math.max(0, Math.min(100, Math.round((P.hp / PETS[P.kind].hp) * 100))) };
   }
 
   // someone else's pet: follow where they say it is
@@ -327,7 +375,7 @@ export class PetSystem {
     if (!n || !PETS[n.s]) return null;
     const dir = ['left', 'right', 'up', 'down'][n.d] || 'right';
     const out = prev && prev.kind === n.s ? prev : { x: n.x, y: n.y, anim: 0 };
-    return Object.assign(out, { kind: n.s, v: n.v | 0, tx: n.x, ty: n.y, dir, state: n.st === 2 ? 'rest' : n.st === 1 ? 'attack' : 'follow', moving: !!n.mv, rid: !!n.rd });
+    return Object.assign(out, { kind: n.s, v: n.v | 0, tx: n.x, ty: n.y, dir, state: n.st === 2 ? 'rest' : n.st === 1 ? 'attack' : 'follow', moving: !!n.mv, rid: !!n.rd, hpPct: Number.isFinite(n.h) ? n.h : 100 });
   }
 
   static lerpRemote(p, dt) {
@@ -375,6 +423,14 @@ export class PetSystem {
     const squash = rest ? 0.8 : 1;
     ctx.drawImage(sheet, col * 16, (blk.r + row) * 16, 16, 16, -8 * sc, -(15 * sc) * squash + 1, 16 * sc, 16 * sc * squash);
     ctx.restore();
+    // its health: a small bar over its head
+    const pct = Math.max(0, Math.min(100, p.hpPct ?? (p.hp / def.hp) * 100));
+    const bw = Math.round(11 * Math.max(1, sc * 0.85));
+    const by = y - hover - Math.round(16 * sc) - 2;
+    ctx.fillStyle = 'rgba(40,24,30,0.75)';
+    ctx.fillRect(x - Math.floor(bw / 2) - 1, by - 1, bw + 2, 4);
+    ctx.fillStyle = pct > 55 ? '#5fd16a' : pct > 25 ? '#f2c14e' : '#ee5a6c';
+    ctx.fillRect(x - Math.floor(bw / 2), by, Math.round(bw * pct / 100), 2);
     if (rest) {
       // Zzz drifting up from the sleeper
       ctx.save();
@@ -411,6 +467,13 @@ export class PetSystem {
     } else if (f.k === 'bleed') {
       ctx.fillStyle = '#e0384a';
       for (let i = 0; i < 6; i++) ctx.fillRect(x - 7 + i * 3 + Math.round(Math.sin(i * 2) * 2), y - 4 + k * (6 + (i % 3) * 3), 2, 3);
+    } else if (f.k === 'heal') {
+      ctx.fillStyle = '#7ff08a';
+      for (let i = 0; i < 6; i++) ctx.fillRect(x - 7 + i * 3, y - 2 - k * (10 + (i % 3) * 4), 2, 2);
+      ctx.strokeStyle = 'rgba(127,240,138,0.9)';
+      ctx.beginPath();
+      ctx.ellipse(x, y + 4, 4 + k * 9, 2 + k * 4, 0, 0, Math.PI * 2);
+      ctx.stroke();
     } else if (f.k === 'slam') {
       ctx.strokeStyle = '#fff3d0';
       ctx.lineWidth = 2;

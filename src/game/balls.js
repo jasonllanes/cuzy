@@ -13,7 +13,7 @@ const FRICTION = 0.9; // per second, on the ground: it rolls a good while
 const GRAVITY = 260;
 const SYNC_EVERY = 0.35; // seconds between updates from whoever is moving a ball
 
-export const hasBalls = (world) => !world.apoc && !world.waveMode && (SEA_MAPS.includes(world.tileset) || world.mixed);
+export const hasBalls = (world) => !world.apoc && !world.waveMode && !world.arena; // (every Free Roam map)
 
 export class Balls {
   constructor(game) {
@@ -29,8 +29,11 @@ export class Balls {
   spawn() {
     const { world, home } = this.g;
     if (!hasBalls(world)) return;
-    const baseX = home.x;
-    const baseY = home.y;
+    // (everyone in the room starts from the same place: the house nearest the middle of the world, not their own)
+    const first = world.houseList()[0];
+    const anchor = first ? world.homePoint(first) : { x: home.x, y: home.y };
+    const baseX = anchor.x;
+    const baseY = anchor.y;
     for (let i = 0; i < COUNT; i++) {
       for (let tries = 0; tries < 80; tries++) {
         const a = hash2(i, tries, world.seed + 6101) * Math.PI * 2;
@@ -147,6 +150,12 @@ export class Balls {
           sfx.play('pickup', 0.5);
         }
       }
+    }
+    // the host now and then tells everyone where the balls lie at rest (so a player who joined late sees them where they are)
+    this.restT = (this.restT ?? 3) - dt;
+    if (this.restT <= 0) {
+      this.restT = 3;
+      if (g.mp && g.hostId === g.mp.you) for (const b of this.list) if (!this.mine.has(b.i) && Math.hypot(b.vx, b.vy) < 4 && b.z === 0) this.send(b);
     }
     // keep the others in step with a ball you are still moving
     if (this.syncT <= 0 && this.mine.size) {

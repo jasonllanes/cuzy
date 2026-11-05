@@ -637,9 +637,9 @@ export class World {
     if (den) chunk.decor.push({ kind: 'den', x: den.x, y: den.y });
     if (!this.apoc && !this.waveMode) {
       this.addBushes(chunk, x0, y0);
-      this.addSeesaw(chunk, cx, cy);
       this.addVault(chunk, cx, cy);
     }
+    this.addSeesaw(chunk, cx, cy); // (every map has them, Survival too)
 
     // Cottage + its stepping-stone path
     const rx = Math.floor(cx * CHUNK / REGION);
@@ -1031,14 +1031,28 @@ export class World {
   // A seesaw, now and then in an open meadow: two people can sit on it (one on each end) and it rocks up and down by itself.
   addSeesaw(chunk, cx, cy) {
     const s = this.seed;
-    if (hash2(cx, cy, s + 6400) > 0.06) return;
-    const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, s + 6401) * (CHUNK - 8));
-    const ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy, s + 6402) * (CHUNK - 8));
-    if (Math.hypot(tx, ty) < 14 || this.nearArena(tx, ty, 6) || !this.isOpenMeadow(tx, ty) || this.isCleared(tx, ty) || this.type(tx + 3, ty) !== GRASS || this.type(tx - 3, ty) !== GRASS) return;
+    const near = Math.abs(cx) <= 2 && Math.abs(cy) <= 2; // (there is always one to be found close to where you start)
+    if (hash2(cx, cy, s + 6400) > (near ? 0.5 : 0.2)) return;
+    let tx = 0;
+    let ty = 0;
+    let found = false;
+    for (let a = 0; a < 10 && !found; a++) {
+      tx = cx * CHUNK + 4 + Math.floor(hash2(cx + a * 7, cy, s + 6401) * (CHUNK - 8));
+      ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy + a * 7, s + 6402) * (CHUNK - 8));
+      if (Math.hypot(tx, ty) < 14 || this.nearArena(tx, ty, 6)) continue;
+      let ok = true;
+      for (let dy = -2; dy <= 1 && ok; dy++) {
+        for (let dx = -3; dx <= 3 && ok; dx++) {
+          if (this.type(tx + dx, ty + dy) !== GRASS || this.treeAt((tx + dx) >> 1, (ty + dy) >> 1) || this.isCleared(tx + dx, ty + dy)) ok = false;
+        }
+      }
+      found = ok;
+    }
+    if (!found) return;
     const x = tx * T + 8;
     const y = ty * T + 14;
     // (it is sorted a little behind its base, so a hero sitting on it is drawn in front of the board)
-    chunk.objects.push({ kind: 'seesaw', inter: 'seesaw', id: `ss${cx},${cy}`, v: hash2(cx, cy, s + 6403) < 0.5 ? 1 : 2, label: 'F · sit on the seesaw', x, y: y - 16, by: y, iy: y - 6 });
+    chunk.objects.push({ kind: 'seesaw', inter: 'seesaw', id: `ss${cx},${cy}`, v: hash2(cx, cy, s + 6403) < 0.5 ? 1 : 2, label: 'F · sit on the seesaw', x, y: y - 16, by: y, iy: y - 6, pad: 14 });
     chunk.rects.push({ x: x - 4, y: y - 9, w: 8, h: 6 });
   }
 

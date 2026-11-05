@@ -1,6 +1,6 @@
 import { CHUNK_PX, GRASS, SAND, T, WATER } from './world';
 import { PETS, PetSystem } from './pets';
-import { ITEMS, LOOT_APOC, isConsumable, rollLoot, sellPrice, sellValue, throwStats } from './items';
+import { ITEMS, LOOT_APOC, RARITIES, isConsumable, rarityOf, rollLoot, sellPrice, sellValue, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
 import { Balls } from './balls';
@@ -23,7 +23,7 @@ const tagHeight = (hero) => (hero.kind === 'v2' ? 36 : hero.kind === 'retro' ? 2
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
 import { DOOR, ROOM, SPOTS, designFor, drawRoom, roomBlocked, spotsOf } from './interior';
-import { WEAPONS, emptyWeapons, sanitizeWeapons, weaponById } from './weapons';
+import { EFFECTS, WEAPONS, emptyWeapons, sanitizeWeapons, weaponById, weaponIconFile, weaponRarity } from './weapons';
 import { hash2, hashString } from './rng';
 import { renderChunk } from './render';
 import { frostImages } from './assets';
@@ -116,11 +116,12 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', waves = 10, bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp }) {
+  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', waves = 10, bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp, onGet }) {
     this.canvas = canvas;
     this.onStorage = onStorage;
     this.onOpenStorage = onOpenStorage;
     this.onLevelUp = onLevelUp;
+    this.onGet = onGet; // a card for a new weapon or a rare find
     this.ctx = canvas.getContext('2d');
     this.world = world;
     this.img = world.frost ? frostImages(assets.img) : assets.img; // the frozen map gets snowy sprites
@@ -220,6 +221,7 @@ export class Game {
     this.boatSpawned = new Set();
     this.boatT = 0;
     this.boat = null; // the boat you are sailing
+    this.boatPass = null; // the id of the player whose boat you are riding in (you sit in it; they steer)
     this.seat = null; // the seesaw end you are sitting on: { o, side }
     this.crows = []; // crows passing over Survival
     this.crowT = 8;
@@ -271,6 +273,7 @@ export class Game {
     if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
     if (!saved?.wood) this.wood += Math.max(0, Math.round(Number(session?.room?.startWood)) || 0); // ...and its startup wood
     // bets on a duel are placed by the ones who are not in it (see placeBet)
+    this.duelPreview = null; // who fights in the next duel of a running round: { fighters, bet }
     this.duelCall = null; // a duel is about to start: { left, bet, kind }
     this.myBet = null; // { on: the side you back, amt }
     this.duelPool = []; // everybody's bets: [id, side, amt]
@@ -357,7 +360,7 @@ export class Game {
         e.preventDefault();
         if (!e.repeat) {
           this.spaceDown = true;
-          if (this.boat) this.leaveBoat();
+          if (this.boat || this.boatPass) this.leaveBoat();
           else if (this.seat) this.leaveSeat();
           else if (this.pets.pet?.rid) this.pets.dismount();
           else if (this.mount) this.dismount();
@@ -587,7 +590,6 @@ export class Game {
           coins: this.coins,
           wood: this.wood,
           revives: this.revives,
-      pets: this.pets.hud(),
           pets: this.pets.save(),
           felled: [...this.world.felled].slice(-4000),
           kills: this.combat?.kills || 0,
@@ -648,6 +650,7 @@ export class Game {
 
   // `inside` puts you in your house, otherwise you land on its doorstep
   goHome(inside = false) {
+    this.leaveRides(); // (no boat comes home with you)
     this.leaveDungeon(false);
     this.inside = null;
     this.fade = null;
@@ -728,6 +731,33 @@ export class Game {
     return r ? { x: r.x, y: r.y } : null;
   }
 
+  // who is marked as fighting in the next duel (a red name and a sword): the planned pair, or the pair that was just called
+  duelMarks() {
+    if (this.duelCall && this.duelFighters.length) return this.duelFighters;
+    if (this.duelPreview && !this.duelEvent) return this.duelPreview.fighters;
+    return [];
+  }
+
+  // the card for the next duel: who is up, how long, and the room to bet in advance
+  nextDuelHud() {
+    const pre = this.duelPreview;
+    if (!this.mp || !pre || this.duelCall || this.duelEvent || this.duelNextLeft === null) return null;
+    const me = String(this.mp.you);
+    const who = pre.fighters.map((id) => {
+      if (id === me) return { key: id, name: this.name || 'You', hero: this.hero, me: true };
+      const r = this.remotes.get(id);
+      return { key: id, name: r?.name || 'Someone', hero: r?.hero || null };
+    });
+    const mine = pre.fighters.includes(me);
+    return { left: Math.ceil(this.duelNextLeft), units: who, bet: pre.bet, mine, canBet: pre.bet && !mine, pool: this.poolMap(), bets: this.duelPool.length, myBet: this.myBet, coins: this.coins };
+  }
+
+  poolMap() {
+    const pool = {};
+    for (const [, on, amt] of this.duelPool) pool[on] = (pool[on] || 0) + (Number(amt) || 0);
+    return pool;
+  }
+
   // the duel bar: the clock, a health bar for each side (a fighter, or a team) and what is on the table
   duelHud() {
     if (!this.duelActive() && !this.duelCall) return null;
@@ -738,8 +768,10 @@ export class Game {
       return r ? { id, name: r.name, hero: r.hero, hp: this.duelFallen.has(id) ? 0 : Math.max(0, r.hp ?? 0), max: r.max || 6 } : { id, name: '…', hero: null, hp: 0, max: 6 };
     };
     const units = new Map();
-    for (const id of this.duelFighters) {
-      const key = this.duelUnits[id] ?? id;
+    // (who is fighting also rides on the call itself, so the names are always there to bet on)
+    const ids = this.duelFighters.length ? this.duelFighters : this.duelCall?.fighters || [];
+    for (const id of ids) {
+      const key = (this.duelFighters.length ? this.duelUnits : this.duelCall?.units || {})[id] ?? id;
       if (!units.has(key)) units.set(key, { key, members: [] });
       units.get(key).members.push({ ...info(id), out: this.duelFallen.has(id) || (id === me && !!this.dead) });
     }
@@ -758,8 +790,7 @@ export class Game {
       };
     });
     const fighting = this.duelFighters.includes(me);
-    const pool = {};
-    for (const [, on, amt] of this.duelPool) pool[on] = (pool[on] || 0) + (Number(amt) || 0);
+    const pool = this.poolMap();
     const call = this.duelCall;
     return {
       call: call ? Math.max(0, Math.ceil(call.left)) : null, // seconds left to bet (the fight starts after)
@@ -795,7 +826,9 @@ export class Game {
   // The ones who are not in the duel can back a side before it starts (the coins leave your purse now; `amt` 0 takes the bet back).
   placeBet(on, amt) {
     const call = this.duelCall;
-    if (!this.mp || !call || !call.bet || call.left <= 0 || this.duelFighters.includes(String(this.mp.you))) return false;
+    const pre = !call && this.duelPreview && this.duelPreview.bet && !this.duelEvent ? this.duelPreview : null;
+    const side = call ? this.duelFighters : pre?.fighters || [];
+    if (!this.mp || (!(call && call.bet && call.left > 0) && !pre) || side.includes(String(this.mp.you))) return false;
     const prev = this.myBet?.amt || 0;
     amt = Math.max(0, Math.min(this.coins + prev, Math.floor(Number(amt)) || 0));
     this.coins += prev; // (the old bet comes back first)
@@ -805,35 +838,62 @@ export class Game {
       this.myBet = { on: String(on), amt };
     }
     this.mp.net.send({ t: 'bet', on: String(on || ''), amt });
+    this.combat.floaters.push({ x: this.player.x, y: this.player.y - 40, text: amt >= 1 ? `-${amt} 🪙 bet` : 'bet taken back', color: amt >= 1 ? '#ff9a3c' : '#9fd88a', t: 0 });
+    sfx.play('coin', 0.4);
     return true;
   }
 
-  // Pay out (or refund) your bet once the duel is decided. The ones who backed the winner share what the others put on the loser, by
-  // how much each put in. No one on the other side, or a draw: everybody gets their coins back. Returns a sentence for the toast.
+  // Pay out the bets once a duel is decided (every game works out its own share; the host only said who bet what).
+  //   L = what was bet on the side that lost. The house keeps 10% of it.
+  //   - Backers of the winner get their stake back plus a share of 80% of L (by how much each put in); the winning duelist gets the last 10%.
+  //   - If no one backed the winner, the winning duelist takes 90% of L.
+  //   - A draw, or nothing on the losing side: every stake comes back.
+  // Sets this.lastNet (what you gained or lost, after your own stake) and returns a sentence for the toast.
   settleBet(m) {
     const me = String(this.mp.you);
     const mine = this.myBet;
-    const entry = (m.bets || []).find((b) => String(b[0]) === me);
+    const list = (m.bets || []).map((b) => ({ id: String(b[0]), on: String(b[1]), amt: Number(b[2]) || 0 }));
+    const entry = list.find((b) => b.id === me);
     this.myBet = null;
     this.duelCall = null;
     this.duelPool = [];
-    if (!mine) return '';
-    if (!entry) {
-      this.giveCoins(mine.amt); // (the host never heard of it: it comes back)
-      return ' 🎲 Your bet came back.';
-    }
-    const list = (m.bets || []).map((b) => ({ on: String(b[1]), amt: Number(b[2]) || 0 }));
+    this.lastNet = 0;
+    const winners = (m.winners || []).map(String);
+    const iAmWinner = !m.draw && winners.includes(me);
     const win = list.filter((b) => b.on === m.unit).reduce((n, b) => n + b.amt, 0);
     const lose = list.filter((b) => b.on !== m.unit).reduce((n, b) => n + b.amt, 0);
-    if (!m.unit || !win || !lose) {
-      this.giveCoins(mine.amt);
-      return ` 🎲 No one was on the other side: your ${mine.amt} 🪙 came back.`;
+    const live = !m.draw && m.unit && lose > 0; // (is there anything to win?)
+    let text = '';
+    // the duelists
+    if (iAmWinner && live) {
+      const share = Math.floor(((win > 0 ? 0.1 : 0.9) * lose) / Math.max(1, winners.length));
+      if (share > 0) {
+        this.giveCoins(share);
+        this.lastNet += share;
+        text += ` 💰 Prize money: +${share} 🪙${win > 0 ? ' (10% of what was bet against you)' : ' (90% of the pot: nobody bet on you!)'}.`;
+        sfx.play('coin');
+      }
     }
-    if (mine.on !== m.unit) return ` 🎲 You lost ${mine.amt} 🪙 on your bet.`;
-    const gain = Math.floor((mine.amt * lose) / win);
-    this.giveCoins(mine.amt + gain);
-    sfx.play('coin');
-    return ` 🎲 You won ${gain} 🪙 on your bet!`;
+    // the ones who bet
+    if (mine) {
+      if (!entry) {
+        this.giveCoins(mine.amt); // (the host never heard of it: it comes back)
+        text += ' 🎲 Your bet came back.';
+      } else if (!live) {
+        this.giveCoins(mine.amt);
+        text += m.draw ? ` 🎲 A draw: your ${mine.amt} 🪙 bet came back.` : ` 🎲 No one was on the other side: your ${mine.amt} 🪙 came back.`;
+      } else if (mine.on !== m.unit) {
+        this.lastNet -= mine.amt;
+        text += ` 🎲 You lost your ${mine.amt} 🪙 bet.`;
+      } else {
+        const gain = Math.floor((mine.amt * 0.8 * lose) / Math.max(1, win));
+        this.giveCoins(mine.amt + gain);
+        this.lastNet += gain;
+        text += ` 🎲 Your bet won: +${gain} 🪙!`;
+        sfx.play('coin');
+      }
+    }
+    return text;
   }
 
   // the duel is decided (the last side standing, the clock, or the others walked out): cheer, or shrug on a draw
@@ -850,8 +910,11 @@ export class Game {
       after?.();
       return;
     }
-    this.celebrate(m.draw ? 'draw' : String(m.id), m.draw ? 'Nobody' : m.name, after ? 5 : 6.9, `${why}${money}`, after);
-    if (this.celeb && m.draw) this.celeb.draw = true;
+    this.celebrate(m.draw ? 'draw' : String(m.id), m.draw ? 'Nobody' : m.name, after ? 6 : 6.9, `${why}${money}`, after);
+    if (this.celeb) {
+      if (m.draw) this.celeb.draw = true;
+      this.celeb.gold = this.lastNet || 0; // (what you made or lost, shown big on the banner)
+    }
   }
 
   // Cheer the winner: the camera goes to them, they are lit up, and confetti rains for `dur` seconds. `after` runs at the end.
@@ -1192,7 +1255,7 @@ export class Game {
 
   // how high a rider sits above the ground
   rideLift() {
-    if (this.boat) return 3;
+    if (this.boat || this.boatPass) return 3;
     if (this.glideTile) return 9;
     if (this.pets.pet?.rid) return 6;
     return this.mount ? (this.mount.type === 'chicken' ? 5 : 11) : 0;
@@ -1324,6 +1387,7 @@ export class Game {
     const idx = Math.max(0, this.duelFighters.indexOf(me));
     const go = () => {
       this.dead = null; // (even if you had just fallen: you are in the duel with everyone else)
+      this.leaveRides();
       this.leaveDungeon(false);
       if (this.inside) this.exitHouse(true);
       this.inside = null;
@@ -1371,7 +1435,9 @@ export class Game {
     if (!this.duelEvent) return;
     const fighter = (m.fighters || []).map(String).includes(String(this.mp.you));
     if (!fighter) {
-      this.onToast?.(`${m.draw ? '⚔️ The duel was a draw.' : `⚔️ ${m.name} won the duel!`}${this.settleBet(m)}`);
+      const note = this.settleBet(m);
+      this.onToast?.(`${m.draw ? '⚔️ The duel was a draw.' : `⚔️ ${m.name} won the duel!`}${note}`);
+      if (this.lastNet) this.combat.floaters.push({ x: this.player.x, y: this.player.y - 44, text: `${this.lastNet > 0 ? '+' : ''}${this.lastNet} 🪙`, color: this.lastNet > 0 ? '#e0a83a' : '#ff5d7a', t: 0, big: true });
       this.returnFromDuel();
       return;
     }
@@ -1458,23 +1524,61 @@ export class Game {
         best = b;
       }
     }
+    // a boat another player is sailing: hop in beside them
+    for (const r of this.remotes.values()) {
+      if (r.mt !== 'boat' || r.hidden) continue;
+      const d = Math.hypot(r.x - p.x, r.y - p.y);
+      if (d < bd) {
+        bd = d;
+        best = { remote: r, x: r.x, y: r.y };
+      }
+    }
     return best;
   }
 
+  // you ride along in someone else's boat: you sit beside them and go where they go
+  passengerUpdate() {
+    const p = this.player;
+    const r = this.remotes.get(this.boatPass);
+    if (this.dead || !r || r.mt !== 'boat') {
+      // the one who steered has gone (or hopped out): the boat is yours now
+      this.boatPass = null;
+      if (!this.dead) {
+        const b = { id: `p${Date.now()}`, x: p.x, y: p.y, dir: p.dir, t: 0 };
+        this.boats.push(b);
+        this.boat = b;
+        this.onToast?.('⛵ The boat is yours to sail now.');
+      }
+      return;
+    }
+    p.x = r.x + 11;
+    p.y = r.y + 2;
+    p.dir = r.dir;
+    p.moving = false;
+  }
+
   boardBoat(b) {
-    if (!b || this.boat) return;
+    if (!b || this.boat || this.boatPass) return;
     this.dismount();
     const p = this.player;
+    this.keys.clear();
+    if (b.remote) {
+      this.boatPass = String(b.remote.id);
+      p.x = b.remote.x + 11;
+      p.y = b.remote.y + 2;
+      this.onToast?.(`⛵ You hop in ${b.remote.name}'s boat. Press F to hop out.`);
+      return;
+    }
     this.boat = b;
     p.x = b.x;
     p.y = b.y;
-    this.keys.clear();
+    this.mp?.net.send({ t: 'fx', kind: 'boatride', bid: b.id }); // (the others stop seeing it where it floated)
     this.onToast?.('⛵ You are in the boat: sail across the water. Press F near the shore to hop out.');
   }
 
   leaveBoat() {
     const b = this.boat;
-    if (!b) return;
+    if (!b && !this.boatPass) return;
     const p = this.player;
     // the nearest bit of dry land
     for (const r of [18, 26, 34, 46, 60]) {
@@ -1483,9 +1587,13 @@ export class Game {
         const x = p.x + Math.cos(a) * r;
         const y = p.y + Math.sin(a) * r;
         if (this.world.type(Math.floor(x / T), Math.floor((y - 2) / T)) !== WATER && !this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true)) {
-          b.x = p.x;
-          b.y = p.y;
+          if (b) {
+            b.x = p.x;
+            b.y = p.y;
+            this.mp?.net.send({ t: 'fx', kind: 'boatset', bid: b.id, x: Math.round(b.x), y: Math.round(b.y), d: b.dir });
+          }
           this.boat = null;
+          this.boatPass = null;
           p.x = x;
           p.y = y;
           this.onToast?.('You hop out of the boat. It stays where it is.');
@@ -1539,7 +1647,9 @@ export class Game {
       this.onToast?.(`A boat costs ${BOAT_COST} coins. You have ${this.coinCount()}.`);
       return;
     }
-    this.boats.push({ id: `bought${Date.now()}`, x: spot.x, y: spot.y, dir: 'left', t: 0 });
+    const nb = { id: `bought${Date.now()}`, x: spot.x, y: spot.y, dir: 'left', t: 0 };
+    this.boats.push(nb);
+    this.mp?.net.send({ t: 'fx', kind: 'boatset', bid: nb.id, x: Math.round(nb.x), y: Math.round(nb.y), d: 'left' });
     sfx.play('buy');
     this.onToast?.('⛵ Your boat is on the water by the shore. Walk up to it and press F.');
     this.save();
@@ -1552,13 +1662,17 @@ export class Game {
 
   // where each end of the seesaw is: the end handles' height in each frame of the sheet (the other end is half a cycle behind)
   seatPos(o, side) {
-    const L = [19.4, 20.0, 20.4, 20.0, 19.4, 18.7, 18.1, 18.7];
+    // the two seat pads at the ends of the board, in each of the 8 frames (measured on the sheets: red and blue)
+    const SEATS = {
+      1: { x: [5.6, 41.4], l: [16.8, 18.8, 20.4, 18.8, 16.8, 13.8, 11.8, 13.8], r: [16.8, 13.8, 12.8, 13.8, 16.8, 18.8, 20.5, 18.8] },
+      2: { x: [7.0, 40.0], l: [17.7, 19.7, 21.0, 19.7, 17.7, 14.7, 12.7, 14.7], r: [17.7, 14.7, 13.7, 14.7, 17.7, 19.7, 21.0, 19.7] },
+    }[o.v === 2 ? 2 : 1];
     const ph = this.seesawPhase(o);
-    const f0 = Math.floor(ph);
-    const k = ph - f0;
-    const at = (f) => (side < 0 ? L[f % 8] : L[(f + 4) % 8]);
-    const cy = at(f0) * (1 - k) + at(f0 + 1) * k;
-    return { x: o.x + (side < 0 ? -7.2 : 6.3), y: o.by - 32 + cy + 4.5 };
+    const f0 = Math.floor(ph) % 8;
+    const k = ph - Math.floor(ph);
+    const tab = side < 0 ? SEATS.l : SEATS.r;
+    const cy = tab[f0] * (1 - k) + tab[(f0 + 1) % 8] * k;
+    return { x: o.x - 24 + SEATS.x[side < 0 ? 0 : 1], y: o.by - 32 + cy + 3 };
   }
 
   sitSeesaw(o) {
@@ -1578,7 +1692,7 @@ export class Game {
     }
     this.seat = { o, side };
     this.keys.clear();
-    p.dir = 'down';
+    p.dir = side < 0 ? 'right' : 'left';
     this.onToast?.(taken(-side) ? 'You sit on the seesaw. Press F (or move) to hop off.' : 'You sit on the seesaw. A friend can take the other end! Press F (or move) to hop off.');
   }
 
@@ -1589,7 +1703,7 @@ export class Game {
     p.x = sp.x;
     p.y = sp.y;
     p.moving = false;
-    p.dir = 'down';
+    p.dir = side < 0 ? 'right' : 'left'; // they face each other across the board
     this.cam.x += (p.x - this.cam.x) * 0.1;
   }
 
@@ -1655,6 +1769,10 @@ export class Game {
   buyPet(kind, v = 0) {
     if (this.dead) return;
     this.pets.buy(kind, v);
+  }
+
+  healPet() {
+    this.pets.heal();
   }
 
   callPet(kind) {
@@ -1812,10 +1930,26 @@ export class Game {
     }
   }
 
+  // whatever you were sitting in or on is left behind where you are (a boat stays on the water, you do not take it home)
+  leaveRides() {
+    const p = this.player;
+    if (this.boat) {
+      this.boat.x = p.x;
+      this.boat.y = p.y;
+      this.mp?.net.send({ t: 'fx', kind: 'boatset', bid: this.boat.id, x: Math.round(p.x), y: Math.round(p.y), d: this.boat.dir });
+    }
+    this.boat = null;
+    this.boatPass = null;
+    if (this.seat) this.seat = null;
+    this.glideTile = false;
+    if (this.pets?.pet?.rid) this.pets.dismount();
+  }
+
   // Called when your hearts run out. You sit out a short respawn timer, watching whoever did it.
   die(by) {
     if (this.dead) return;
     if (this.useRevive()) return; // (a Resurrection Cross: no falling at all)
+    this.leaveRides();
     const c = this.combat;
     c.cancelHold();
     c.dash = null;
@@ -2665,7 +2799,7 @@ export class Game {
     this.combat.cancelHold();
     this.mouseHeld[0] = false;
     this.mouseHeld[2] = false;
-    this.onToast?.('💫 Stunned by a grenade!');
+    this.onToast?.('💫 You are stunned!');
   }
 
   // Visit: teleport straight to where another player is (only when the room allows it)
@@ -2688,6 +2822,7 @@ export class Game {
     if (this.t - (this.visitAt ?? -99) < 5) return; // (not every instant)
     this.visitAt = this.t;
     const go = () => {
+      this.leaveRides();
       if (this.inside) {
         this.storageOpen = false;
         this.inside = null;
@@ -3664,6 +3799,7 @@ export class Game {
   // how high another player's mount lifts them
   remoteLift(r) {
     if (r.pet?.rid) return 6;
+    if (r.mt === 'boat' || r.mt === 'boatp') return 3;
     return r.mt === 'cow' ? 11 : r.mt === 'chicken' ? 5 : 0;
   }
 
@@ -3698,8 +3834,13 @@ export class Game {
       if (this.mp && !this.world.arena && m.room.mode === 'free' && m.room.winBy) this.winBy = m.room.winBy;
       if (!m.room.duelEvery || m.room.duel) this.duelNextLeft = null; // (the duels of a running round were switched off)
     } else if (m.t === 'duelstart') {
+      // (a repeated or late message of a duel that is over (or already on) must never pull you back in)
+      if (Number.isFinite(m.did) && (m.did === this.endedDid || m.did === this.currentDid)) return;
+      this.currentDid = m.did;
       this.beginDuelEvent(m);
     } else if (m.t === 'duelend') {
+      if (Number.isFinite(m.did)) this.endedDid = m.did;
+      this.duelTp = null;
       this.endDuelEvent(m);
     } else if (m.t === 'duelcall') {
       // a duel is about to start: who is in it, and (if the room allows it) a few seconds to bet
@@ -3707,9 +3848,14 @@ export class Game {
       this.duelFighters = (m.fighters || []).map(String);
       this.duelUnits = m.units || {};
       this.duelFallen = new Set();
-      this.duelPool = [];
-      this.myBet = null;
-      this.duelCall = { left: Number(m.window) || 0, bet: !!m.bet, kind: m.kind };
+      const kept = this.duelPreview && this.duelPreview.fighters.slice().sort().join() === this.duelFighters.slice().sort().join(); // (the bets placed in advance stay)
+      if (!kept) {
+        if (this.myBet) this.giveCoins(this.myBet.amt);
+        this.duelPool = [];
+        this.myBet = null;
+      }
+      this.duelPreview = null;
+      this.duelCall = { left: Number(m.window) || 0, bet: !!m.bet, kind: m.kind, fighters: (m.fighters || []).map(String), units: m.units || {} };
       this.duelNextLeft = null;
       const names = this.duelFighters.map((id) => (id === me ? 'you' : this.remotes.get(id)?.name || 'someone'));
       this.onToast?.(this.duelFighters.includes(me) ? `⚔️ You are called to a duel in ${Math.round(m.window)}s! Finish what you are doing.` : m.bet ? `🎲 A duel is about to start (${names.join(' vs ')}): place your bets!` : `⚔️ A duel is about to start (${names.join(' vs ')}).`);
@@ -3722,14 +3868,20 @@ export class Game {
         if (this.myBet) this.giveCoins(this.myBet.amt); // (the duel is off: the bet comes back)
         this.myBet = null;
         this.duelPool = [];
-        if (!this.duelEvent && !this.mp?.duel) {
+        if (!m.pre && !this.duelEvent && !this.mp?.duel) {
           this.duelFighters = [];
           this.duelUnits = {};
         }
-        this.onToast?.('⚔️ The duel was called off. Your bet came back.');
+        this.onToast?.(m.pre ? '⚔️ The next duel changed: your bet came back, you can bet again.' : '⚔️ The duel was called off. Your bet came back.');
       }
     } else if (m.t === 'duelnext') {
       this.duelNextLeft = m.left === null || m.left === undefined ? null : Math.max(0, Number(m.left) || 0);
+      this.duelPreview = Array.isArray(m.fighters) && m.fighters.length === 2 && this.duelNextLeft !== null ? { fighters: m.fighters.map(String), bet: !!m.bet } : null;
+      if (!this.duelPreview && this.myBet && !this.duelCall && !this.duelEvent) {
+        this.giveCoins(this.myBet.amt); // (no duel is planned any more: the advance bet comes back)
+        this.myBet = null;
+        this.duelPool = [];
+      }
     } else if (m.t === 'duelfall') {
       this.duelFallen.add(String(m.id));
     } else if (m.t === 'duel') {
@@ -3813,6 +3965,14 @@ export class Game {
         this.reviveFxs.push({ x: m.x, y: m.y, t: 0, mine: false });
         sfx.play('respawn', 0.5);
       }
+    } else if (m.t === 'fx' && m.kind === 'boatride') {
+      this.boats = this.boats.filter((b) => b.id !== m.bid || b === this.boat); // (someone climbed into it: it is theirs now)
+    } else if (m.t === 'fx' && m.kind === 'boatset') {
+      if (Number.isFinite(m.x) && Number.isFinite(m.y) && (!(this.boat || this.boatPass) || Math.hypot(m.x - this.player.x, m.y - this.player.y) > 60)) {
+        const ex = this.boats.find((b) => b.id === m.bid);
+        if (ex) Object.assign(ex, { x: m.x, y: m.y });
+        else this.boats.push({ id: String(m.bid), x: m.x, y: m.y, dir: ['left', 'right', 'up', 'down'].includes(m.d) ? m.d : 'left', t: 0 });
+      }
     } else if (m.t === 'fx' && m.kind === 'petfx') {
       if (Number.isFinite(m.x) && Number.isFinite(m.y)) this.pets.addFx(m.x, m.y, m.k);
     } else if (m.t === 'fx' && m.kind === 'aim') {
@@ -3841,7 +4001,7 @@ export class Game {
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
       const at = this.inside ? this.inside.out : p; // indoors you are not in the world: friends just stop seeing you
-      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating, mt: this.mount?.type || (this.boat ? 'boat' : ''), pet: this.pets.netState() });
+      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating, mt: this.mount?.type || (this.boat ? 'boat' : this.boatPass ? 'boatp' : ''), pet: this.pets.netState() });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -3858,6 +4018,7 @@ export class Game {
       if (r.pet) PetSystem.lerpRemote(r.pet, dt);
       if (r.bubble && (r.bubble.t += dt) > 5) r.bubble = null;
       if (r.swing && (r.swing.t += dt) > 0.24) r.swing = null;
+      if (r.stunT > 0) r.stunT -= dt;
       if (r.gunFx && (r.gunFx.t += dt) > 0.7) r.gunFx = null;
       if (r.spin && (r.spin.t += dt) > r.spin.dur) r.spin = null;
       if (r.shield > 0) r.shield -= dt;
@@ -4041,15 +4202,16 @@ export class Game {
         if (this.dead || this.keys.has('left') || this.keys.has('right') || this.keys.has('up') || this.keys.has('down')) this.leaveSeat();
         else this.seatUpdate(dt);
       }
-      const still = this.dead || this.celeb || this.fade || !!this.seat;
+      if (this.boatPass) this.passengerUpdate(dt);
+      const still = this.dead || this.celeb || this.fade || !!this.seat || !!this.boatPass;
       let dx = still ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
       let dy = still ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
       const dashing = !!this.combat.dash; // the dash moves the hero itself
       p.moving = dashing || dx !== 0 || dy !== 0;
       // wading is slow going, and too splashy to sprint
       const waterHere = this.world.type(Math.floor(p.x / T), Math.floor((p.y - 2) / T)) === WATER;
-      this.glideTile = waterHere && !this.boat && this.pets.gliding(); // (a seagull carries you over the water: no slowing down)
-      this.inWater = !this.boat && !this.glideTile && waterHere; // (in a boat you float on top of it)
+      this.glideTile = waterHere && !this.boat && !this.boatPass && this.pets.gliding(); // (a seagull carries you over the water: no slowing down)
+      this.inWater = !this.boat && !this.boatPass && !this.glideTile && waterHere; // (in a boat you float on top of it)
       // a mount has its own, bigger stamina pool: sprinting tires the animal and spares you
       const m = this.mount;
       const tired = m ? m.exhausted : this.exhausted;
@@ -4186,7 +4348,10 @@ export class Game {
         this.day = this.mp.clockDay + Math.floor(total / 24) - Math.floor(this.mp.clockHour / 24);
         if (this.world.arena || (this.duelEvent && this.inArena())) this.hour = 12;
         if (this.duelNextLeft !== null && !this.duelEvent && !this.paused) this.duelNextLeft = Math.max(0, this.duelNextLeft - dt);
-        if (this.duelCall) this.duelCall.left = Math.max(0, this.duelCall.left - dt);
+        if (this.duelCall) {
+          this.duelCall.left = Math.max(0, this.duelCall.left - dt);
+          if (this.duelCall.left <= 0 && (this.duelLeft !== null || this.duelEvent)) this.duelCall = null; // (the fight has started: betting is closed)
+        }
         if (this.spectating && !this.specZoom) {
           this.specZoom = true;
           if (this.zoomBefore === undefined) this.zoomBefore = this.zoomOffset;
@@ -4268,6 +4433,8 @@ export class Game {
       hidden: this.combat.hidden && !this.dead,
       dead: this.dead ? { name: this.killerName(), left: Math.max(0, this.dead.dur - this.dead.t), total: this.dead.dur, duel: this.duelActive() } : null,
       duelNext: this.duelNextLeft,
+      nextDuel: this.nextDuelHud(),
+      marks: this.duelMarks(),
       wave: this.wave?.hudState() || null,
       fight: this.bots?.scoreboard() || null,
       duel: this.duelHud(),
@@ -4278,7 +4445,7 @@ export class Game {
       consumables: { ...this.consumables },
       mount: this.mount ? { type: this.mount.type, hp: this.mount.hp ?? MOUNT_HP[this.mount.type], maxHp: MOUNT_HP[this.mount.type], stamina: this.mount.stamina ?? 1, exhausted: !!this.mount.exhausted, total: Math.round(100 * (MOUNT_POOL[this.mount.type] || 1)) } : null,
       mkills: this.winBy === 'monsters' && !this.mp ? { count: this.monsterKills, target: MONSTER_TARGET } : null,
-      celeb: this.celeb ? { name: this.celeb.name, mine: this.celebMine(), sub: this.celeb.sub, draw: !!this.celeb.draw } : null,
+      celeb: this.celeb ? { name: this.celeb.name, mine: this.celebMine(), sub: this.celeb.sub, draw: !!this.celeb.draw, gold: this.celeb.gold || 0 } : null,
       skills: { ...this.skills },
       activeSkill: this.activeSkill(),
       util: this.activeUtil(),
@@ -4287,6 +4454,7 @@ export class Game {
       coins: this.coinCount(),
       wood: this.wood,
       revives: this.revives,
+      pets: this.pets.hud(),
       tEnergy: this.combat.tEnergy,
       tLocked: this.combat.tLocked,
       gun: this.combat.gun,
@@ -4327,17 +4495,21 @@ export class Game {
     let bestD = 22;
     for (const o of this.nearbyObjects(cx, cy)) {
       if (!o.inter || this.looted(o) || (o.hidden && !this.pets.sees(o))) continue;
-      const d = Math.hypot(o.x - p.x, (o.iy ?? o.y - 4) - p.y);
+      const d = Math.hypot(o.x - p.x, (o.iy ?? o.y - 4) - p.y) - (o.pad || 0);
       if (d < bestD) {
         bestD = d;
         best = o;
       }
     }
-    if (!best && !this.boat && !this.seat) {
-      const bt = this.boatNear();
-      if (bt) best = { inter: 'boat', x: bt.x, y: bt.y + 6, label: 'F · board the boat', boat: bt };
+    if (!best && !this.boat && !this.boatPass && !this.seat) {
+      const hp = this.pets.healNear();
+      if (hp) best = { inter: 'pet', x: hp.x, y: hp.y + 4, label: `F · heal your ${PETS[hp.kind].name}${(this.supplies?.hp || 0) > 0 ? ' (HP Pack)' : ` (${this.pets.hud().healCost} coins)`}` };
     }
-    if (this.boat || this.seat) best = null; // (nothing else to do while you sail or sit)
+    if (!best && !this.boat && !this.boatPass && !this.seat) {
+      const bt = this.boatNear();
+      if (bt) best = { inter: 'boat', x: bt.x, y: bt.y + 6, label: bt.remote ? `F · hop in ${bt.remote.name}'s boat` : 'F · board the boat', boat: bt };
+    }
+    if (this.boat || this.boatPass || this.seat) best = null; // (nothing else to do while you sail or sit)
     if (!best && this.wave) best = this.nearBarricade();
     if (!best && !this.boat && !this.seat) best = this.waterAhead();
     this.prompt = best;
@@ -4354,6 +4526,8 @@ export class Game {
       this.enterBuilding(best.b);
     } else if (this.interactPressed && best?.inter === 'dexit') {
       this.exitDungeon();
+    } else if (this.interactPressed && best?.inter === 'pet') {
+      this.pets.heal();
     } else if (this.interactPressed && best?.inter === 'boat') {
       this.boardBoat(best.boat);
     } else if (this.interactPressed && best?.inter === 'seesaw') {
@@ -4430,17 +4604,48 @@ export class Game {
   gearLoot(o) {
     const rank = (o.skin ?? 0) & 3;
     if (!o.boss && hash2(o.x, o.y, this.world.seed + 777) > 0.45) return; // (the guardian's and a fallen boss's chests always hold one)
-    const left = WEAPONS.filter((w) => w.id !== 'trusty' && !this.weapons.owned[w.id]).sort((a, b) => a.cost - b.cost);
-    if (!left.length) {
+    const wid = this.pickWeapon(rank);
+    if (!wid) {
       this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: 10, vy: 6, vz: 120, fly: true, burst: true, id: 'coin', qty: 20 + rank * 10, age: 0, ins: !!this.inside });
       return;
     }
+    // the weapon pops out of the chest like the rest of the loot: walk over it to take it
+    this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: 0, vy: 10, vz: 140, fly: true, burst: true, id: 'weapon', wid, qty: 1, age: 0, ins: !!this.inside, nopick: 0.6 });
+    this.combat.floaters.push({ x: o.x, y: o.y - 34, text: '⚔️ A weapon!', color: '#ffe27a', t: 0 });
+  }
+
+  // a weapon you do not own yet: a better chest or a bigger monster gives a better one (rank 0-3). null when you own them all.
+  pickWeapon(rank = 0) {
+    const left = WEAPONS.filter((w) => w.id !== 'trusty' && !this.weapons.owned[w.id]).sort((a, b) => a.cost - b.cost);
+    if (!left.length) return null;
     const pos = Math.min(left.length - 1, Math.floor(((rank / 3) * 0.7 + Math.random() * 0.45) * left.length));
-    const w = left[pos];
-    this.weapons.owned[w.id] = true;
+    return left[pos].id;
+  }
+
+  // a weapon is yours: it goes in your hand if it is better than the one you carry (weapons are ranked by price), with a card to show it
+  gainWeapon(wid) {
+    const w = WEAPONS.find((x) => x.id === wid);
+    if (!w || this.weapons.owned[wid]) return;
+    this.weapons.owned[wid] = true;
+    const cur = weaponById(this.weapons.equipped);
+    const equip = w.cost >= (cur?.cost || 0);
+    if (equip) this.weapons.equipped = wid;
     sfx.play('levelup');
-    this.combat.floaters.push({ x: o.x, y: o.y - 34, text: `⚔️ ${w.name}!`, color: '#ffe27a', t: 0 });
-    this.onToast?.(`⚔️ The chest held the ${w.name}! Equip it in the shop (B).`);
+    this.combat.floaters.push({ x: this.player.x, y: this.player.y - 40, text: `⚔️ ${w.name}!`, color: '#ffe27a', t: 0 });
+    this.onGet?.({ kind: 'weapon', name: w.name, file: weaponIconFile(w), rarity: RARITIES[weaponRarity(w)].name, color: RARITIES[weaponRarity(w)].color, desc: `${w.blurb} ${EFFECTS[w.effect]?.name || ''}`.trim(), equipped: equip });
+    this.save();
+  }
+
+  // a card for a rare find (not for common things, and not the same thing again right away)
+  lootCard(id, qty = 1) {
+    const def = ITEMS[id];
+    if (!def || id === 'coin' || id === 'wood') return;
+    const tier = rarityOf(id);
+    if (!['rare', 'epic', 'legendary'].includes(tier)) return;
+    this.cardAt ||= {};
+    if (this.t - (this.cardAt[id] ?? -99) < 20) return;
+    this.cardAt[id] = this.t;
+    this.onGet?.({ kind: 'loot', itemId: id, name: def.name, rarity: RARITIES[tier].name, color: RARITIES[tier].color, desc: def.desc, qty });
   }
 
   // ---------- weather ----------
@@ -5826,10 +6031,11 @@ export class Game {
           this.drawTeamRing(ctx, o.r.x, o.r.y, this.teamOf(o.r));
           // riding: the animal under them, and they sit a little higher
           if (o.r.mt === 'boat') this.drawBoatSprite(ctx, o.r.x, o.r.y, o.r.dir, o.r.animT);
-          else if (o.r.mt) this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
+          else if (o.r.mt && o.r.mt !== 'boatp') this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
           this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
           if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, { ...o.r, y: o.r.y - lift, teamColor: this.teamCount ? this.peerColor(o.r) : null });
           if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y - lift, o.r.shield);
+          if (o.r.stunT > 0) this.combat.drawStun(ctx, o.r.x, o.r.y - lift - 26, '#ffe36b'); // (stunned: stars over their head)
           if (o.r.swing) this.combat.drawSwingAt(ctx, o.r.x, o.r.y - lift - 8, o.r.swing);
           if (o.r.gunFx) this.combat.drawGunAt(ctx, o.r.x, o.r.y - lift - 8, o.r.gunFx);
           if (o.r.spin) this.combat.drawSpinAt(ctx, o.r.x, o.r.y - lift - 8, o.r.spin);
@@ -6298,7 +6504,8 @@ export class Game {
       const [sx, sy] = this.toScreen(r.x, r.y - this.remoteLift(r) - tagHeight(r.hero), camX, camY);
       const off = sx < 0 || sy < 0 || sx > canvas.width || sy > canvas.height;
       if (!off) {
-        this.pill(r.name, sx, sy, zoom * 4.5, '#fff', this.peerColor(r));
+        const next = this.duelMarks().includes(String(r.id)); // (in the next duel: a red name and a sword)
+        this.pill(next ? `⚔️ ${r.name}` : r.name, sx, sy, zoom * 4.5, '#fff', next ? '#d6293e' : this.peerColor(r));
         if (r.bubble) this.pill(r.bubble.text, sx, sy - zoom * 9, zoom * 4.2, '#5b4636', '#fff');
         continue;
       }

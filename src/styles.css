@@ -1771,3 +1771,51 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .rar-tab small { opacity: 0.7; font-weight: 400; margin-left: 2px; }
 .rar-tab:hover { background: color-mix(in srgb, var(--rc, #888) 18%, transparent); }
 .rar-tab.on { background: var(--rc, #888); color: #fff; }
+
+/* who fights in the next duel: a red name and a sword in the scoreboard */
+.score-row.next-duel-row .score-who { color: #d6293e; font-weight: 800; }
+.score-row.next-duel-row { box-shadow: inset 0 0 0 2px rgba(214, 41, 62, 0.5); }
+/* the card for the next duel, with the advance bets */
+.next-duel { pointer-events: auto; display: grid; gap: 6px; justify-items: center; padding: 8px 12px; background: var(--paper); min-width: 300px; max-width: min(520px, calc(100vw - 24px)); }
+.nd-head { font: 700 0.9rem var(--pixel); }
+.nd-head.soon { color: #d6293e; animation: duel-pulse 0.6s infinite alternate; }
+.nd-vs { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.nd-side { display: inline-flex; align-items: center; gap: 12px; }
+.nd-v { font: 800 1rem var(--pixel); color: #d6293e; }
+.nd-who { display: inline-flex; align-items: center; gap: 6px; }
+.nd-who b { font: 700 0.95rem var(--pixel); color: #d6293e; }
+.nd-note { color: var(--ink-soft); font-size: 0.72rem; }
+.next-duel .bet-panel { width: 100%; box-shadow: none; border: 0; padding: 4px 0 0; background: transparent; }
+
+/* item pictures sit inside their box, centred; the box grows to hold a big picture instead of letting it spill out */
+.upg-row { grid-template-columns: auto 1fr auto; }
+.shop-col .upg-row { grid-template-columns: auto 1fr auto; }
+.upg-icon.rar { min-width: 48px; min-height: 48px; width: auto; height: auto; box-sizing: border-box; display: grid; place-items: center; overflow: visible; flex: none; }
+.upg-icon.rar img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.hot-slot .item-icon, .inv-slot .item-icon { max-width: 100%; max-height: 100%; }
+.bet-amount input[type=number] { width: 92px; min-width: 92px; flex: none; text-align: center; }
+.bet-ask { font-size: 0.74rem; font-weight: 700; color: var(--ink); }
+
+/* the pet card next to the coins: its health and a heal button */
+.pet-chip { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.pet-hp { display: inline-block; width: 36px; height: 7px; border-radius: 4px; background: rgba(0, 0, 0, 0.22); overflow: hidden; }
+.pet-hp i { display: block; height: 100%; background: #5fd16a; }
+.pet-chip.asleep .pet-hp i { background: #ee5a6c; }
+.pet-heal { padding: 1px 8px; min-height: 0; font-size: 0.72rem; }
+
+/* a card for a new weapon or a rare find (the same card as a new skill) */
+.get-card { border-color: var(--gc, #f0a21e); }
+.get-card .unlock-ribbon { background: var(--gc, #f0a21e); }
+.get-wicon { display: block; width: 64px; height: 64px; background-size: 64px 64px; image-rendering: pixelated; margin: 0 auto; }
+.get-loot .unlock-icon { display: grid; place-items: center; min-height: 64px; }
+/* duel wins and losses in the scoreboard */
+.score-duel { font: 700 0.68rem var(--pixel); color: var(--ink-soft); white-space: nowrap; }
+.score-duel i { font-style: normal; }
+.score-duel .w { color: #2f9e55; font-style: normal; }
+.score-duel .l { color: #d6293e; font-style: normal; }
+.score-row small.score-duel { position: relative; z-index: 1; }
+
+/* the gold made (or lost) in a duel, big on the win banner */
+.celeb-gold { position: relative; font: 800 clamp(1.4rem, 4vw, 2.2rem) var(--pixel); animation: lvl-text 6s ease-out forwards; text-shadow: 0 3px 0 rgba(0,0,0,0.35); }
+.celeb-gold.up { color: #ffe27a; }
+.celeb-gold.down { color: #ff7a8f; }

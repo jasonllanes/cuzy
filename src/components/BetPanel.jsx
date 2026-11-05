@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 // Before a duel the ones who are not in it can back a side: pick a fighter, type how much (or go all in), and the coins are on the table.
 // The winners share what the losers put in, by how much each of them bet.
-export default function BetPanel({ duel, game }) {
+export default function BetPanel({ duel, game, advance = false }) {
   const { units, pool = {}, myBet, coins = 0, canBet, call } = duel;
   const [side, setSide] = useState(null);
   const [amt, setAmt] = useState('');
@@ -20,15 +20,16 @@ export default function BetPanel({ duel, game }) {
     const mine = pool[key] || 0;
     const rest = total - mine;
     if (!n || !rest) return null;
-    return Math.floor((n * rest) / (mine + (myBet && myBet.on === key ? 0 : n) || 1));
+    return Math.floor((n * 0.8 * rest) / (mine + (myBet && myBet.on === key ? 0 : n) || 1));
   };
   if (!canBet && !myBet && !total) return null;
   return (
     <div className="bet-panel panel small">
       <div className="bet-head">
         <b>🎲 Bets</b>
-        <small>{canBet ? `${call}s to bet` : 'closed'}{total > 0 ? ` · 🪙 ${total} on the table` : ''}</small>
+        <small>{canBet ? (advance ? 'bets open · bet now' : `${call}s to bet`) : 'closed'}{total > 0 ? ` · 🪙 ${total} on the table` : ''}</small>
       </div>
+      {canBet && units.length > 0 && <small className="bet-ask">Who will win? Pick a fighter, then how much:</small>}
       <div className="bet-sides">
         {units.map((u) => (
           <button key={u.key} type="button" className={`bet-side ${side === u.key ? 'on' : ''} ${myBet?.on === u.key ? 'mine' : ''}`} disabled={!canBet} onClick={() => setSide(u.key)} style={u.color ? { '--team': u.color } : undefined}>
@@ -42,7 +43,7 @@ export default function BetPanel({ duel, game }) {
           <input type="range" min={0} max={Math.max(1, room)} value={n} onChange={(e) => setAmt(e.target.value)} aria-label="How much to bet" />
           <input type="number" min={0} max={room} value={amt} placeholder="0" onChange={(e) => setAmt(e.target.value)} aria-label="Coins to bet" />
           <button type="button" className="btn small-btn" onClick={() => setAmt(String(room))}>All in</button>
-          <button type="button" className="btn go small-btn" disabled={!side || !n} onClick={() => place(side, n)}>{myBet ? 'Change' : 'Bet'} 🪙 {n}</button>
+          <button type="button" className="btn go small-btn" disabled={!side || !n} onClick={() => place(side, n)}>{myBet ? 'Change' : 'Bet'} 🪙 {n}{side ? ` on ${units.find((u) => u.key === side)?.name || ''}` : ''}</button>
           {myBet && <button type="button" className="btn small-btn" onClick={() => place(myBet.on, 0)}>Take back</button>}
         </div>
       )}

@@ -166,7 +166,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                 );
               })}
               <div className="upg-row">
-                <div className="upg-icon rar rar-legendary"><img src={`${import.meta.env.BASE_URL}assets/items/revive_ring.png`} alt="" width="32" height="32" style={{ imageRendering: 'pixelated' }} /></div>
+                <div className="upg-icon rar rar-legendary"><img src={`${import.meta.env.BASE_URL}assets/items/revive_ring.png`} alt="" width="40" height="40" style={{ imageRendering: 'pixelated' }} /></div>
                 <div className="upg-info">
                   <h3>Resurrection Cross <small>carrying {hud.revives || 0}/{REVIVE.cap}</small></h3>
                   <p>If you fall, it shatters and you rise again on the spot with full health and a few seconds of safety.</p>

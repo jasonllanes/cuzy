@@ -218,7 +218,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
                   {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} min</option>)}
                 </select>
               </div>
-              <Switch label="Betting" hint={bet ? 'The players who are not in the duel see who is fighting and have a few seconds to back a fighter: they type how much (or go all in). The winners share what the losers put in. A draw, or nobody on the other side, gives everyone their coins back.' : 'Off: the duel is for pride only'} on={bet > 0} disabled={duelLocked} onChange={(v) => onChange({ bet: v ? 1 : 0 })} />
+              <Switch label="Betting" hint={bet ? 'The players who are not in the duel see who is fighting and can bet on a fighter (even in advance), by typing how much or going all in. Backers of the winner get their stake back plus a share of 80% of what was bet on the loser; the winning duelist gets 10%, or 90% if nobody bet on them. A draw, or nobody on the other side, gives every stake back.' : 'Off: the duel is for pride only'} on={bet > 0} disabled={duelLocked} onChange={(v) => onChange({ bet: v ? 1 : 0 })} />
             </>
           )}
         </Section>
