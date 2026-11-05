@@ -10,7 +10,7 @@ import MusicButton from './MusicButton';
 import V2Sprite from './V2Sprite';
 import Avatar from './Avatar';
 import MapPreview from './MapPreview';
-import { FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
+import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
 
@@ -63,6 +63,13 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   // 'ai' is a solo-only Free Roam flavour: an ordinary fight world with computer rivals
   const vsAi = gameType === 'free' && freeMode === 'ai' && mode === 'solo';
   const gameMode = gameType === 'survival' ? 'survival' : freeMode === 'waves' ? 'waves' : 'free';
+  // game modes of their own (Free Roam rounds with a fixed world and fixed rules): they are set up in the room, and can still be tuned there
+  const SPECIAL = {
+    beach: { icon: '🏖️', name: 'Beach Ball', seed: PITCH_SEED, together: true, blurb: 'A cozy ball game: two teams, one beach ball, a goal at each end. Kick it by walking into it. 1v1 with two players.' },
+    escape: { icon: '🚁', name: 'Escape', seed: ESCAPE_SEED, together: false, blurb: 'Open world survival: loot buildings and cars for guns, grenades and a compass, fight the zombies, and reach the chopper that lands far away before it leaves. No shop.' },
+    duel: { icon: '🏛️', name: 'Duel', seed: ARENA_SEED, together: true, blurb: 'A 1v1 in the Colosseum against the clock (everyone else watches, and can bet). Pick the fighters in the room.' },
+  };
+  const special = SPECIAL[gameType] || null;
   const survival = gameType === 'survival';
 
   // Free Roam heroes: the Super Retro World pack
@@ -116,7 +123,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const { status, rooms, problem } = useLobby(net);
 
   // `hero` is what the game uses; the other picks are remembered so switching game type does not lose them
-  const fullSeed = () => rolledSeed;
+  const fullSeed = () => (special ? special.seed : rolledSeed);
   const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed: fullSeed(), mode: gameMode, difficulty, waves: survWaves, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
   const myName = () => name.trim() || 'Friend';
 
@@ -150,7 +157,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const create = () =>
     run(
       net
-        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, player: { name: myName(), hero: activeHeroId } })
+        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, duel: gameType === 'duel', soccer: gameType === 'beach', escape: gameType === 'escape', player: { name: myName(), hero: activeHeroId } })
         .then((joined) => {
           // a room server that was started before Wave Defense existed quietly makes an ordinary room
           if (gameMode !== 'free' && joined.room.mode !== gameMode) {
@@ -167,7 +174,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     setError('');
     try {
       const surv = gameMode === 'survival';
-      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
+      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : special ? `${myName()}'s ${special.name.toLowerCase()}` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, duel: gameType === 'duel', soccer: gameType === 'beach', escape: gameType === 'escape', allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
     } catch (err) {
       // no room available (offline, or the rooms table is not set up): say so, and play without one if asked again
       if (noRoomOk) {
@@ -385,7 +392,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
               >
                 <span className="type-emoji"><V2Sprite theme="camping" name="Tree_157" scale={1} /></span>
                 <b>Free Roam</b>
-                <small>The cozy open world: explore, forage, meet farm animals, hold a wave defense, or duel your friends.</small>
+                <small>The cozy open world: explore, forage, meet farm animals and hold a wave defense.</small>
               </button>
               {!v2 && <button
                 type="button"
@@ -398,6 +405,23 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <b>Survival</b>
                 <small>The zombie apocalypse: hold a container shelter through 10 waves with scavenged walls and supplies.</small>
               </button>}
+              {!v2 && Object.entries(SPECIAL).map(([id, sp]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={gameType === id}
+                  className={`type-card ${id === 'escape' ? 'survival' : ''} ${gameType === id ? 'on' : ''}`}
+                  onClick={() => {
+                    setGameType(id);
+                    if (sp.together) setMode('together'); // (a ball game or a duel needs other players)
+                  }}
+                >
+                  <span className="type-emoji" style={{ fontSize: '2.6rem' }}>{sp.icon}</span>
+                  <b>{sp.name}</b>
+                  <small>{sp.blurb}</small>
+                </button>
+              ))}
             </div>
             {fromMulti ? (
               <div className="nav-row">
@@ -418,7 +442,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 role="radio"
                 aria-checked={mode === 'solo'}
                 className={`type-card ${mode === 'solo' ? 'on' : ''}`}
-                onClick={() => setMode('solo')}
+                disabled={!!special?.together}
+                title={special?.together ? `${special.name} needs other players` : undefined}
+                style={special?.together ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                onClick={() => !special?.together && setMode('solo')}
               >
                 <span className="type-emoji"><Avatar assets={assets} id="v2:scout3" size={64} /></span>
                 <b>Solo</b>
@@ -505,7 +532,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             <div className="play-side">
             <div className="summary">
               <button type="button" className="summary-chip" onClick={() => go('name')} title="Change name">👤 {myName()}</button>
-              <button type="button" className="summary-chip" onClick={() => go('game')} title="Change game">{survival ? '☠️ Survival' : '🌳 Free Roam'}</button>
+              <button type="button" className="summary-chip" onClick={() => go('game')} title="Change game">{survival ? '☠️ Survival' : special ? `${special.icon} ${special.name}` : '🌳 Free Roam'}</button>
               <button type="button" className="summary-chip" onClick={() => go('who')} title="Change players">{mode === 'solo' ? '🌱 Solo' : '🏡 Together'}</button>
               <button type="button" className="summary-chip" onClick={() => go('hero')} title="Change hero">🧍 {activeHero.label}</button>
             </div>
@@ -536,17 +563,18 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
               </div>
             )}
 
-            <div className="layout-box">
+            {special && <p className="hint special-blurb">{special.icon} <b>{special.name}</b>: {special.blurb} The world and the rules are set for you; the host can still tune them in the room settings.</p>}
+            {!special && <div className="layout-box">
               <div className="layout-row">
                 <button type="button" className="btn" title="Press again for another one: same tiles, but the land, trees and objects are placed anew" onClick={() => { setFresh(true); setRoll(newRoll()); }}>🎲 Generate a new layout</button>
                 <span className="layout-tag">{fresh ? `New layout #${roll}` : 'Original layout'}</span>
                 {fresh && <button type="button" className="btn ghost small-btn" onClick={() => setFresh(false)}>↺ Original</button>}
               </div>
-            </div>
-            <div className="preview-row">
+            </div>}
+            {!special && <div className="preview-row">
               <button type="button" className="btn" title="See the whole map full screen and walk around it. You can generate another one there before you decide." onClick={() => setPv({ roll: fresh ? roll : null })}>👁 Preview the map</button>
               <small>See the whole map full screen and walk around it. You can generate another one there before you decide.</small>
-            </div>
+            </div>}
 
             {mode === 'together' && (
               <div className="together">
@@ -579,10 +607,10 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             <div className="nav-row">
               <button type="button" className="btn ghost" onClick={() => go('hero')}>← Back</button>
               {mode === 'together' && <button type="button" className="btn go" disabled={busy || !online} onClick={create}>{busy ? 'Creating…' : 'Create room ➜'}</button>}
-              {mode === 'solo' && <button type="submit" className="btn go" disabled={busy}>{busy ? 'Opening…' : soloRoom ? 'Open the room ➜' : 'Begin adventure ➜'}</button>}
+              {mode === 'solo' && <button type="submit" className="btn go" disabled={busy || (!!special && !online)}>{busy ? 'Opening…' : soloRoom ? 'Open the room ➜' : 'Begin adventure ➜'}</button>}
             </div>
             </div>
-            <div className="play-maps">
+            {!special && <div className="play-maps">
             <span className="sub-label">Choose a map</span>
             <div className="map-grid" role="radiogroup" aria-label="Map">
               {(gameMode === 'survival' ? SURVIVAL_MAPS : FREE_MAPS).map((m) => {
@@ -603,7 +631,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 </small>
               </button>
             </div>
-            </div>
+            </div>}
             </div>
           </section>
         )}

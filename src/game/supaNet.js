@@ -381,7 +381,16 @@ export class SupaNet {
       this.resetMatches();
       this.fixPair(true);
     }
-    const startHour = mode === 'survival' ? 17.3 : START_HOUR; // Survival begins at dusk
+    // the game modes that are picked on the menu: a Beach Ball match, or the Escape zone
+    if (free && soccer === true) {
+      this.cfg = cfg;
+      this.setSoccer(true);
+    }
+    if (free && escape === true) {
+      this.cfg = cfg;
+      this.setEscape(true);
+    }
+    const startHour = mode === 'survival' ? 17.3 : cfg.escape ? 16.5 : START_HOUR; // Survival begins at dusk (and the Escape zone a little before)
     const t0 = Date.now();
 
     let code = null;
