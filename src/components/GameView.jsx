@@ -10,7 +10,7 @@ import { TEAMS } from '../game/teams';
 import IntroScene from './IntroScene';
 import OnlinePlayers from './OnlinePlayers';
 import { sfx } from '../game/sfx';
-import { INVIS_CD } from '../game/combat';
+import { INVIS_CD, WIND_CD } from '../game/combat';
 import AudioSettings from './AudioSettings';
 import ControlsLayout from './ControlsLayout';
 import ScreenSettings from './ScreenSettings';
@@ -22,12 +22,13 @@ import UnlockCards from './UnlockCards';
 import QtyPicker from './QtyPicker';
 import RoomSettings, { Switch, WAVE_START } from './RoomSettings';
 import BetPanel from './BetPanel';
+import CompassPanel from './CompassPanel';
 import { WAVE_COUNTS } from '../game/monsters';
 import TouchControls from './TouchControls';
 import { getControls, useControls } from '../game/controls';
 import { COMMANDS } from '../game/commands';
 import { hp100 } from '../game/stats';
-import { mapNameOf } from '../game/maps';
+import { isEscapeSeed, mapNameOf } from '../game/maps';
 import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
 import TrainingPanel from './TrainingPanel';
@@ -435,7 +436,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     if (introRef.current === 'play' && !game.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0);
     };
     // a V2 world draws sprites from the Modern Exteriors atlases: they are loaded before the game begins
-    if (isV2Seed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
+    if (isV2Seed(profile.seed) || isEscapeSeed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) || isEscapeSeed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
     else boot();
     return () => {
       dead = true;
@@ -587,7 +588,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       } else if (e.code === 'KeyB' || e.code === 'KeyU') {
         // B opens the shop (Upgrades in Wave Defense and Survival)
         e.preventDefault();
-        if (!e.repeat && !mapRef.current && !pausedRef.current && !guideRef.current && !storeRef.current) setUpgOpen((o) => !o);
+        if (!e.repeat && !gameRef.current?.escape && !mapRef.current && !pausedRef.current && !guideRef.current && !storeRef.current) setUpgOpen((o) => !o);
       } else if (e.code === 'KeyM') {
         if (!e.repeat && !upgRef.current && !pausedRef.current && !guideRef.current) setMapOpen((o) => !o);
       } else if (e.code === 'KeyG' && !mapRef.current && !pausedRef.current && !upgRef.current) {
@@ -818,7 +819,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
         {(!mobile || hudMenuOpen) && (
           <>
-        {!mobile && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
+        {!mobile && !hud.escape && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
         {mobile && <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat</button>}
         {(session ? isHost : true) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
         <button className="btn small-btn" onClick={() => setBestiaryOpen(true)} title="Every creature in the game, so you can tell what is attacking you">👹 Creatures</button>
@@ -878,6 +879,19 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             {hud.invisCd > 0 && <span className="skill-num">{Math.ceil(hud.invisCd)}</span>}
           </button>
         )}
+        {!waves && hud.util === 'wind' && (
+          <button
+            className={`skill ${hud.windCd > 0 ? 'cooling' : 'ready'}`}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => gameRef.current?.combat?.activateWind()}
+            title="Second Wind: heals half of your health and refills your stamina (40 second cooldown)"
+          >
+            <span className="skill-icon">💚</span>
+            <kbd>R</kbd>
+            <span className="skill-cd" style={{ height: `${Math.min(100, (hud.windCd / WIND_CD) * 100)}%` }} />
+            {hud.windCd > 0 && <span className="skill-num">{Math.ceil(hud.windCd)}</span>}
+          </button>
+        )}
         {waves && (
           <button
             className="skill ready"
@@ -904,11 +918,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'grapple' ? 1.5 : 1.2)) * 100)}%` }} />
         </div>
       </div>
-      {waves && (
-        <div className={`hud throw-meter ${survival ? (hud.reloading ? 'locked' : '') : hud.tLocked ? 'locked' : ''}`}>
-          <span>{survival ? (hud.reloading ? '🔄 Reloading…' : `${GUNS[hud.gun]?.icon || '🔫'} ${hud.ammo ?? 0} / ${hud.gunMag || GUNS[hud.gun]?.mag || 12}`) : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
+      {(waves || hud.gunSel) && (
+        <div className={`hud throw-meter ${survival || hud.gunSel ? (hud.reloading ? 'locked' : '') : hud.tLocked ? 'locked' : ''}`}>
+          <span>{survival || hud.gunSel ? (hud.reloading ? '🔄 Reloading…' : `${GUNS[hud.gun]?.icon || '🔫'} ${hud.ammo ?? 0} / ${hud.gunMag || GUNS[hud.gun]?.mag || 12}${hud.gunSel ? ` · 🎒 ${hud.bullets}` : ''}`) : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
           <div className="throw-track">
-            <div className="throw-fill" style={{ width: `${survival ? (hud.reloading ? hud.reload : (hud.ammo ?? 0) / (hud.gunMag || GUNS[hud.gun]?.mag || 12)) * 100 : hud.tEnergy * 100}%` }} />
+            <div className="throw-fill" style={{ width: `${survival || hud.gunSel ? (hud.reloading ? hud.reload : (hud.ammo ?? 0) / (hud.gunMag || GUNS[hud.gun]?.mag || 12)) * 100 : hud.tEnergy * 100}%` }} />
           </div>
         </div>
       )}
@@ -964,7 +978,23 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {(!waves || survival) && <SupplyBar keys={['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
       {supplyOpen && (!waves || survival) && <SupplyMenu kind={supplyOpen} hud={hud} game={gameRef.current} onClose={() => setSupplyOpen(null)} />}
+      <CompassPanel compass={hud.compass} />
+      {hud.escape && (
+        <div className={`escape-bar panel small ${hud.escape.phase}`}>
+          <b>{hud.escape.phase === 'extract' ? '🚁 THE CHOPPER HAS LANDED' : '🚁 Chopper arrives in'}</b>
+          <span className="eb-time">{Math.floor(hud.escape.left / 60)}:{String(Math.floor(hud.escape.left % 60)).padStart(2, '0')}</span>
+          <small>{hud.escape.boarded ? `You are on board · ${hud.escape.outN}/${hud.escape.total} aboard` : hud.escape.phase === 'extract' ? `It leaves when the clock runs out · ${hud.escape.outN}/${hud.escape.total} aboard · use the compass` : 'Loot, survive the zombies, and find a compass'}</small>
+        </div>
+      )}
       <div className="top-stack">
+      {hud.soccer && (
+        <div className="soccer-bar panel small">
+          <span className="sb-team red">🔴 {hud.soccer.goals[0]}</span>
+          <span className="sb-mid"><b>{hud.soccer.left !== null ? `${Math.floor(hud.soccer.left / 60)}:${String(Math.floor(hud.soccer.left % 60)).padStart(2, '0')}` : '⚽'}</b><small>{hud.soccer.sudden ? 'next goal wins!' : `first to ${hud.soccer.target}`}</small></span>
+          <span className="sb-team blue">{hud.soccer.goals[1]} 🔵</span>
+          <small className="sb-you">You are {hud.soccer.team === 0 ? '🔴 red · attack right ➜' : '🔵 blue · ⬅ attack left'}</small>
+        </div>
+      )}
       {hud.duel && (
         <div className="duel-bar panel small">
           <div className="duel-mid">
@@ -1056,7 +1086,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       {hud.celeb && (
         <div key="round-flash" className="levelup-flash round-flash" aria-hidden="true">
           <span className="levelup-glow" />
-          <b>{hud.celeb.draw ? '🤝 A draw!' : `🏆 ${hud.celeb.mine ? 'You win' : `${hud.celeb.name} wins`}!`}</b>
+          <b>{hud.celeb.title || (hud.celeb.draw ? '🤝 A draw!' : `🏆 ${hud.celeb.mine ? 'You win' : `${hud.celeb.name} wins`}!`)}</b>
           {hud.celeb.gold !== 0 && <strong className={`celeb-gold ${hud.celeb.gold > 0 ? 'up' : 'down'}`}>{hud.celeb.gold > 0 ? '+' : ''}{hud.celeb.gold} 🪙</strong>}
           {hud.celeb.sub && <small>{hud.celeb.sub}</small>}
         </div>

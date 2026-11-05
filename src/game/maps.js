@@ -48,6 +48,8 @@ export const SURVIVAL_BASE = 'cuzy-survival';
 // a friendly name for whatever world a seed makes
 export function mapNameOf(seed) {
   if (isArenaSeed(seed)) return 'Colosseum';
+  if (isPitchSeed(seed)) return 'Beach Ball Pitch';
+  if (isEscapeSeed(seed)) return 'Escape Zone';
   const { base, map } = splitSeed(seed);
   const free = FREE_MAPS.find((m) => m.seed === base);
   if (free) return free.name;
@@ -68,6 +70,14 @@ export const splitSeed = (seed) => {
 export const ARENA_SEED = 'colosseum-1~arena';
 export const isArenaSeed = (s) => /~arena$/.test(String(s));
 export const stripArena = (s) => String(s).replace(/~arena$/, '');
+// The Beach Ball pitch: a sand field with a goal at each end, in the sea (a Free Roam room with the Beach Ball match on)
+export const PITCH_SEED = 'beachpitch-1~pitch';
+export const isPitchSeed = (s) => /~pitch$/.test(String(s));
+export const stripPitch = (s) => String(s).replace(/~pitch$/, '');
+// The Escape zone: an open world full of buildings to loot, zombies, and a chopper that arrives somewhere far away (Free Roam room with Escape on)
+export const ESCAPE_SEED = 'asphalt-358~esc';
+export const isEscapeSeed = (s) => /~esc$/.test(String(s));
+export const stripEscape = (s) => String(s).replace(/~esc$/, '');
 
 // Endless Survival (no waves) is a flag at the end of the seed: the same map, played differently
 export const ENDLESS_TAG = '~endless';

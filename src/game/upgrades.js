@@ -104,6 +104,7 @@ export const SKILL_SHOP = [
   { id: 'dash', icon: '💨', name: 'Dash', group: 'sword', cost: 20, sword: true, desc: 'Press Space (hold it to charge) to dash through enemies. Upgrade distance and damage in the shop.' },
   { id: 'grapple', icon: '🪝', name: 'Grapple Hook', group: 'sword', cost: 35, sword: true, desc: 'Press Space (hold it to charge how far it reaches) to fire a hook. It catches a tree, a wall, a house, a creature or a player, and pulls you straight to it. Upgrade its range in the shop.' },
   { id: 'shield', icon: '🛡️', name: 'Shield', group: 'utility', cost: 30, desc: 'Press R: blocks all damage for 3 seconds. 10 second cooldown.' },
+  { id: 'wind', icon: '💚', name: 'Second Wind', group: 'utility', cost: 40, desc: 'Press R: heals half of your health at once and refills your stamina. 40 second cooldown.' },
   { id: 'invis', icon: '👻', name: 'Invisibility', group: 'utility', cost: 50, desc: 'Press R: enemies can no longer see you for 4 seconds (attacking reveals you). 25 second cooldown.' },
 ];
 

@@ -13,7 +13,7 @@ const FRICTION = 0.9; // per second, on the ground: it rolls a good while
 const GRAVITY = 260;
 const SYNC_EVERY = 0.35; // seconds between updates from whoever is moving a ball
 
-export const hasBalls = (world) => !world.apoc && !world.waveMode && !world.arena; // (every Free Roam map)
+export const hasBalls = (world) => !world.apoc && !world.waveMode && (!world.arena || world.pitch); // (every Free Roam map, and the Beach Ball pitch)
 
 export class Balls {
   constructor(game) {
@@ -29,6 +29,11 @@ export class Balls {
   spawn() {
     const { world, home } = this.g;
     if (!hasBalls(world)) return;
+    if (world.pitch) {
+      // the match ball: in the middle of the pitch
+      this.list.push({ i: 0, x: 8, y: 8, vx: 0, vy: 0, z: 0, vz: 0, spin: 0, match: true });
+      return;
+    }
     // (everyone in the room starts from the same place: the house nearest the middle of the world, not their own)
     const first = world.houseList()[0];
     const anchor = first ? world.homePoint(first) : { x: home.x, y: home.y };
@@ -148,6 +153,25 @@ export class Balls {
           this.send(b);
           this.syncT = SYNC_EVERY;
           sfx.play('pickup', 0.5);
+        }
+      }
+    }
+    // Beach Ball match: the host's game sees the ball roll into a goal, tells the room, and puts the ball back in the middle
+    if (g.world.pitch) {
+      this.goalLock = Math.max(0, (this.goalLock || 0) - dt);
+      if (this.kickoffT > 0 && (this.kickoffT -= dt) <= 0) {
+        for (const b of this.list) Object.assign(b, { x: 8, y: 8, vx: 0, vy: 0, z: 0, vz: 0 });
+        this.mine.add(0);
+        this.send(this.list[0]);
+        this.syncT = SYNC_EVERY;
+      }
+      if (g.mp && g.hostId === g.mp.you && !this.goalLock) {
+        for (const b of this.list) {
+          const side = g.world.goalSide(b.x, b.y);
+          if (side < 0) continue;
+          this.goalLock = 4;
+          this.kickoffT = 2.6;
+          g.mp.net.send({ t: 'goal', team: side === 0 ? 1 : 0 }); // (the ball in the left goal: the right team scored)
         }
       }
     }

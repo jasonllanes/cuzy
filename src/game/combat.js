@@ -38,7 +38,12 @@ const ALL_FOES = (() => {
   const all = (k) => [...new Set(Object.values(BIOME_FOES).flatMap((b) => b[k]))];
   return { day: all('day'), night: all('night'), boss: all('boss'), mini: all('mini') };
 })();
-const foesAt = (world, x, y) => (world.mixed ? BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover : ALL_FOES);
+// the Escape zone: only the undead
+const ESC_ZOMBIES = ['z_small', 'z_small', 'z_small', 'z_axe', 'z_runner', 'z_armor'];
+const ESC_FOES = { day: ESC_ZOMBIES, night: ESC_ZOMBIES, boss: ['z_armor'], mini: ['z_armor', 'z_axe'] };
+// what a zombie of the Escape zone sometimes leaves behind: [item, chance, min, max] (bullets only now and then)
+const ESC_KILL_LOOT = [['ammo', 0.14, 4, 10], ['truffle', 0.025, 1, 1], ['bandage', 0.04, 1, 1]];
+const foesAt = (world, x, y) => (world.escape ? ESC_FOES : world.mixed ? BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover : ALL_FOES);
 
 // Who fights whom: monsters of different camps attack each other when they meet. A type that is in no camp stays out of it.
 const CAMPS = {
@@ -110,6 +115,7 @@ const SPLAT_LIFE = 1.2; // seconds a splash stays on the ground
 export const SHIELD_DUR = 3;
 export const SHIELD_CD = 10; // counted from the moment the shield goes up
 export const INVIS_DUR = 4;
+export const WIND_CD = 40; // Second Wind: counted from the moment you use it
 export const INVIS_CD = 25; // counted from the moment you vanish
 const SPIN_DUR = 0.6;
 export const SPIN_COOLDOWN = 1.4;
@@ -276,6 +282,7 @@ export class Combat {
     this.shieldCd = 0;
     this.invisT = 0;
     this.invisCd = 0;
+    this.windCd = 0;
     this.spin = null;
     // hiding: standing inside a house makes you invisible to skeletons and rivals (until you attack)
     this.hidden = false;
@@ -832,10 +839,44 @@ export class Combat {
     else this.startDash(power, true);
   }
 
+  // Escape zone: a reload takes bullets out of your pouch (what is not there cannot be loaded)
+  updateEscapeGun(dt) {
+    this.muzzleT = Math.max(0, (this.muzzleT || 0) - dt);
+    const gun = GUNS[this.gun];
+    if (!gun) return;
+    if (this.reloadT > 0) {
+      this.reloadT -= dt;
+      if (this.reloadT <= 0) {
+        const take = Math.min(this.gunMag(this.gun) - this.ammo[this.gun], this.g.bullets || 0);
+        this.ammo[this.gun] += take;
+        this.g.bullets -= take;
+      }
+    } else if (this.ammo[this.gun] < this.gunMag(this.gun) && this.g.bullets > 0 && (this.idleT += dt) > 2) {
+      this.reloadT = gun.reload; // not shooting for a while: top the magazine up
+    }
+  }
+
   // R: whichever utility skill you have equipped
   activateUtil() {
-    if (this.g.activeUtil() === 'invis') this.activateInvis();
+    const u = this.g.activeUtil();
+    if (u === 'invis') this.activateInvis();
+    else if (u === 'wind') this.activateWind();
     else this.activateShield();
+  }
+
+  // ---------- Second Wind skill (R) ----------
+
+  activateWind() {
+    if (this.windCd > 0) return;
+    if (this.g.activeUtil() !== 'wind' || this.g.dead) return;
+    this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.5);
+    this.g.stamina = 1;
+    this.g.exhausted = false;
+    this.windCd = WIND_CD;
+    this.floaters.push({ x: this.g.player.x, y: this.g.player.y - 40, text: `+${hp100(this.maxHp * 0.5)} ❤`, color: '#5fd16a', t: 0, big: true });
+    sfx.play('heal');
+    this.g.pets?.addFx(this.g.player.x, this.g.player.y - 10, 'heal'); // (the green sparkles, shown to everyone)
+    this.g.mp?.net.send({ t: 'fx', kind: 'petfx', x: Math.round(this.g.player.x), y: Math.round(this.g.player.y - 10), k: 'heal' });
   }
 
   // ---------- dash (hold + release left click) ----------
@@ -1248,7 +1289,7 @@ export class Combat {
   activateShield() {
     if (this.shieldCd > 0) return;
     if (this.g.activeUtil() !== 'shield') {
-      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'Buy the Shield in the shop (B).');
+      this.g.onToast?.(this.g.skills.shield ? 'Equip the Shield in the shop (B).' : 'Buy a utility skill in the shop (B).');
       return;
     }
     this.shieldT = SHIELD_DUR;
@@ -1720,6 +1761,14 @@ export class Combat {
     const gun = GUNS[this.gun] || GUNS.pistol;
     if (this.reloadT > 0) return;
     if (this.ammo[this.gun] <= 0) {
+      if (this.g.escape && !(this.g.bullets > 0)) {
+        this.throwCd = 0.4;
+        if (this.g.t - (this.noAmmoAt ?? -9) > 1.5) {
+          this.noAmmoAt = this.g.t;
+          this.g.onToast?.('🔫 No bullets! Look for ammo in the buildings and cars.');
+        }
+        return;
+      }
       this.reloadT = gun.reload;
       return;
     }
@@ -1727,7 +1776,7 @@ export class Combat {
     const [cx, cy] = this.center();
     this.ammo[this.gun]--;
     this.idleT = 0;
-    if (this.ammo[this.gun] <= 0) this.reloadT = gun.reload; // empty: reloads on its own
+    if (this.ammo[this.gun] <= 0 && (!this.g.escape || this.g.bullets > 0)) this.reloadT = gun.reload; // empty: reloads on its own
     this.revealT = 1.5;
     if (gun.flame) {
       this.flameBurst(a, gun);
@@ -1858,6 +1907,11 @@ export class Combat {
     const inv = this.g.inventory;
     const stack = inv[slot];
     if (!stack) return;
+    if (this.g.escape && ITEMS[stack.id]?.gun) {
+      if (this.gun !== ITEMS[stack.id].gun && this.owned[ITEMS[stack.id].gun]) this.equipGun(ITEMS[stack.id].gun);
+      this.shootGun();
+      return;
+    }
     if (GRENADES[stack.id]) {
       this.throwGrenade(slot);
       return;
@@ -1906,7 +1960,7 @@ export class Combat {
     const pl = this.g.player;
     const inSmoke = this.smokes.some((s) => Math.hypot(pl.x - s.x, pl.y - 4 - s.y) < s.R);
     this.inBush = !this.g.inside && !this.g.dead && this.g.world.bushAt(pl.x, pl.y - 2);
-    this.hidden = this.g.dead ? true : (!!room || this.invisT > 0 || inSmoke || this.inBush) && this.revealT <= 0;
+    this.hidden = this.g.dead || this.g.boarded ? true : (!!room || this.invisT > 0 || inSmoke || this.inBush) && this.revealT <= 0;
     if (this.inBush && !this.wasInBush && this.hidden) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the bush', color: '#9fd88a', t: 0 });
     this.wasInBush = this.inBush;
     if (inSmoke && !this.wasInSmoke && !this.g.dead) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the smoke', color: '#cfd6e0', t: 0 });
@@ -1917,6 +1971,7 @@ export class Combat {
     this.updateRecall(dt);
     this.slowT = Math.max(0, this.slowT - dt);
     this.blastT = Math.max(0, this.blastT - dt);
+    if (this.g.escape && !this.g.wave) this.updateEscapeGun(dt);
     if (this.g.wave) {
       this.tEnergy = Math.min(1, this.tEnergy + (this.g.world.apoc ? GUN_REGEN : THROW_REGEN) * dt);
       if (this.g.world.apoc) {
@@ -1935,6 +1990,7 @@ export class Combat {
     this.shieldCd = Math.max(0, this.shieldCd - dt);
     this.invisT = Math.max(0, this.invisT - dt);
     this.invisCd = Math.max(0, this.invisCd - dt);
+    this.windCd = Math.max(0, this.windCd - dt);
     if (this.spin) this.updateSpin(dt);
     if (this.hold) this.hold.t += dt;
     if (this.skillHold) this.skillHold.t += dt;
@@ -2110,8 +2166,11 @@ export class Combat {
       this.wildT = 3 + Math.random() * 3;
       const night = this.g.darkness();
       const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 2;
-      if (!this.g.dungeon && this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
-      if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
+      if (this.g.escape) this.updateEscape(3 + Math.random() * 3);
+      else {
+        if (!this.g.dungeon && this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
+        if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
+      }
     }
     if (!this.g.dungeon) this.updateBossZones(dt);
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
@@ -2299,6 +2358,43 @@ export class Combat {
     this.floaters.push({ x, y: y - 24, text: '🎁 A chest!', color: '#ffd24a', t: 0 });
     this.g.onToast?.('🎁 A chest appeared where it fell! It holds a weapon.');
     sfx.play('chest');
+  }
+
+  // The Escape zone's zombies: one by one all the time, and a horde now and then, a little more of them (and tougher) the longer it goes on.
+  // (`step` is how long it has been since the last call)
+  updateEscape(step) {
+    const g = this.g;
+    if (g.dead || g.inside || g.boarded || g.escapeState?.phase === 'over') return;
+    this.escClock = (this.escClock || 0) + step;
+    this.hordeT = (this.hordeT ?? 40) - step;
+    const level = Math.min(9, 1 + Math.floor(this.escClock / 150));
+    const alive = this.wilds.filter((w) => w.state !== 'dead').length;
+    const cap = Math.min(26, 6 + Math.floor(this.escClock / 60) * 2);
+    if (alive < cap) this.spawnZombie(level);
+    if (this.hordeT <= 0) {
+      this.hordeT = 55 + Math.random() * 25;
+      const n = Math.min(14, 3 + Math.floor(this.escClock / 60) * 2);
+      let came = 0;
+      for (let i = 0; i < n; i++) if (this.spawnZombie(level)) came++;
+      if (came) g.onToast?.('🧟 A horde is coming!');
+    }
+  }
+
+  spawnZombie(level) {
+    const { world, player: p } = this.g;
+    for (let i = 0; i < 14; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const d = 230 + Math.random() * 130;
+      const x = p.x + Math.cos(ang) * d;
+      const y = p.y + Math.sin(ang) * d;
+      if (this.g.seenFrom(x, y)) continue; // never on the screen: it walks in from outside
+      const tx = Math.floor(x / 16);
+      const ty = Math.floor(y / 16);
+      if (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4)) continue;
+      this.wilds.push(this.makeWild(pickOf(ESC_ZOMBIES), x, y, level));
+      return true;
+    }
+    return false;
   }
 
   // returns false once the creature should be removed
@@ -2690,7 +2786,7 @@ export class Combat {
       w.t = 0;
       if (w.den) this.denLost(w, true);
       if (quiet) return;
-      if (!this.g.wave && !this.g.dungeon) {
+      if (!this.g.wave && !this.g.dungeon && !this.g.escape) {
         const big = w.nightBoss || w.miniBoss || def.boss;
         if (big || Math.random() < 0.025) {
           const wid = this.g.pickWeapon(w.nightBoss || def.boss ? 3 : w.miniBoss ? 2 : 0);
@@ -2711,7 +2807,7 @@ export class Combat {
         this.shareCoins(w.x, w.y, 24 + Math.floor(Math.random() * 14), 5);
         for (const [id, qty] of [['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
       }
-      for (const [id, chance, min, max] of w.minionOf ? [] : def.crab ? CRAB_LOOT : WILD_LOOT) {
+      for (const [id, chance, min, max] of w.minionOf ? [] : this.g.escape ? ESC_KILL_LOOT : def.crab ? CRAB_LOOT : WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1)) + (id === 'coin' ? Math.floor((w.lv || 1) / 3) : 0); // (higher levels pay more)
           if (id === 'coin' && this.g.mp) this.shareCoins(w.x, w.y, qty, 1);
@@ -3510,6 +3606,13 @@ export class Combat {
       sfx.play('coin');
       return false;
     }
+    if (d.id === 'ammo' && dist < 10) {
+      this.g.giveBullets(d.qty);
+      if (d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net });
+      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🔫`, color: '#d9b25a', t: 0 });
+      sfx.play('pickup');
+      return false;
+    }
     if (d.id === 'wood' && dist < 10) {
       this.g.giveWood(d.qty);
       this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪵`, color: '#b98650', t: 0 });
@@ -3518,6 +3621,7 @@ export class Combat {
     }
     if (dist < 10) {
       const left = this.g.stow(d.id, d.qty);
+      if (left < d.qty && this.g.escape && ITEMS[d.id]?.gun) this.owned[ITEMS[d.id].gun] = true; // (a gun you pick up is yours to fire)
       if (left < d.qty) this.g.lootCard(d.id, d.qty - left);
       if (left === 0 && d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
       if (left < d.qty) {

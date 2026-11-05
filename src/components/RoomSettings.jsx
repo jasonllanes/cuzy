@@ -43,6 +43,8 @@ function Section({ icon, title, note, open = true, children }) {
 export default function RoomSettings({ room, count, editable, onChange, players = [] }) {
   const free = room.mode === 'free';
   const locked = !editable || room.started; // the mode, the map, the Colosseum round and the startup money are fixed once the round starts
+  const escape = !!room.escape; // the Escape zone: loot, zombies and a chopper
+  const soccer = !!room.soccer; // a Beach Ball match (goals) on the beach pitch
   const duel = !!room.duel; // a whole round in the Colosseum
   const every = Number(room.duelEvery) || 0; // a duel every so many minutes of a running round
   const duels = duel ? 'round' : every > 0 ? 'timed' : 'off';
@@ -73,14 +75,16 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         )}
         <div className="set-row">
           <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Everyone in the room gets the new world.'}</small></div>
-          <select value={duel ? 'colosseum' : mapIdOf(room.seed, room.mode)} disabled={locked || duel} onChange={(e) => onChange({ map: e.target.value })}>
+          <select value={duel ? 'colosseum' : soccer ? 'pitch' : escape ? 'escape' : mapIdOf(room.seed, room.mode)} disabled={locked || duel || soccer || escape} onChange={(e) => onChange({ map: e.target.value })}>
             {duel && <option value="colosseum">🏛️ Colosseum</option>}
+            {soccer && <option value="pitch">🏖️ Beach Pitch</option>}
+            {escape && <option value="escape">🚁 Escape Zone</option>}
             {(free ? FREE_MAPS : SURVIVAL_MAPS).map((m) => <option key={m.id} value={m.id}>{m.icon} {m.name}</option>)}
           </select>
         </div>
         <div className="set-row">
           <div className="set-label"><b>Max players</b><small>{count} in the room now</small></div>
-          <select value={room.max} disabled={!editable || duel} onChange={(e) => onChange({ max: Number(e.target.value) })}>
+          <select value={room.max} disabled={!editable} onChange={(e) => onChange({ max: Number(e.target.value) })}>
             {[2, 3, 4, 5, 6, 7, 8, 9, 10].filter((n) => n >= count).map((n) => <option key={n} value={n}>{n} players</option>)}
           </select>
         </div>
@@ -131,6 +135,54 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       </Section>
 
       {free && (
+        <Section icon="🚁" title="Escape" note={escape ? `chopper in ${room.escapeMins || 10} min · waits ${room.extractMins || 5}` : 'off'} open={escape}>
+          <Switch label="Escape (open world survival)" hint={escape ? 'A co-op round in a big open world: loot the houses, shops, clinics, police stations and cars for guns, grenades, bullets and medicine (there is no shop), fight the zombies that keep coming, and find the compass. When the timer ends a chopper lands somewhere far away: reach it to escape!' : 'Loot buildings, survive zombie hordes, and escape on a chopper that lands far away. No shop: everything is found.'} on={escape} disabled={locked} onChange={(v) => onChange({ escape: v })} />
+          {escape && (
+            <>
+              <div className="set-row">
+                <div className="set-label"><b>Chopper arrives in</b><small>How long you have to loot and survive before it lands (somewhere far).</small></div>
+                <select value={room.escapeMins || 10} disabled={locked} onChange={(e) => onChange({ escapeMins: Number(e.target.value) })}>
+                  {[3, 5, 8, 10, 15, 20, 30].map((n) => <option key={n} value={n}>{n} min</option>)}
+                </select>
+              </div>
+              <div className="set-row">
+                <div className="set-label"><b>Chopper waits</b><small>How long it stays once it has landed. It takes off early when everyone is on board.</small></div>
+                <select value={room.extractMins || 5} disabled={locked} onChange={(e) => onChange({ extractMins: Number(e.target.value) })}>
+                  {[2, 3, 4, 5, 8, 10, 15].map((n) => <option key={n} value={n}>{n} min</option>)}
+                </select>
+              </div>
+            </>
+          )}
+        </Section>
+      )}
+
+      {free && (
+        <Section icon="🏖️" title="Beach Ball" note={soccer ? `first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : 'off'} open={soccer}>
+          <Switch label="Beach Ball match" hint={soccer ? 'Two teams, one beach ball and a goal at each end: kick it by walking into it (run or dash for a hard kick) and roll it into the other team’s goal. With only two players it is a 1v1.' : 'A cozy ball game on a beach pitch: two teams, one ball, a goal at each end. No fighting, no monsters.'} on={soccer} disabled={locked} onChange={(v) => onChange({ soccer: v })} />
+          {soccer && (
+            <>
+              <div className="set-row">
+                <div className="set-label"><b>Goals to win</b><small>The first team to score this many wins the match.</small></div>
+                <select value={room.target || 5} disabled={locked} onChange={(e) => onChange({ target: Number(e.target.value) })}>
+                  {[1, 3, 5, 7, 10, 15, 20].map((n) => <option key={n} value={n}>{n} goal{n > 1 ? 's' : ''}</option>)}
+                </select>
+              </div>
+              <div className="set-row">
+                <div className="set-label"><b>Match time</b><small>{room.matchMins ? 'When the whistle blows the team with more goals wins. If it is level, the next goal wins.' : 'No clock: play to the goal target.'}</small></div>
+                <select value={room.matchMins ?? 5} disabled={locked} onChange={(e) => onChange({ matchMins: Number(e.target.value) })}>
+                  {[0, 2, 3, 5, 10, 15].map((n) => <option key={n} value={n}>{n ? `${n} min` : 'No clock'}</option>)}
+                </select>
+              </div>
+              <div className="set-row">
+                <div className="set-label"><b>Shuffle teams</b><small>Deals everyone out to the red and blue teams at random. Players can also pick a side in the waiting room.</small></div>
+                <button type="button" className="btn go small-btn" disabled={locked} onClick={() => onChange({ shuffleTeams: true })}>🎲 Shuffle</button>
+              </div>
+            </>
+          )}
+        </Section>
+      )}
+
+      {free && !soccer && !escape && (
         <Section icon="⚔️" title="Fighting" note={fightNote}>
           <div className="set-row">
             <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score and one camp. Tap a free slot under a team to join it, or use Shuffle.' : 'Free for all: everyone for themselves'}</small></div>
@@ -165,7 +217,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         </Section>
       )}
 
-      {free && (
+      {free && !soccer && !escape && (
         <Section icon="🏛️" title="Duels" note={duelNote} open={duels !== 'off'}>
           <div className="set-row wide">
             <div className="set-label">

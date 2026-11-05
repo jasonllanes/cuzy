@@ -195,6 +195,12 @@ function drawDecor(ctx, chunk, img) {
       ctx.drawImage(image, Math.round(d.x - ox - image.width / 2), Math.round(d.y - oy - image.height));
       continue;
     }
+    if (d.kind === 'rect') {
+      // a line or a mark on the ground (the white lines of the beach pitch)
+      ctx.fillStyle = d.color;
+      ctx.fillRect(d.x - ox, d.y - oy, d.w, d.h);
+      continue;
+    }
     if (d.kind === 'den') {
       // a monster den: a patch of trampled, dark earth with bones and stones, so you can tell something lives here
       ctx.fillStyle = 'rgba(58,40,32,0.6)';

@@ -10,7 +10,7 @@
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
 import { TEAMS, TEAM_COUNTS } from './teams.js';
-import { ARENA_SEED, seedForMode, seedWithMap } from './maps.js';
+import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, seedForMode, seedWithMap } from './maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -31,11 +31,13 @@ const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 
 const cleanBet = (v) => (Number(v) > 0 ? 1 : 0); // betting on the duels: on or off (the players decide how much)
 const BET_WINDOW = 15; // seconds to place a bet before a duel starts
 const cleanEvery = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(60, Math.max(1, Math.round(Number(v)))) : 0); // minutes between the duels of a running round (0 = none)
+const cleanEsc = (v, lo, hi, def) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.round(Number(v)))) : def);
+const cleanMatch = (v) => (Number.isFinite(Number(v)) ? Math.min(15, Math.max(0, Math.round(Number(v)))) : 5); // minutes of a Beach Ball match (0: first to the goal target, no clock)
 const cleanMins = (v) => (Number.isFinite(Number(v)) ? Math.min(10, Math.max(1, Math.round(Number(v)))) : 3);
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'matchMins', 'escape', 'escapeMins', 'extractMins'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -103,7 +105,11 @@ export class SupaNet {
     this.identity = { name: 'Friend', hero: 'adam' };
     this.lobbyCh = null;
     this.lobbyReady = false;
-    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0, duel: 0, duelEvent: 0, duelPrep: 0 };
+    this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0, duel: 0, duelEvent: 0, duelPrep: 0, match: 0, escape: 0 };
+    this.esc = null; // the Escape round: { phase: 'wait' | 'extract', left, out: Set of the ones who boarded the chopper }
+    this.goals = [0, 0]; // goals of the Beach Ball match (left team, right team)
+    this.sudden = false; // time is up and it is level: the next goal wins
+    this.matchLeft = null;
     this.record = new Map(); // duel wins and losses for the whole stay in this room: player id -> { w, l }
     this.bets = new Map(); // the bets of the ones who are not fighting: player id -> { on: the side they back, amt }
     this.duelPrep = null; // the few seconds before a duel when bets can be placed: { left }
@@ -147,6 +153,12 @@ export class SupaNet {
     this.duelNext = null;
     this.bets = new Map();
     this.record = new Map();
+    if (this.timers) clearInterval(this.timers.match);
+    if (this.timers) clearInterval(this.timers.escape);
+    this.esc = null;
+    this.goals = [0, 0];
+    this.sudden = false;
+    this.matchLeft = null;
     this.resetDuel?.();
     this.resetMatches?.();
     this.channel = null;
@@ -324,7 +336,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, matchMins, escape, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -354,6 +366,11 @@ export class SupaNet {
       duel: false, // a Free Roam 1v1 in the colosseum, against the clock (kept in the channel)
       bet: cleanBet(bet), // the players who are not in a duel may bet on who wins it (1 = on)
       duelMins: cleanMins(duelMins),
+      escape: false, // the Escape zone: loot, zombies and a chopper to find (kept in the channel)
+      escapeMins: cleanEsc(escapeMins, 3, 30, 10), // minutes until the chopper lands
+      extractMins: cleanEsc(extractMins, 2, 15, 5), // minutes the chopper waits
+      soccer: false, // a Beach Ball match (goals, two teams) on a beach pitch (kept in the channel)
+      matchMins: cleanMatch(matchMins),
       duelEvery: free ? cleanEvery(duelEvery) : 0, // a duel in the Colosseum every this many minutes of a running Free Roam round (0 = none)
       duelPick: 'pick', // who duels next (a 1v1 with spectators): pick (the host) | random | streak (the winner stays, the loser sits out) | robin (everybody in turn)
     };
@@ -650,6 +667,8 @@ export class SupaNet {
       count: this.members.size,
       started: this.started,
       host: this.members.get(this.hostId)?.name || '?',
+      ...(this.cfg.escape && this.started && this.esc ? { escPhase: this.esc.phase, escLeft: this.esc.left, escOut: [...this.esc.out] } : {}),
+      ...(this.cfg.soccer && this.started ? { soccerGoals: [...this.goals], soccerLeft: this.matchLeft, soccerSudden: this.sudden } : {}),
       ...(this.cfg.mode === 'free' && ((this.cfg.duel && this.started) || this.duelLive) ? { duelFighters: [...this.fighters], duelFallen: [...this.fallen], duelUnits: Object.fromEntries(this.fighterUnit), duelLive: this.duelLive } : {}),
     };
   }
@@ -799,6 +818,7 @@ export class SupaNet {
           if (this.cfg.duelEvery > 0 && !this.cfg.duel) this.duelNext = 30;
         } else if (this.duelRunning() && this.fighters.has(m.id)) this.duelFall(m.id, null, 'forfeit'); // a fighter walked out: they are out
         this.checkIntro(); // the one who left might have been the last we were waiting for
+        this.checkEscapeDone();
         if (this.cfg.duel && !this.started) {
           this.fixPair();
           this.out({ t: 'settings', room: this.summary() });
@@ -831,6 +851,7 @@ export class SupaNet {
     } else if (this.started) {
       this.out({ t: 'go' }); // do not leave anyone stuck waiting on a scene that the old host was tracking
       this.startDuelEventTimer();
+      if (this.cfg.escape && this.esc) this.timers.escape = setInterval(() => this.escTick(), 1000); // (the Escape clock carries on from where it was)
     }
   }
 
@@ -953,6 +974,12 @@ export class SupaNet {
         break;
       case 'died':
         this.request('died', { killer: String(m.killer ?? '') });
+        break;
+      case 'escaped':
+        this.request('escaped', {});
+        break;
+      case 'goal':
+        this.request('goal', { team: Number(m.team) === 1 ? 1 : 0 });
         break;
       case 'bet':
         this.request('bet', { on: String(m.on ?? ''), amt: Math.max(0, Math.min(9999999, Math.round(Number(m.amt)) || 0)) });
@@ -1079,6 +1106,16 @@ export class SupaNet {
       case 'duelfall':
         this.fallen.add(String(msg.id));
         break;
+      case 'escape':
+        this.esc = { phase: msg.phase, left: msg.left, out: new Set((msg.out || []).map(String)) };
+        break;
+      case 'goalscore':
+        this.goals = [Number(msg.goals?.[0]) || 0, Number(msg.goals?.[1]) || 0];
+        this.sudden = !!msg.sudden;
+        break;
+      case 'match':
+        this.matchLeft = Number.isFinite(msg.left) ? msg.left : null;
+        break;
       case 'duelcall':
         this.duelPrep = { left: msg.window || 0 };
         this.fighters = new Set((msg.fighters || []).map(String));
@@ -1181,6 +1218,10 @@ export class SupaNet {
         return this.hDied(from, m);
       case 'mkill':
         return this.hMkill(from);
+      case 'escaped':
+        return this.hEscaped(from);
+      case 'goal':
+        return this.hGoal(from, m);
       case 'bet':
         return this.hBet(from, m);
       case 'team':
@@ -1284,6 +1325,8 @@ export class SupaNet {
     clearTimeout(this.timers.intro);
     this.out({ t: 'go' });
     if (this.cfg.duel) this.openBets('round');
+    if (this.cfg.soccer) this.startMatch();
+    if (this.cfg.escape) this.startEscape();
     this.startDuelEventTimer();
     // say it again a few times, in case it got lost on the way (extra ones are harmless)
     for (const ms of [800, 2000, 4000]) {
@@ -1301,6 +1344,15 @@ export class SupaNet {
   hStart(from) {
     if (this.started || from !== this.hostId) return;
     if (this.cfg.duel && !this.pickFighters()) return; // a duel needs two sides
+    if (this.cfg.soccer) {
+      // a Beach Ball match needs someone on each team
+      for (const id of this.members.keys()) if (this.teamMap[id] === undefined) this.assignTeam(id);
+      const on = (t) => this.humans().some((h) => this.teamMap[h.id] === t);
+      if (!on(0) || !on(1)) return;
+    }
+    this.goals = [0, 0];
+    this.sudden = false;
+    this.matchLeft = null;
     this.started = true;
     this.winning = false;
     this.paused = false;
@@ -1344,6 +1396,8 @@ export class SupaNet {
       // Free Roam <-> Survival: the map, the start of the day and the fighting rules follow the mode
       if (['free', 'survival'].includes(m.mode) && m.mode !== cfg.mode) {
         if (cfg.duel) this.setDuel(false);
+        if (cfg.soccer) this.setSoccer(false);
+        if (cfg.escape) this.setEscape(false);
         cfg.mode = m.mode;
         cfg.seed = seedForMode(cfg.seed, m.mode);
         this.startHour = m.mode === 'survival' ? 17.3 : START_HOUR;
@@ -1357,7 +1411,30 @@ export class SupaNet {
         }
         this.reassignAll();
       }
-      if (cfg.mode === 'free' && typeof m.duel === 'boolean' && m.duel !== !!cfg.duel) this.setDuel(m.duel);
+      if (cfg.mode === 'free' && typeof m.escape === 'boolean' && m.escape !== !!cfg.escape) {
+        if (m.escape && cfg.duel) this.setDuel(false);
+        if (m.escape && cfg.soccer) this.setSoccer(false);
+        this.setEscape(m.escape);
+      }
+      if (cfg.escape) {
+        if (m.escapeMins !== undefined) cfg.escapeMins = cleanEsc(m.escapeMins, 3, 30, 10);
+        if (m.extractMins !== undefined) cfg.extractMins = cleanEsc(m.extractMins, 2, 15, 5);
+      }
+      if (cfg.mode === 'free' && typeof m.duel === 'boolean' && m.duel !== !!cfg.duel) {
+        if (m.duel && cfg.escape) this.setEscape(false);
+        if (m.duel && cfg.soccer) this.setSoccer(false);
+        this.setDuel(m.duel);
+      }
+      if (cfg.mode === 'free' && typeof m.soccer === 'boolean' && m.soccer !== !!cfg.soccer) {
+        if (m.soccer && cfg.duel) this.setDuel(false);
+        if (m.soccer && cfg.escape) this.setEscape(false);
+        this.setSoccer(m.soccer);
+      }
+      if (cfg.soccer) {
+        if (m.target !== undefined) cfg.target = Math.min(20, Math.max(1, Math.round(Number(m.target)) || 5));
+        if (m.matchMins !== undefined) cfg.matchMins = cleanMatch(m.matchMins);
+        if (m.shuffleTeams === true) this.shuffleTeams();
+      }
       if (cfg.duel) {
         if (m.shuffleTeams === true) this.shuffleTeams();
         if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
@@ -1384,7 +1461,7 @@ export class SupaNet {
       }
     }
     // the fighting rules can change in the middle of a round too: every game picks them up from the settings message
-    if (cfg.mode === 'free' && !cfg.duel) {
+    if (cfg.mode === 'free' && !cfg.duel && !cfg.soccer && !cfg.escape) {
       const wasWinBy = cfg.winBy;
       if (m.shuffleTeams === true) this.shuffleTeams();
       if (TEAM_COUNTS.includes(Number(m.teams)) && m.teams !== undefined && Number(m.teams) !== cfg.teams) {
@@ -1418,6 +1495,127 @@ export class SupaNet {
       const p = this.preDuel || {};
       Object.assign(cfg, { duel: false, seed: p.seed && p.seed !== ARENA_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel') });
     }
+  }
+
+  // The Escape zone: a co-op round of looting buildings and fighting zombies, until a chopper lands far away
+  setEscape(on) {
+    const cfg = this.cfg;
+    if (on) {
+      this.preEscape = { seed: cfg.seed, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams, duelEvery: cfg.duelEvery, startMoney: cfg.startMoney, startWood: cfg.startWood };
+      Object.assign(cfg, { escape: true, seed: ESCAPE_SEED, pvp: false, teams: 0, duelEvery: 0, startMoney: 0, startWood: 0 });
+      this.startHour = 16.5;
+      this.reassignAll();
+    } else {
+      const p = this.preEscape || {};
+      Object.assign(cfg, { escape: false, seed: p.seed && p.seed !== ESCAPE_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel'), teams: p.teams || 0, duelEvery: p.duelEvery || 0, startMoney: p.startMoney || 0, startWood: p.startWood || 0 });
+      this.startHour = START_HOUR;
+      this.reassignAll();
+    }
+  }
+
+  startEscape() {
+    clearInterval(this.timers.escape);
+    this.esc = { phase: 'wait', left: Math.max(3, Number(this.cfg.escapeMins) || 10) * 60, out: new Set() };
+    this.sendEsc();
+    this.timers.escape = setInterval(() => this.escTick(), 1000);
+  }
+
+  sendEsc() {
+    if (this.esc) this.out({ t: 'escape', phase: this.esc.phase, left: this.esc.left, out: [...this.esc.out] });
+  }
+
+  escTick() {
+    if (!this.channel || !this.started || this.winning || !this.isHost || !this.esc) return clearInterval(this.timers.escape);
+    if (this.paused) return;
+    const e = this.esc;
+    e.left -= 1;
+    if (e.left <= 0) {
+      if (e.phase === 'wait') {
+        e.phase = 'extract'; // the chopper has landed
+        e.left = Math.max(2, Number(this.cfg.extractMins) || 5) * 60;
+        this.sendEsc();
+      } else this.finishEscape();
+      return;
+    }
+    if (e.left % 3 === 0 || e.left <= 10) this.sendEsc();
+  }
+
+  // a player reached the chopper
+  hEscaped(from) {
+    const e = this.esc;
+    if (!e || e.phase !== 'extract' || this.winning || !this.members.has(from) || this.members.get(from)?.ai) return;
+    e.out.add(from);
+    this.sendEsc();
+    this.checkEscapeDone();
+  }
+
+  // everyone who is still in the room is on board: it takes off at once
+  checkEscapeDone() {
+    const e = this.esc;
+    if (!e || e.phase !== 'extract' || this.winning) return;
+    const here = this.humans();
+    if (here.length && here.every((h) => e.out.has(h.id))) this.finishEscape();
+  }
+
+  finishEscape() {
+    clearInterval(this.timers.escape);
+    if (this.winning) return;
+    this.winning = true;
+    const escaped = this.esc ? [...this.esc.out].filter((id) => this.members.has(id)) : [];
+    this.out({ t: 'win', escape: true, id: escaped[0] ?? null, name: this.members.get(escaped[0])?.name || '', escaped, total: this.humans().length, target: 0 });
+    clearTimeout(this.timers.back);
+    this.timers.back = setTimeout(() => this.returnToLobby(), CELEBRATE_MS + 2000);
+  }
+
+  // The Beach Ball match: two teams, a ball and two goals, on a beach pitch.
+  setSoccer(on) {
+    const cfg = this.cfg;
+    if (on) {
+      this.preSoccer = { seed: cfg.seed, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams, duelEvery: cfg.duelEvery };
+      Object.assign(cfg, { soccer: true, seed: PITCH_SEED, pvp: false, teams: 2, target: 5, duelEvery: 0 });
+      this.reassignAll();
+    } else {
+      const p = this.preSoccer || {};
+      Object.assign(cfg, { soccer: false, seed: p.seed && p.seed !== PITCH_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel'), teams: p.teams || 0, duelEvery: p.duelEvery || 0 });
+      this.reassignAll();
+    }
+  }
+
+  // the host's game saw the ball in a goal: it counts, and when a team has the target (or scores in sudden death) the match is won
+  hGoal(from, m) {
+    if (from !== this.hostId || !this.cfg.soccer || !this.started || this.winning) return;
+    const team = Number(m.team) === 1 ? 1 : 0;
+    this.goals[team]++;
+    this.out({ t: 'goalscore', goals: [...this.goals], team, sudden: this.sudden });
+    if (this.goals[team] >= (this.cfg.target || 5) || this.sudden) this.finishSoccer(team);
+  }
+
+  startMatch() {
+    clearInterval(this.timers.match);
+    const mins = Number(this.cfg.matchMins) || 0;
+    if (!mins) return;
+    let left = mins * 60;
+    let n = 0;
+    this.matchLeft = left;
+    this.out({ t: 'match', left });
+    this.timers.match = setInterval(() => {
+      if (!this.channel || !this.started || this.winning || !this.isHost) return clearInterval(this.timers.match);
+      if (!this.paused) left -= 1;
+      this.matchLeft = Math.max(0, left);
+      if (n++ % 2 === 0 || left <= 10) this.out({ t: 'match', left: this.matchLeft });
+      if (left > 0) return;
+      clearInterval(this.timers.match);
+      if (this.goals[0] === this.goals[1]) {
+        this.sudden = true; // level at the whistle: the next goal wins
+        this.out({ t: 'goalscore', goals: [...this.goals], team: -1, sudden: true });
+      } else this.finishSoccer(this.goals[0] > this.goals[1] ? 0 : 1);
+    }, 1000);
+  }
+
+  finishSoccer(team) {
+    clearInterval(this.timers.match);
+    const who = this.humans().find((h) => this.teamMap[h.id] === team) || this.humans()[0];
+    if (who) this.finishRound(who.id);
   }
 
   // the duel is against the clock: when it runs out, whoever has the lowest health loses (the same health is a draw)
@@ -1748,6 +1946,12 @@ export class SupaNet {
     this.introOpen = false;
     clearInterval(this.timers.duel);
     clearInterval(this.timers.duelEvent);
+    clearInterval(this.timers.match);
+    clearInterval(this.timers.escape);
+    this.esc = null;
+    this.goals = [0, 0];
+    this.sudden = false;
+    this.matchLeft = null;
     clearTimeout(this.timers.duelPrep);
     this.duelPrep = null;
     this.bets = new Map();

@@ -75,6 +75,9 @@ const KINDS_HW = [
   { id: 'grove', weight: 16, min: [22, 18], pick: (r) => pickFrom(list('graveyard', /^Big_Tree_(Pumpkins_)?$/), r) },
 ];
 const TOTAL = KINDS.reduce((n, k) => n + k.weight, 0);
+// the Escape zone is full of places to loot: the buildings come up three times as often
+const KINDS_ESC = KINDS.map((k) => (k.enter ? { ...k, weight: k.weight * 3 } : k));
+const TOTAL_ESC = KINDS_ESC.reduce((n, k) => n + k.weight, 0);
 const TOTAL_HW = KINDS_HW.reduce((n, k) => n + k.weight, 0);
 const CELL = 30; // a place is rolled per 30x30 tiles
 
@@ -98,9 +101,9 @@ function place(world, ci, cj) {
   const seed = world.seed;
   const r = (k) => hash2(ci * 31 + k, cj * 17 + k * 3, seed + 9200 + k * 7);
   let out = null;
-  if (r(0) < (world.hw ? 0.85 : world.sv2 ? 0.5 : 0.8)) {
-    const kinds = world.hw ? KINDS_HW : KINDS;
-    let pick = r(2) * (world.hw ? TOTAL_HW : TOTAL);
+  if (r(0) < (world.hw ? 0.85 : world.sv2 ? 0.5 : world.escape ? 0.95 : 0.8)) {
+    const kinds = world.hw ? KINDS_HW : world.escape ? KINDS_ESC : KINDS;
+    let pick = r(2) * (world.hw ? TOTAL_HW : world.escape ? TOTAL_ESC : TOTAL);
     const kind = kinds.find((k) => (pick -= k.weight) <= 0) || kinds[0];
     const s = kind.pick(r);
     if (s) {
@@ -112,7 +115,7 @@ function place(world, ci, cj) {
       const W = Math.min(CELL - 2, cluster ? 10 : sw + 2);
       const H = Math.min(CELL - 2, cluster ? 10 : sh + 3);
       const BW = Math.min(CELL - 2, Math.max(sw + 6, kind.min?.[0] || 0)); // (the room the place takes, for the sprites around it)
-      for (let k = 0; k < 28 && !out; k++) {
+      for (let k = 0; k < (world.escape ? 44 : 28) && !out; k++) {
         const ox = ci * CELL + 1 + Math.floor(r(30 + k * 2) * (CELL - BW - 1)) + Math.floor((BW - W) / 2);
         const oy = cj * CELL + 1 + Math.floor(r(31 + k * 2) * (CELL - (H + 4) - 1));
         if (spotOk(world, ox, oy, W, H, kind)) out = { kind, s, ox: ox - Math.floor((BW - W) / 2), oy, W: BW, H, ci, cj, r };
@@ -128,7 +131,9 @@ function spotOk(world, ox, oy, W, H) {
   if (Math.hypot(ox + W / 2, oy + H / 2) < 18 + Math.max(W, H) / 2) return false;
   for (let y = oy; y < oy + H; y += 2) {
     for (let x = ox; x < ox + W; x += 2) {
-      if (world.type(x, y) !== 2 || world.elevation(x, y) < 0.46 || world.isCleared(x, y)) return false;
+      const road = world.escape && world.groundSet; // (on a road map, roads are ground too)
+      if (road ? world.type(x, y) === 0 : world.type(x, y) !== 2 || world.elevation(x, y) < 0.46) return false;
+      if (world.isCleared(x, y)) return false;
       if (world.treeAt(x >> 1, y >> 1)) return false;
     }
   }
@@ -363,7 +368,7 @@ export function addV2Chunk(world, chunk, cx, cy) {
         const id = `v2:${ci},${cj}:${n}`;
         if (world.v2removed?.has(id)) continue;
         // the little things around a place are skipped where a tree or the water is
-        if (n > 1 && (world.treeAt(x >> 5, y >> 5) || world.type(x >> 4, y >> 4) !== 2 || world.isCleared(x >> 4, y >> 4))) continue;
+        if (n > 1 && (world.treeAt(x >> 5, y >> 5) || (world.escape && world.groundSet ? world.type(x >> 4, y >> 4) === 0 : world.type(x >> 4, y >> 4) !== 2) || world.isCleared(x >> 4, y >> 4))) continue;
         addProp(world, chunk, s, x, y, id, world.sv2 ? null : extra); // (in Survival the buildings are ruins: nothing to open or enter)
       }
     }
@@ -457,6 +462,12 @@ export function addProp(world, chunk, s, x, y, id, extra) {
     chunk.objects.push({ kind: 'tree', vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, x, y });
     // the way in: stand at the door and press Space
     chunk.objects.push({ kind: 'bdoor', inter: 'building', id: `bd${id}`, vid: id, label: `Space · go inside (${extra.name})`, b: { id, type: extra.enter, name: extra.name, x, y }, x, y: y - 1 });
+    if (rect) chunk.rects.push({ vid: id, ...rect });
+    return;
+  }
+  if (world.escape && /^(Car|Ambulance|Van|Truck|Taxi|Police_Car|Jeep|Bus)/i.test(s.name)) {
+    // in the Escape zone you can search the cars (an ambulance has medicine in it)
+    chunk.objects.push({ kind: 'chest', inter: 'chest', id: `v2c${id}`, vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, lootKind: /^Ambulance/i.test(s.name) ? 'ambulance' : 'car', label: 'F · search the vehicle', x, y });
     if (rect) chunk.rects.push({ vid: id, ...rect });
     return;
   }

@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { isArenaSeed, isEndlessSeed, mapInfo, splitSeed, stripArena, stripEndless } from './maps';
+import { isArenaSeed, isEndlessSeed, isEscapeSeed, isPitchSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -16,6 +16,13 @@ export const GRASS = 2;
 
 // The Duel colosseum: sand tiles -ARENA_HALF .. ARENA_HALF-1 each way, a two-tile wall all round it, and things to hide behind
 export const ARENA_HALF = 15;
+// The Beach Ball pitch (tiles, around 0,0): the field is PITCH_W each way across and PITCH_H up and down; each end has a goal mouth GOAL_H
+// tiles either side of the middle, and a pocket GOAL_D tiles deep behind it. A ball that rolls into a pocket is a goal.
+export const PITCH_W = 22;
+export const PITCH_H = 12;
+export const GOAL_H = 3;
+export const GOAL_D = 3;
+const PITCH_BEACH = 9; // tiles of beach round the walls (then the sea)
 export const ARENA_ZONE = 9000; // in every Free Roam world the Colosseum also stands far off at this tile, for the duels that happen in the middle of a round
 const ARENA_BOX = 26; // the area around it that belongs to it
 const ARENA_PILLARS = [[-9, -8], [7, -8], [-9, 6], [7, 6], [-1, -1]]; // (2x2 tiles each, by their top-left tile)
@@ -62,13 +69,15 @@ export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
     this.endless = theme === 'apoc' && isEndlessSeed(seedStr); // Survival without waves
-    this.arena = theme !== 'apoc' && !waves && isArenaSeed(seedStr); // the Duel colosseum (a whole world of it)
+    this.pitch = theme !== 'apoc' && !waves && isPitchSeed(seedStr); // the Beach Ball pitch (a whole world of it)
+    this.arena = theme !== 'apoc' && !waves && (isArenaSeed(seedStr) || this.pitch); // the Duel colosseum (a whole world of it); the pitch is built the same way
     this.hasArena = theme !== 'apoc' && !waves; // (Free Roam worlds have the Colosseum far off too, where the duels of a running round are fought)
     this.ac = this.arena ? { x: 0, y: 0 } : { x: ARENA_ZONE, y: ARENA_ZONE }; // its middle, in tiles
-    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(seedStr))));
+    this.escape = theme !== 'apoc' && !waves && isEscapeSeed(seedStr); // the Escape zone: loot, zombies and a chopper
+    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripEscape(seedStr))))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
-    this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw); // Free Roam V2: the same world with the Modern Exteriors props on top
+    this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape); // Free Roam V2: the same world with the Modern Exteriors props on top
     this.seed = hashString(this.seedStr);
     // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
     // start of the seed, and a Survival map names it
@@ -199,7 +208,7 @@ export class World {
     const key = `${drx},${dry}`;
     if (this.dsites.has(key)) return this.dsites.get(key);
     let site = null;
-    if (!this.apoc && !this.waveMode && !this.arena && hash2(drx, dry, this.seed + 8800) < 0.55) {
+    if (!this.apoc && !this.waveMode && !this.arena && !this.escape && hash2(drx, dry, this.seed + 8800) < 0.55) {
       const kr = hash2(drx, dry, this.seed + 8801);
       const base = kr < 0.4 ? 'crypt' : kr < 0.75 ? 'cave' : 'ruin';
       const portal = hash2(drx, dry, this.seed + 8804) < 0.35; // now and then it is a portal instead
@@ -637,7 +646,7 @@ export class World {
     if (den) chunk.decor.push({ kind: 'den', x: den.x, y: den.y });
     if (!this.apoc && !this.waveMode) {
       this.addBushes(chunk, x0, y0);
-      this.addVault(chunk, cx, cy);
+      if (!this.escape) this.addVault(chunk, cx, cy);
     }
     this.addSeesaw(chunk, cx, cy); // (every map has them, Survival too)
 
@@ -710,8 +719,115 @@ export class World {
   }
 
   // what a tile is where the Colosseum stands (undefined: not part of it)
+  // the Beach Ball pitch: is this tile (lx, ly from the middle) walkable (the field and the two goal pockets)?
+  pitchWalk(lx, ly) {
+    if (lx >= -PITCH_W && lx < PITCH_W && ly >= -PITCH_H && ly < PITCH_H) return true;
+    return ly >= -GOAL_H && ly < GOAL_H && ((lx >= -PITCH_W - GOAL_D && lx < -PITCH_W) || (lx >= PITCH_W && lx < PITCH_W + GOAL_D));
+  }
+
+  // 0: the ball is in the left goal (the right team scores), 1: in the right goal (the left team scores), -1: not in a goal
+  goalSide(px, py) {
+    if (!this.pitch) return -1;
+    const lx = px / T;
+    const ly = py / T;
+    if (ly < -GOAL_H || ly >= GOAL_H) return -1;
+    if (lx < -PITCH_W && lx >= -PITCH_W - GOAL_D) return 0;
+    if (lx >= PITCH_W && lx < PITCH_W + GOAL_D) return 1;
+    return -1;
+  }
+
+  // where a player of `team` (0: left side, 1: right side) starts: spread out on their own half (k of n on the team)
+  pitchSpawn(team = 0, k = 0, n = 1) {
+    const side = team % 2 === 0 ? -1 : 1;
+    const row = (k - (n - 1) / 2) * Math.min(46, (PITCH_H * 2 * T - 40) / Math.max(1, n));
+    return { x: side * PITCH_W * T * 0.5 + 8, y: row + 12 };
+  }
+
+  // the little rectangles of the pitch markings (white lines on the sand), made once
+  pitchRects() {
+    if (this.prects) return this.prects;
+    const out = [];
+    const line = (x0, y0, x1, y1) => {
+      // (a straight line in pixels, as 16px pieces so each lands in its own chunk)
+      const n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / 2));
+      for (let i = 0; i <= n; i++) out.push({ x: Math.round(x0 + ((x1 - x0) * i) / n) - 1, y: Math.round(y0 + ((y1 - y0) * i) / n) - 1, w: 2, h: 2 });
+    };
+    const W = PITCH_W * T;
+    const H = PITCH_H * T;
+    const G = GOAL_H * T;
+    line(-W, -H, W, -H);
+    line(-W, H, W, H);
+    line(-W, -H, -W, -G);
+    line(-W, G, -W, H);
+    line(W, -H, W, -G);
+    line(W, G, W, H);
+    line(0, -H, 0, H); // the halfway line
+    // the centre circle, and the box in front of each goal
+    for (let a = 0; a < 180; a++) out.push({ x: Math.round(Math.cos((a / 180) * Math.PI * 2) * 56) - 1, y: Math.round(Math.sin((a / 180) * Math.PI * 2) * 56) - 1, w: 2, h: 2 });
+    for (const sd of [-1, 1]) {
+      line(sd * W, -G - 32, sd * (W - 80), -G - 32);
+      line(sd * (W - 80), -G - 32, sd * (W - 80), G + 32);
+      line(sd * (W - 80), G + 32, sd * W, G + 32);
+    }
+    this.prects = out;
+    return out;
+  }
+
+  // the beach pitch: a rope fence round the field and the goals, the goal nets, the white lines, and beach things on the sand round it
+  buildPitchChunk(cx, cy) {
+    const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
+    const inChunk = (tx, ty) => Math.floor(tx / CHUNK) === cx && Math.floor(ty / CHUNK) === cy;
+    const s = this.seed;
+    const bx0 = -PITCH_W - GOAL_D - 1;
+    const bx1 = PITCH_W + GOAL_D;
+    // the fence: every tile that is not walkable but touches the field or a goal
+    for (let ty = -PITCH_H - 1; ty <= PITCH_H; ty++) {
+      for (let tx = bx0; tx <= bx1; tx++) {
+        if (this.pitchWalk(tx, ty) || !inChunk(tx, ty)) continue;
+        let edge = false;
+        for (let j = -1; j <= 1 && !edge; j++) for (let i = -1; i <= 1; i++) if (this.pitchWalk(tx + i, ty + j)) edge = true;
+        if (!edge) continue;
+        chunk.rects.push({ x: tx * T, y: ty * T, w: T, h: T });
+        chunk.objects.push({ kind: 'pitchwall', x: tx * T + 8, y: ty * T + T, tx, ty, faces: this.pitchWalk(tx, ty + 1) });
+      }
+    }
+    // the goals: a net in each pocket, in the colour of the team that defends it (left: red, right: blue)
+    for (const side of [0, 1]) {
+      const gx = side === 0 ? -PITCH_W - GOAL_D : PITCH_W; // left edge of the pocket, in tiles
+      if (!inChunk(gx, -GOAL_H)) continue;
+      chunk.objects.push({ kind: 'goalnet', team: side, x: gx * T + (GOAL_D * T) / 2, y: GOAL_H * T, gx: gx * T, gy: -GOAL_H * T, w: GOAL_D * T, h: GOAL_H * 2 * T });
+    }
+    // the white lines
+    for (const r of this.pitchRects()) if (inChunk(Math.floor(r.x / T), Math.floor(r.y / T))) chunk.decor.push({ kind: 'rect', x: r.x, y: r.y, w: r.w, h: r.h, color: 'rgba(255,255,255,0.85)' });
+    // beach things on the sand round the fence (nobody can walk there): umbrellas, palms, towels, starfish, a castle with a flag
+    const things = [['umb_blue', 48, 64], ['umb_green', 48, 64], ['umb_lb', 48, 64], ['palm', 64, 80], ['towel_blue', 32, 32], ['towel_green', 32, 32], ['towel_purple', 32, 32], ['towel_multi', 32, 32], ['star_blue', 16, 16], ['star_green', 16, 16], ['star_purple', 16, 16], ['castle', 32, 32], ['bucket', 16, 32], ['shell_pink', 16, 16], ['shell_gold', 16, 16], ['float_red', 32, 32], ['float_orange', 32, 32], ['sign', 48, 48], ['speaker', 32, 32]];
+    for (let ty = cy * CHUNK; ty < (cy + 1) * CHUNK; ty += 2) {
+      for (let tx = cx * CHUNK; tx < (cx + 1) * CHUNK; tx += 2) {
+        if (this.type(tx, ty) !== SAND) continue;
+        const outX = Math.max(bx0 - tx, tx - bx1, 0);
+        const outY = Math.max(-PITCH_H - 1 - ty, ty - PITCH_H, 0);
+        if (outX === 0 && outY === 0) continue; // (inside the fence)
+        if (Math.max(outX, outY) < 2) continue; // (keep the fence itself clear)
+        if (hash2(tx, ty, s + 6900) > 0.16) continue;
+        const pick = things[Math.floor(hash2(tx, ty, s + 6901) * things.length)];
+        chunk.objects.push({ kind: 'tree', sheet: `beach/${pick[0]}`, sw: pick[1], sh: pick[2], sx: 0, sy: 0, x: tx * T + 8, y: ty * T + 16 });
+      }
+    }
+    // the goal flags: a red sand castle behind the left goal, a blue one behind the right
+    for (const [side, key] of [[-1, 'castle_red'], [1, 'castle_blue']]) {
+      const tx = side * (PITCH_W + GOAL_D + 3);
+      if (inChunk(tx, 0)) chunk.objects.push({ kind: 'tree', sheet: `beach/${key}`, sw: 32, sh: 32, sx: 0, sy: 0, x: tx * T, y: 2 * T });
+    }
+    return chunk;
+  }
+
   arenaTile(x, y) {
     if (!this.hasArena) return undefined;
+    if (this.pitch) {
+      const ex = Math.max(-PITCH_W - GOAL_D - 1 - PITCH_BEACH - x, x - (PITCH_W + GOAL_D + PITCH_BEACH), 0);
+      const ey = Math.max(-PITCH_H - 1 - PITCH_BEACH - y, y - (PITCH_H + PITCH_BEACH), 0);
+      return ex > 0 || ey > 0 ? WATER : SAND; // (the sea all round the beach)
+    }
     const lx = x - this.ac.x;
     const ly = y - this.ac.y;
     if (!this.arena && (lx < -ARENA_BOX || lx > ARENA_BOX || ly < -ARENA_BOX || ly > ARENA_BOX)) return undefined;
@@ -740,6 +856,7 @@ export class World {
   // where a player stands at the start of a duel
   // (`k` of `n` is the place among the others on the same side: a team stands in a short line)
   arenaSpawn(slot = 0, k = 0, n = 1) {
+    if (this.pitch) return this.pitchSpawn(slot, k, n);
     const i = Math.abs(slot | 0) % ARENA_STARTS.length;
     const [tx, ty] = ARENA_STARTS[i];
     const off = (k - (n - 1) / 2) * 20;
@@ -755,6 +872,7 @@ export class World {
 
   // the colosseum: wall tiles all round, pillars and crates inside (the same for everyone: no randomness)
   buildArenaChunk(cx, cy) {
+    if (this.pitch) return this.buildPitchChunk(cx, cy);
     const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
     const ox = this.ac.x;
     const oy = this.ac.y;
@@ -942,7 +1060,7 @@ export class World {
     const key = `${brx},${bry}`;
     if (this.bsites.has(key)) return this.bsites.get(key);
     let site = null;
-    if (!this.apoc && !this.waveMode && !this.depot && !this.arena && hash2(brx, bry, this.seed + 9100) < 0.62) {
+    if (!this.apoc && !this.waveMode && !this.depot && !this.arena && !this.escape && hash2(brx, bry, this.seed + 9100) < 0.62) {
       const kind = hash2(brx, bry, this.seed + 9101) < 0.34 ? 'boss' : 'mini';
       const r = kind === 'boss' ? 18 : 11;
       const far = kind === 'boss' ? 120 : 80; // tiles from the middle of the world, where the houses are
@@ -1016,6 +1134,30 @@ export class World {
       }
     }
     return false;
+  }
+
+  // Where the chopper lands in the Escape zone: far from where everyone starts (250 to 310 tiles), in the same open spot for everyone
+  chopperSpot() {
+    if (this._chop) return this._chop;
+    const s = this.seed;
+    const ang = hash2(1, 2, s + 7000) * Math.PI * 2;
+    const dist = 250 + hash2(3, 4, s + 7001) * 60;
+    const tx = Math.round(Math.cos(ang) * dist);
+    const ty = Math.round(Math.sin(ang) * dist);
+    let spot = { tx, ty };
+    outer: for (let r = 0; r < 40; r += 2) {
+      for (let k = 0; k < Math.max(1, r * 4); k++) {
+        const a = (k / Math.max(1, r * 4)) * Math.PI * 2;
+        const x = tx + Math.round(Math.cos(a) * r);
+        const y = ty + Math.round(Math.sin(a) * r);
+        if (this.isOpenMeadow(x, y) && !this.isCleared(x, y) && !this.isBlocked(x * T - 28, y * T - 24, 56, 40)) {
+          spot = { tx: x, ty: y };
+          break outer;
+        }
+      }
+    }
+    this._chop = { x: spot.tx * T + 8, y: spot.ty * T + 12, tx: spot.tx, ty: spot.ty };
+    return this._chop;
   }
 
   // A hidden chest, rarely: it cannot be seen (or opened) unless a pet pigeon is close. It holds a lot, and always a weapon.
@@ -1092,7 +1234,7 @@ export class World {
   // A skeleton camp, if this chunk has one: three of them stand guard on an open patch of meadow.
   // The same chunk always gives the same answer for a seed.
   campAt(cx, cy) {
-    if (this.arena) return null;
+    if (this.arena || this.escape) return null;
     if (hash2(cx, cy, this.seed + 71) > 0.2) return null;
     const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 72) * (CHUNK - 8));
     const ty = cy * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 73) * (CHUNK - 8));
