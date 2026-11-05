@@ -196,6 +196,9 @@ RARITY_OF.gun_laser = 'epic';
 RARITY_OF.gun_fireplasma = 'epic';
 RARITY_OF.gun_quantum = 'legendary';
 // swords, staffs and the rest: the dearer, the rarer
+// guns and pets cost more than swords: their own price bands
+export const gunRarity = (price) => (price <= 40 ? 'common' : price <= 90 ? 'uncommon' : price <= 140 ? 'rare' : price <= 200 ? 'epic' : 'legendary');
+export const petRarity = (cost) => (cost <= 30 ? 'common' : cost <= 100 ? 'uncommon' : cost <= 130 ? 'rare' : cost <= 170 ? 'epic' : 'legendary');
 export const rarityByCost = (cost) => (cost <= 14 ? 'common' : cost <= 28 ? 'uncommon' : cost <= 40 ? 'rare' : cost <= 52 ? 'epic' : 'legendary');
 
 // What a shop pays when you sell something back. Items without a price here can't be sold.

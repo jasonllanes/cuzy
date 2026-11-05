@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { PETS, PET_KINDS } from '../game/pets';
+import { RARITIES, petRarity } from '../game/items';
+import RarityTabs from './RarityTabs';
 
 // One colour of a pet, cut from the pet sheet (the side view, first frame)
 function Thumb({ kind, v, size = 2 }) {
@@ -20,8 +22,9 @@ export default function PetShop({ hud, game }) {
   return (
     <div>
       <p className="hint">A pet follows you and attacks whatever is hurting you, or whatever you are hitting. If it is worn out it falls asleep (💤) where it was and wakes up again later.</p>
+      <RarityTabs items={PET_KINDS} rarity={(k) => petRarity(PETS[k].cost)}>{(list) => (
       <div className="upg-list pet-list">
-        {PET_KINDS.map((kind) => {
+        {list.map((kind) => {
           const def = PETS[kind];
           const has = pets.owned[kind] !== undefined;
           const v = has ? pets.owned[kind] : pick[kind] ?? 0;
@@ -30,7 +33,7 @@ export default function PetShop({ hud, game }) {
             <div className={`upg-row pet-row ${active ? 'is-active' : ''}`} key={kind}>
               <div className="upg-icon"><Thumb kind={kind} v={v} size={3} /></div>
               <div className="upg-info">
-                <h3>{def.icon} {def.name} {active && <small>{pets.rest ? '💤 asleep' : 'with you'}</small>}</h3>
+                <h3>{def.icon} {def.name} <i className="rar-tag">{RARITIES[petRarity(def.cost)].name}</i> {active && <small>{pets.rest ? '💤 asleep' : 'with you'}</small>}</h3>
                 <p>{def.blurb}</p>
                 <div className="pet-swatches">
                   {def.blocks.map((b, i) => (
@@ -51,6 +54,7 @@ export default function PetShop({ hud, game }) {
           );
         })}
       </div>
+      )}</RarityTabs>
     </div>
   );
 }

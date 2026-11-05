@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { ALLIES, ALLY_KINDS, teamCap } from '../game/allies';
 import { GUNS, GUN_ORDER } from '../game/combat';
 import { AIR_SUPPORT, MAX_LEVEL, REPAIR_HEAL, REVIVE, UPGRADES, mendCost, repairKitCost, upgradeCost } from '../game/upgrades';
-import { ITEMS, RARITIES, rarityByCost, rarityOf, sellPrice } from '../game/items';
+import { ITEMS, RARITIES, gunRarity, rarityByCost, rarityOf, sellPrice } from '../game/items';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
 import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
 import { GRENADE_COSTS } from '../game/engine';
 import ItemIcon from './ItemIcon';
 import SellPanel from './SellPanel';
 import PetShop from './PetShop';
+import RarityTabs from './RarityTabs';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
 export default function UpgradePanel({ hud, game, onClose, inventory = [], survival = false }) {
@@ -155,7 +156,8 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
                   {hud.weapons.equipped === 'trusty' ? 'Equipped' : 'Equip'}
                 </button>
               </div>
-              {WEAPONS.filter((w) => w.id !== 'trusty').map((w) => {
+              <RarityTabs items={WEAPONS.filter((w) => w.id !== 'trusty')} rarity={weaponRarity}>{(list) => (<>
+              {list.map((w) => {
                 const have = !!hud.weapons.owned?.[w.id];
                 const on = hud.weapons.equipped === w.id;
                 return (
@@ -173,6 +175,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
                   </div>
                 );
               })}
+              </>)}</RarityTabs>
             </div>
           </div>
         )}
@@ -181,12 +184,13 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
           <div className="recruit-note">
             <b>🔫 Guns</b> (the pistol is free; switch with R or the slot beside the hotbar). Every gun you own can be upgraded: a bigger magazine and more firepower.
             <div className="recruit-list">
-              {GUN_ORDER.map((id) => {
+              <RarityTabs items={GUN_ORDER} rarity={(id) => gunRarity(GUNS[id].price)}>{(list) => (<>
+              {list.map((id) => {
                 const g = GUNS[id];
                 const have = !!hud.gunsOwned[id];
                 const on = hud.gun === id;
                 return (
-                  <div key={id} className={`recruit-chip hire rar rar-${rarityByCost(g.price)}`}>
+                  <div key={id} className={`recruit-chip hire rar rar-${gunRarity(g.price)}`}>
                     <span>
                       <b><img className="gun-img small" src={`${import.meta.env.BASE_URL}assets/guns/${id}.png`} alt="" /> {g.name}</b>
                       <small>{g.blurb}</small>
@@ -214,6 +218,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
                   </div>
                 );
               })}
+              </>)}</RarityTabs>
             </div>
           </div>
         )}

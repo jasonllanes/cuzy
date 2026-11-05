@@ -1,4 +1,5 @@
 import PetShop from './PetShop';
+import RarityTabs from './RarityTabs';
 import { useState } from 'react';
 import { BOAT_COST, FREE_UPGRADES, MAX_LEVEL, REVIVE, SKILL_SHOP, SUPPLY_SHOP, THROW_SHOP, WOOD_SHOP } from '../game/upgrades';
 import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
@@ -58,8 +59,9 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
 
         {tab === 'swords' && (
           <div className="sword-shop">
+            <RarityTabs items={WEAPONS} rarity={weaponRarity}>{(list) => (
             <div className="sword-grid">
-              {WEAPONS.map((w) => {
+              {list.map((w) => {
                 const have = !!hud.weapons?.owned?.[w.id];
                 const on = hud.weapons?.equipped === w.id;
                 const atk = hud.upg?.atkspd || 0;
@@ -91,6 +93,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                 );
               })}
             </div>
+            )}</RarityTabs>
           </div>
         )}
 
@@ -195,8 +198,9 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
 
           <section className="shop-col">
             <h3 className="shop-h">🎯 Throwables <small>(right-click to throw)</small></h3>
+            <RarityTabs items={THROW_SHOP} rarity={(t) => rarityOf(t.item)}>{(list) => (
             <div className="upg-list">
-              {THROW_SHOP.map((t) => {
+              {list.map((t) => {
                 const def = ITEMS[t.item];
                 return (
                   <div className="upg-row" key={t.item}>
@@ -212,6 +216,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                 );
               })}
             </div>
+            )}</RarityTabs>
           </section>
         </div>}
       </div>
