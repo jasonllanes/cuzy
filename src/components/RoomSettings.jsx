@@ -90,6 +90,12 @@ export default function RoomSettings({ room, count, editable, onChange, players 
             {[0, 25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n ? `🪙 ${n}` : 'None'}</option>)}
           </select>
         </div>
+        <div className="set-row">
+          <div className="set-label"><b>Startup wood</b><small>Wood everyone begins the round with (for crafting weapons)</small></div>
+          <select value={room.startWood || 0} disabled={!editable || room.started} onChange={(e) => onChange({ startWood: Number(e.target.value) })}>
+            {[0, 5, 10, 20, 50, 100, 250, 500].map((n) => <option key={n} value={n}>{n ? `🪵 ${n}` : 'None'}</option>)}
+          </select>
+        </div>
       </Section>
 
       {!free && (

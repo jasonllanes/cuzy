@@ -66,6 +66,7 @@ export function attachRoomServer(httpServer) {
     allowMelee: r.allowMelee,
     streakMonsters: r.streakMonsters,
     startMoney: r.startMoney || 0,
+    startWood: r.startWood || 0,
     teams: r.teams,
     count: seatsUsed(r),
     started: r.started,
@@ -288,6 +289,7 @@ export function attachRoomServer(httpServer) {
         teams: !['waves', 'survival'].includes(m.mode) && [2, 3, 4].includes(Number(m.teams)) ? Number(m.teams) : 0, // 0 = free for all
         streakMonsters: m.streakMonsters === true, // do monster kills count towards kill streaks (and get announced to everyone)?
         startMoney: Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0)), // coins everyone starts a round with
+        startWood: Math.min(9999, Math.max(0, Math.round(Number(m.startWood)) || 0)), // wood everyone starts a round with
         allowLate: m.allowLate !== false, // may people join once the round is under way?
         allowCheats: m.allowCheats === true, // may players type chat commands like -gold 100?
         waves: Number.isInteger(Number(m.waves)) && Number(m.waves) >= 0 && Number(m.waves) <= 99 ? Number(m.waves) : 10, // how many waves a Survival run lasts (0 = endless)
@@ -499,6 +501,7 @@ export function attachRoomServer(httpServer) {
       if (typeof m.allowMelee === 'boolean') room.allowMelee = m.allowMelee;
       if (typeof m.streakMonsters === 'boolean') room.streakMonsters = m.streakMonsters;
       if (m.startMoney !== undefined && !room.started) room.startMoney = Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0));
+      if (m.startWood !== undefined && !room.started) room.startWood = Math.min(9999, Math.max(0, Math.round(Number(m.startWood)) || 0));
       if (['easy', 'medium', 'hard'].includes(m.difficulty)) room.difficulty = m.difficulty;
       if (Number.isFinite(Number(m.max))) room.max = Math.min(MAX_PLAYERS, Math.max(2, seatsUsed(room), Math.round(Number(m.max))));
       if (free && m.target !== undefined) room.target = clampTarget(m.target, room.target);

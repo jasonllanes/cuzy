@@ -269,6 +269,7 @@ export class Game {
     this.reviveFxs = []; // the light and rings of someone rising again (yours and other players')
     this.reviveFlash = 0;
     if (!saved?.coins) this.coins += Math.max(0, Math.round(Number(session?.room?.startMoney)) || 0); // the room's startup money
+    if (!saved?.wood) this.wood += Math.max(0, Math.round(Number(session?.room?.startWood)) || 0); // ...and its startup wood
     // bets on a duel are placed by the ones who are not in it (see placeBet)
     this.duelCall = null; // a duel is about to start: { left, bet, kind }
     this.myBet = null; // { on: the side you back, amt }
