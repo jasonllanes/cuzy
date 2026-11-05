@@ -93,6 +93,7 @@ export class World {
     this.typeCache = new Map();
     this.siteCache = new Map();
     this.dsites = new Map(); // dungeon entrances
+    this.denCache = new Map(); // monster dens
     this.bsites = new Map(); // boss zones
     this.dkindOverride = new Map(); // regions forced to a kind (the -dimension command)
     this.activeZone = null; // the dungeon you are in (only that one is built)
@@ -624,6 +625,8 @@ export class World {
     }
 
     if (this.v2 && !this.apoc && !this.waveMode) addV2Chunk(this, chunk, cx, cy);
+    const den = this.denAt(cx, cy);
+    if (den) chunk.decor.push({ kind: 'den', x: den.x, y: den.y });
 
     // Cottage + its stepping-stone path
     const rx = Math.floor(cx * CHUNK / REGION);
@@ -957,6 +960,24 @@ export class World {
       }
     }
     return out;
+  }
+
+  // A monster den, if this chunk has one: a marked patch of ground where monsters wait, a few at a time, for you to come close. They
+  // are in the same place every time (and on screen when you get there), unlike the ones that wander in from outside the screen.
+  denAt(cx, cy) {
+    if (this.apoc || this.waveMode || this.arena || this.depot || zoneOf(cx, cy)) return null;
+    const key = `${cx},${cy}`;
+    if (this.denCache.has(key)) return this.denCache.get(key);
+    let den = null;
+    if (hash2(cx, cy, this.seed + 81) < 0.16) {
+      const tx = cx * CHUNK + 3 + Math.floor(hash2(cx, cy, this.seed + 82) * (CHUNK - 6));
+      const ty = cy * CHUNK + 3 + Math.floor(hash2(cx, cy, this.seed + 83) * (CHUNK - 6));
+      if (Math.hypot(tx, ty) >= 30 && !this.nearArena(tx, ty, 30) && this.type(tx, ty) === GRASS && this.isOpenMeadow(tx, ty) && !this.isCleared(tx, ty) && !this.campAt(cx, cy)) {
+        den = { x: tx * T + 8, y: ty * T + 12, tx, ty };
+      }
+    }
+    this.denCache.set(key, den);
+    return den;
   }
 
   // A skeleton camp, if this chunk has one: three of them stand guard on an open patch of meadow.

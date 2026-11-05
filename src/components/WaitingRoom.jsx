@@ -122,7 +122,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         </header>
         <p className="tagline">
           {MODE_LABEL[room.mode] || MODE_LABEL.free}
-          {room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ` · 🪙 ${room.bet} bet` : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''} · 👥 {ordered.length}/{room.max}
+          {room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''} · 👥 {ordered.length}/{room.max}
         </p>
 
         <div className="room-code-row">

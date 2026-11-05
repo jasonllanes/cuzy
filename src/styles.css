@@ -246,8 +246,8 @@ input::placeholder { color: #c5b2a0; }
 }
 .toast {
   position: absolute; z-index: 3;
-  top: 18%; left: 50%; transform: translateX(-50%);
-  padding: 10px 20px;
+  top: auto; bottom: 214px; left: 50%; transform: translateX(-50%); /* (above the hotbar: the top of the screen is for the clock, the duel and the target) */
+  padding: 10px 20px; max-width: min(640px, calc(100vw - 32px)); text-align: center;
   font: 700 1.1rem var(--pixel);
   color: var(--rose-dark);
   animation: toast-in 0.35s cubic-bezier(0.3, 1.6, 0.5, 1);
@@ -1702,3 +1702,36 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .waiting-card .set-section > .set-grid { gap: 2px 22px; }
 .duel-next { position: fixed; top: 62px; left: 50%; transform: translateX(-50%); z-index: 6; padding: 4px 12px; background: var(--paper); font: 700 0.85rem var(--pixel); pointer-events: none; }
 .duel-next.soon { color: #d6293e; animation: duel-pulse 0.6s infinite alternate; }
+
+/* the top of the screen, under the clock, weather and room tag: the next duel, the duel, and who you are hitting, one under the other */
+.top-stack { position: fixed; z-index: 30; top: 116px; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: calc(100vw - 24px); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.top-stack > * { position: static !important; transform: none !important; margin: 0 !important; }
+.top-stack .duel-bar { z-index: auto; }
+.top-stack .duel-watch { pointer-events: auto; font-size: 0.78rem; padding: 3px 12px; min-height: 0; }
+@media (max-width: 900px) { .top-stack { top: 108px; } }
+
+/* the weather and the time sit above the player card now, which leaves the top of the screen to the duel and the target */
+.hud-left-col .weather-chip { position: static; transform: none; padding: 3px 12px; font-size: 0.85rem; }
+.round-flash .levelup-glow { animation-duration: 6s; }
+.round-flash b, .round-flash small { animation-duration: 6s; }
+
+/* tapping a fighter's card sends the camera to the duel */
+.duel-side.look { pointer-events: auto; cursor: pointer; border-radius: 8px; transition: background 0.12s; }
+.duel-side.look:hover { background: rgba(127, 127, 127, 0.16); }
+/* the bets */
+.bet-panel { pointer-events: auto; display: grid; gap: 6px; padding: 8px 12px; background: var(--paper); min-width: 300px; max-width: min(520px, calc(100vw - 24px)); }
+.bet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.bet-head b { font: 700 0.95rem var(--pixel); }
+.bet-head small, .bet-odds, .bet-mine { font-size: 0.72rem; color: var(--ink-soft); }
+.bet-mine { color: var(--ink); font-weight: 700; }
+.bet-sides { display: flex; gap: 6px; flex-wrap: wrap; }
+.bet-side { flex: 1; min-width: 110px; display: grid; gap: 0; padding: 4px 8px; border: 3px solid var(--wood); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; cursor: pointer; text-align: center; }
+.bet-side[style] { border-color: var(--team); }
+.bet-side.on { background: var(--rose); color: #fff; }
+.bet-side.mine { box-shadow: 0 0 0 3px #ffd94a; }
+.bet-side b { font: 700 0.85rem var(--pixel); }
+.bet-side small { font-size: 0.7rem; opacity: 0.85; }
+.bet-side:disabled { opacity: 0.6; cursor: default; }
+.bet-amount { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bet-amount input[type=range] { flex: 1; min-width: 90px; accent-color: var(--rose); }
+.bet-amount input[type=number] { width: 84px; padding: 3px 6px; }

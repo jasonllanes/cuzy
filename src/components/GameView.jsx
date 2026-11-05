@@ -21,6 +21,7 @@ import StoragePanel from './StoragePanel';
 import UnlockCards from './UnlockCards';
 import QtyPicker from './QtyPicker';
 import RoomSettings, { Switch, WAVE_START } from './RoomSettings';
+import BetPanel from './BetPanel';
 import { WAVE_COUNTS } from '../game/monsters';
 import TouchControls from './TouchControls';
 import { getControls, useControls } from '../game/controls';
@@ -696,6 +697,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         </button>
       )}
       <div className={`hud hud-left-col ${mobile ? `mobile-slide ${statsOpen ? 'open' : ''}` : ''}`}>
+        {!mobile && (
+        <div className="weather-chip in-col" title="Sky and time">
+        {hud.dungeon ? <span>🕳️ {hud.dungeon}</span> : hud.weather && !hud.weather.indoors ? <span>{hud.weather.icon} {hud.weather.name}</span> : <span>🏠 Indoors</span>}
+        <span className="wc-sep">·</span>
+        <b>{formatClock(hud.hour)}</b>
+        <small>Day {hud.day}</small>
+      </div>
+        )}
         <div className="hud-left panel small">
           <div className="hud-id">
             <span className="hud-portrait"><Avatar assets={assets} id={profile.hero} size={52} /></span>
@@ -785,29 +794,6 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </div>
 
-      {hud.duel && (
-        <div className="duel-bar panel small">
-          <div className="duel-mid">
-            <b className={hud.duel.left !== null && hud.duel.left <= 10 ? 'low' : ''}>{hud.duel.left === null ? '⏱ …' : `⏱ ${Math.floor(hud.duel.left / 60)}:${String(Math.floor(hud.duel.left % 60)).padStart(2, '0')}`}</b>
-            <small>{hud.duel.watching ? '👁 You are watching' : hud.duel.out ? '☠ You are out: watching' : 'Duel'}{hud.duel.bet > 0 ? ` · 🪙 Bet ${hud.duel.stake}${hud.duel.stake !== hud.duel.bet ? `/${hud.duel.bet}` : ''} each` : ''}</small>
-          </div>
-          <div className="duel-sides">
-            {hud.duel.units.map((u) => (
-              <div key={u.key} className={`duel-side ${u.mine ? 'me' : 'foe'}`} style={u.color ? { '--team': u.color } : undefined}>
-                {u.hero ? <Avatar assets={assets} id={u.hero} /> : <span className="duel-team-dot" />}
-                <div>
-                  <b>{u.name}{u.mine ? ' (you)' : ''}</b>
-                  <span className="duel-hp"><i style={{ width: `${Math.max(0, Math.min(100, (u.hp / Math.max(1, u.max)) * 100))}%` }} /></span>
-                  <small>{Math.max(0, hp100(u.hp))} / {hp100(u.max)} ❤{u.members.length > 1 ? ` · ${u.members.filter((m) => !m.out).length}/${u.members.length} standing` : ''}</small>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {!hud.duel && hud.duelNext !== null && hud.duelNext !== undefined && (
-        <div className={`duel-next panel small ${hud.duelNext <= 10 ? 'soon' : ''}`}>⚔️ Next duel in {Math.floor(hud.duelNext / 60)}:{String(Math.floor(hud.duelNext % 60)).padStart(2, '0')}</div>
-      )}
       <div className="hud hud-right">
         <canvas ref={miniRef} width={80} height={80} className="minimap" onClick={() => setMapOpen(true)} title="Click the map to see all of it (or press M)" />
         <div className="zoom-box panel small">
@@ -918,12 +904,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {waves && hud.slowT > 0 && <div className="slowmo-tint" aria-hidden="true" />}
       {waves && hud.blastT > 0 && <div className="blast-flash" aria-hidden="true" style={{ opacity: Math.min(1, hud.blastT * 2) }} />}
-      <div className="hud weather-chip" title="Sky and time">
+      {mobile && (
+        <div className="hud weather-chip" title="Sky and time">
         {hud.dungeon ? <span>🕳️ {hud.dungeon}</span> : hud.weather && !hud.weather.indoors ? <span>{hud.weather.icon} {hud.weather.name}</span> : <span>🏠 Indoors</span>}
         <span className="wc-sep">·</span>
         <b>{formatClock(hud.hour)}</b>
         <small>Day {hud.day}</small>
       </div>
+      )}
       {waves && hud.wave && <ShelterBar w={hud.wave} survival={survival} withRoom={!!session} />}
       {waves && hud.wave && <WaveHud w={hud.wave} difficulty={live?.difficulty || difficulty} withRoom={!!session} survival={survival} isHost={session ? isHost : true} onStart={() => gameRef.current?.pressStartWave()} />}
       {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && (
@@ -966,6 +954,34 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {(!waves || survival) && <SupplyBar keys={['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
       {supplyOpen && (!waves || survival) && <SupplyMenu kind={supplyOpen} hud={hud} game={gameRef.current} onClose={() => setSupplyOpen(null)} />}
+      <div className="top-stack">
+      {hud.duel && (
+        <div className="duel-bar panel small">
+          <div className="duel-mid">
+            <b className={hud.duel.left !== null && hud.duel.left <= 10 ? 'low' : ''}>{hud.duel.left === null ? (hud.duel.call !== null ? `⚔️ Fight in ${hud.duel.call}s` : '⏱ …') : `⏱ ${Math.floor(hud.duel.left / 60)}:${String(Math.floor(hud.duel.left % 60)).padStart(2, '0')}`}</b>
+            <small>{hud.duel.fighting ? (hud.duel.out ? '☠ You are out: watching' : '⚔️ You are fighting') : hud.duel.watching ? '👁 You are watching' : '🌾 Farming'}{hud.duel.bets > 0 ? ` · 🎲 ${hud.duel.bets} bet${hud.duel.bets === 1 ? '' : 's'}` : ''}</small>
+          </div>
+          {hud.duel.canWatch && (
+            <button type="button" className="btn small-btn duel-watch" onClick={() => gameRef.current?.watchDuel(!hud.duel.watching, true)}>{hud.duel.watching ? '🌾 Back to my hero' : '👁 Watch the duel'}</button>
+          )}
+          <div className="duel-sides">
+            {hud.duel.units.map((u) => (
+              <div key={u.key} className={`duel-side ${u.mine ? 'me' : 'foe'} ${hud.duel.canWatch ? 'look' : ''}`} style={u.color ? { '--team': u.color } : undefined} title={hud.duel.canWatch ? 'Tap to watch them (move or attack to come back)' : undefined} onClick={hud.duel.canWatch ? () => gameRef.current?.watchDuel(true, true, u.look) : undefined}>
+                {u.hero ? <Avatar assets={assets} id={u.hero} /> : <span className="duel-team-dot" />}
+                <div>
+                  <b>{u.name}{u.mine ? ' (you)' : ''}</b>
+                  <span className="duel-hp"><i style={{ width: `${Math.max(0, Math.min(100, (u.hp / Math.max(1, u.max)) * 100))}%` }} /></span>
+                  <small>{Math.max(0, hp100(u.hp))} / {hp100(u.max)} ❤{u.members.length > 1 ? ` · ${u.members.filter((m) => !m.out).length}/${u.members.length} standing` : ''}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {hud.duel && <BetPanel duel={hud.duel} game={gameRef.current} />}
+      {!hud.duel && hud.duelNext !== null && hud.duelNext !== undefined && (
+        <div className={`duel-next panel small ${hud.duelNext <= 10 ? 'soon' : ''}`}>⚔️ Next duel in {Math.floor(hud.duelNext / 60)}:{String(Math.floor(hud.duelNext % 60)).padStart(2, '0')}</div>
+      )}
       {hud.target && (
         <div className={`target-card ${hud.target.fading ? 'fading' : ''} ${hud.target.boss ? 'boss' : ''}`} style={{ '--tc': hud.target.color }} role="status">
           <span className="target-icon"><MonsterIcon type={hud.target.type} size={40} /></span>
@@ -975,6 +991,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
+      </div>
       {levelFlash && (
         <div key={levelFlash.key} className="levelup-flash" aria-hidden="true">
           <span className="levelup-glow" />
@@ -1012,16 +1029,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </Hotbar>
       {hud.celeb && (
-        <EndingScene
-          key="round-end"
-          kind="round"
-          name={profile.name}
-          winner={hud.celeb.name}
-          mine={!!hud.celeb.mine}
-          board={[...scores].sort((a, b) => (b.kills || 0) - (a.kills || 0)).map((s) => ({ name: s.name, n: s.kills || 0, me: String(s.id) === String(session?.you) }))}
-          boardTitle="⚔️ Final scores"
-          auto
-        />
+        <div key="round-flash" className="levelup-flash round-flash" aria-hidden="true">
+          <span className="levelup-glow" />
+          <b>{hud.celeb.draw ? '🤝 A draw!' : `🏆 ${hud.celeb.mine ? 'You win' : `${hud.celeb.name} wins`}!`}</b>
+          {hud.celeb.sub && <small>{hud.celeb.sub}</small>}
+        </div>
       )}
       {upgOpen && (waves
         ? <UpgradePanel hud={hud} game={gameRef.current} survival={survival} inventory={inventory} onClose={() => setUpgOpen(false)} />

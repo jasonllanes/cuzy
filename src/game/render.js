@@ -195,6 +195,31 @@ function drawDecor(ctx, chunk, img) {
       ctx.drawImage(image, Math.round(d.x - ox - image.width / 2), Math.round(d.y - oy - image.height));
       continue;
     }
+    if (d.kind === 'den') {
+      // a monster den: a patch of trampled, dark earth with bones and stones, so you can tell something lives here
+      ctx.fillStyle = 'rgba(58,40,32,0.6)';
+      ctx.beginPath();
+      ctx.ellipse(x, y, 17, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(28,18,22,0.75)';
+      ctx.beginPath();
+      ctx.ellipse(x, y + 1, 10, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#e6dcc4';
+      ctx.fillRect(x - 13, y - 2, 4, 1);
+      ctx.fillRect(x - 12, y - 3, 1, 3);
+      ctx.fillRect(x + 8, y + 3, 5, 1);
+      ctx.fillRect(x + 4, y - 6, 3, 3);
+      ctx.fillStyle = '#2a1c22';
+      ctx.fillRect(x + 4, y - 5, 1, 1);
+      ctx.fillRect(x + 6, y - 5, 1, 1);
+      ctx.fillStyle = '#8a8478';
+      ctx.fillRect(x - 6, y + 5, 3, 2);
+      ctx.fillRect(x + 11, y - 1, 2, 2);
+      ctx.fillStyle = '#6b4f3a';
+      ctx.fillRect(x - 3, y - 7, 2, 2);
+      continue;
+    }
     if (d.kind === 'flower') {
       ctx.fillStyle = '#4f9a4a';
       ctx.fillRect(x + 1, y + 3, 1, 2);

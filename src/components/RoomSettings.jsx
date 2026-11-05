@@ -55,7 +55,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
   const duelLocked = !editable || (duel ? room.started : !!room.duelLive); // (a duel round is set up before it starts; the timed duels can be changed between duels)
   const oneVsOne = duels === 'timed' || (duel && !room.teams);
   const fightNote = [room.teams ? `${room.teams} teams` : 'free for all', room.pvp || duel ? 'player damage' : 'no damage'].join(' · ');
-  const duelNote = duels === 'round' ? `Colosseum round${bet ? ` · 🪙 ${bet}` : ''}` : duels === 'timed' ? `every ${every} min${bet ? ` · 🪙 ${bet}` : ''}` : 'off';
+  const duelNote = duels === 'round' ? `Colosseum round${bet ? ' · 🎲 bets' : ''}` : duels === 'timed' ? `every ${every} min${bet ? ' · 🎲 bets' : ''}` : 'off';
 
   return (
     <section className="settings-panel" aria-label="Room settings">
@@ -212,15 +212,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
                   {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} min</option>)}
                 </select>
               </div>
-              <Switch label="Bet" hint={bet ? `Each fighter puts ${bet} 🪙 on the table: the winner takes the losers' stakes, a draw gives them back. Whoever cannot cover it stakes what they have; the pot is only as big as the smaller stake.` : 'Off: the duel is for pride only'} on={bet > 0} disabled={duelLocked} onChange={(v) => onChange(v ? { bet: 100, ...(duel ? { startMoney: Math.max(room.startMoney || 0, 100) } : {}) } : { bet: 0 })} />
-              {bet > 0 && (
-                <div className="set-row">
-                  <div className="set-label"><b>Stake</b><small>Taken from each fighter's coins when the duel starts{duel ? ' (the startup money is raised to cover it)' : ''}</small></div>
-                  <select value={bet} disabled={duelLocked} onChange={(e) => onChange({ bet: Number(e.target.value), ...(duel ? { startMoney: Math.max(room.startMoney || 0, Number(e.target.value)) } : {}) })}>
-                    {[25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>🪙 {n}</option>)}
-                  </select>
-                </div>
-              )}
+              <Switch label="Betting" hint={bet ? 'The players who are not in the duel see who is fighting and have a few seconds to back a fighter: they type how much (or go all in). The winners share what the losers put in. A draw, or nobody on the other side, gives everyone their coins back.' : 'Off: the duel is for pride only'} on={bet > 0} disabled={duelLocked} onChange={(v) => onChange({ bet: v ? 1 : 0 })} />
             </>
           )}
         </Section>

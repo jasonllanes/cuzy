@@ -15,10 +15,10 @@ const BLOCK = 3; // hours
 
 // [kind, share] by kind of world
 const ODDS = {
-  meadow: [['clear', 0.38], ['cloudy', 0.2], ['rain', 0.2], ['storm', 0.1], ['snow', 0.12]],
-  mild: [['clear', 0.38], ['cloudy', 0.28], ['rain', 0.24], ['storm', 0.1]], // Survival: no snow, and a storm is a rare treat
-  wet: [['clear', 0.14], ['cloudy', 0.28], ['rain', 0.46], ['storm', 0.12]], // the swamp
-  dry: [['clear', 0.6], ['cloudy', 0.3], ['rain', 0.08], ['storm', 0.02]],
+  meadow: [['clear', 0.56], ['cloudy', 0.24], ['rain', 0.1], ['storm', 0.03], ['snow', 0.07]], // (rain and thunder are not the usual sky)
+  mild: [['clear', 0.46], ['cloudy', 0.32], ['rain', 0.17], ['storm', 0.05]], // Survival: no snow, and a storm is a rare treat
+  wet: [['clear', 0.22], ['cloudy', 0.34], ['rain', 0.36], ['storm', 0.08]], // the swamp
+  dry: [['clear', 0.66], ['cloudy', 0.3], ['rain', 0.03], ['storm', 0.01]],
   frost: [['snow', 0.8], ['cloudy', 0.2]],
 };
 

@@ -13,6 +13,8 @@ import { DMG_PER_LEVEL, HP_PER_HEART, HP_PER_UPGRADE, hp100, maxHearts, monsterX
 // Skeleton camps: three guards that chase you, but give up beyond LEASH and walk home to heal
 const CAMP_WAKE = 300; // the camp stirs when you come this close
 const CAMP_LEASH = 200; // how far from their post the guards will follow
+const DEN_WAKE = 250; // a den stirs when you come this close
+const DEN_RESPAWN = 240; // seconds a wiped-out den stays empty
 const CAMP_RESPAWN = 150; // seconds before a wiped-out camp is guarded again
 
 // Wild creatures from the ENEMY pack that roam the free world: ground things by day, flyers and hounds by night
@@ -170,6 +172,7 @@ const FRAME_W = 96;
 const FRAME_H = 64;
 const FEET_X = 48;
 const FEET_Y = 40;
+const SKELETON_SCALE = 1.6; // (the sprite is tiny: it is drawn bigger)
 const ANIMS = {
   idle: { n: 6, fps: 6, loop: true },
   walk: { n: 8, fps: 10, loop: true },
@@ -217,11 +220,16 @@ export class Combat {
     this.camps = new Map(); // chunk key -> { on, killed, until }
     this.campT = 0;
     this.campScan = 0;
+    this.dens = new Map(); // chunk key -> { on, alive, until, fled }: the monster dens you have woken
+    this.denScan = 0;
     this.projectiles = [];
     this.bombs = []; // Sticky Grenades that have been thrown
     this.smokes = []; // clouds from smoke grenades: { x, y, t, life, R }
     this.blasts = []; // the flash of one going off
     this.remoteShots = [];
+    this.remoteAims = new Map(); // where other players are aiming their staffs (id -> { x, y, r, color, t })
+    this.aimSendT = 0;
+    this.aimOn = false;
     this.remoteBombs = []; // other players' grenades: just the circle on the ground and the blast
     this.drops = [];
     this.floaters = [];
@@ -462,6 +470,81 @@ export class Combat {
     const last = this.spells[this.spells.length - 1];
     g.mp?.net.send({ t: 'fx', kind: 'cast', x: last.x, y: last.y, r: radius, fx: sp.fx, hue: sp.hue || 0, color: sp.color || '#ffffff' });
     this.faceAim(Math.atan2(m.y - cy, m.x - cx));
+  }
+
+  // where your staff would land its spell right now (while you hold the button), and how big it is
+  staffAim() {
+    const w = this.weapon();
+    if (!w || w.kind !== 'staff' || !w.spell || !this.hold || this.hold.t < HOLD_MIN * 0.5) return null;
+    const [cx, cy] = this.center();
+    const m = this.g.mouseWorld();
+    const d = Math.hypot(m.x - cx, m.y - cy) || 1;
+    const k = Math.min(1, (w.reach * 1.05) / d);
+    const power = Math.min(1, Math.max(0, (this.hold.t - HOLD_MIN) / CHARGE_TIME));
+    return { x: cx + (m.x - cx) * k, y: cy + (m.y - cy) * k + 8, r: 20 + 16 * power, color: w.spell.color };
+  }
+
+  // the others see where you are aiming your staff, for as long as you hold the button
+  updateAimShare(dt) {
+    const a = this.g.mp && !this.g.dead ? this.staffAim() : null;
+    if (a) {
+      this.aimSendT -= dt;
+      if (this.aimSendT <= 0) {
+        this.aimSendT = 0.1;
+        this.g.mp.net.send({ t: 'fx', kind: 'aim', x: Math.round(a.x), y: Math.round(a.y), r: Math.round(a.r), color: a.color });
+      }
+      this.aimOn = true;
+    } else if (this.aimOn) {
+      this.aimOn = false;
+      this.aimSendT = 0;
+      this.g.mp?.net.send({ t: 'fx', kind: 'aim', off: 1 });
+    }
+    for (const [id, r] of this.remoteAims) if ((r.t += dt) > 0.6) this.remoteAims.delete(id); // (a player who stopped sending has let go)
+  }
+
+  remoteAim(m) {
+    if (m.off) {
+      this.remoteAims.delete(m.id);
+      return;
+    }
+    if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) return;
+    this.remoteAims.set(m.id, { x: m.x, y: m.y, r: Math.max(8, Math.min(60, m.r || 24)), color: m.color || '#ffffff', t: 0 });
+  }
+
+  // the dashed circles other players hold over the ground with their staffs, with their names
+  drawRemoteAims(ctx, camX, camY, zoom) {
+    if (!this.remoteAims.size) return;
+    ctx.save();
+    for (const [id, a] of this.remoteAims) {
+      const sx = (a.x - camX) * zoom;
+      const sy = (a.y - camY) * zoom;
+      ctx.strokeStyle = a.color;
+      ctx.fillStyle = a.color;
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, a.r * zoom, a.r * 0.55 * zoom, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = zoom * 0.9;
+      ctx.setLineDash([zoom * 2, zoom * 1.6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(sx, sy, zoom * 1.6, 0, Math.PI * 2);
+      ctx.fill();
+      const name = this.g.remotes.get(id)?.name;
+      if (name) {
+        ctx.globalAlpha = 1;
+        ctx.font = `700 ${Math.round(zoom * 4)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.lineWidth = zoom * 1.2;
+        ctx.strokeStyle = 'rgba(30,20,40,0.85)';
+        ctx.strokeText(name, sx, sy - a.r * 0.55 * zoom - zoom * 3);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(name, sx, sy - a.r * 0.55 * zoom - zoom * 3);
+      }
+    }
+    ctx.restore();
   }
 
   // another player's staff spell: the circle that fills up, then the blast. It only looks the part: the caster's own game does the damage.
@@ -1728,11 +1811,13 @@ export class Combat {
       if (!this.g.dungeon) {
         this.updateSpawns(dt);
         this.updateCamps(dt);
+        this.updateDens(dt);
       }
       this.updateWilds(dt); // (underground it only moves the monsters that wait in the rooms: nothing new turns up)
     }
     this.updateRemoteTridents(dt);
     this.updateRemoteBombs(dt);
+    this.updateAimShare(dt);
     this.updateSpells(dt); // (in every mode: Survival and the inside of a house too, or the circles of a staff stay on the screen)
     this.skeletons = this.skeletons.filter((s) => this.updateSkeleton(s, dt));
     this.projectiles = this.projectiles.filter((p) => this.updateProjectile(p, dt));
@@ -2052,7 +2137,10 @@ export class Combat {
     const dist = Math.hypot(dx, dy) || 1;
     w.anim += dt;
     if (w.state === 'dead') return (w.t += dt) < (def.tiny ? 0.85 : 0.5);
-    if (!w.zone && !w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : Math.max(430, Math.hypot(this.g.viewW, this.g.viewH) / 2 + 220))) return false;
+    if (!w.zone && !w.nightBoss && dist > (this.g.dungeon ? 3000 : w.miniBoss ? 1400 : Math.max(430, Math.hypot(this.g.viewW, this.g.viewH) / 2 + 220))) {
+      if (w.den) this.denLost(w, false);
+      return false;
+    }
     if (w.nightBoss && !w.zone && !this.g.dungeon && this.g.darkness() < 0.15) w.burning = true; // sunrise
     if (w.burning) {
       // it burns away in the daylight. Nothing drops from something that burned to death.
@@ -2354,7 +2442,7 @@ export class Combat {
         const ey = (p.y - s.y) / (s.radius * 0.55);
         if (!this.hidden && !this.g.dead && ex * ex + ey * ey <= 1) this.hurtPlayer(s.dmg, s.x, s.y, { by: s.by });
       }
-      return s.t < s.frames / 12;
+      return s.t < Math.max(s.frames / 12, s.mine ? 1 : 0); // (a staff's circle stays on the ground a moment after the blast)
     });
   }
 
@@ -2427,6 +2515,7 @@ export class Combat {
     if (w.hp <= 0) {
       w.state = 'dead';
       w.t = 0;
+      if (w.den) this.denLost(w, true);
       if (quiet) return;
       this.kills++;
       this.g.monsterKill(def.name, Math.round(monsterXp(def.hp, def.boss || w.nightBoss || w.miniBoss) * lvXp(w.lv || 1) * (w.minionOf ? 0.3 : 1)), !!(def.boss || w.nightBoss || w.miniBoss), { x: w.x, y: w.y });
@@ -2456,6 +2545,54 @@ export class Combat {
     w.t = 0;
     w.kx = Math.cos(ang) * kb * (def.kb ?? 1);
     w.ky = Math.sin(ang) * kb * (def.kb ?? 1);
+  }
+
+  // Wake the monster dens near you: each is a marked patch of ground that holds two to four monsters of the land it lies in. Wipe one out
+  // and it stays empty for a few minutes.
+  updateDens(dt) {
+    this.denScan -= dt;
+    if (this.denScan > 0 || this.g.world.arena) return;
+    this.denScan = 0.8;
+    const { world, player: p, home } = this.g;
+    const ccx = Math.floor(p.x / CHUNK_PX);
+    const ccy = Math.floor(p.y / CHUNK_PX);
+    for (let j = -2; j <= 2; j++) {
+      for (let i = -2; i <= 2; i++) {
+        const den = world.denAt(ccx + i, ccy + j);
+        if (!den) continue;
+        const key = `${ccx + i},${ccy + j}`;
+        const st = this.dens.get(key) || { on: false, alive: 0, until: 0, fled: false };
+        this.dens.set(key, st);
+        if (st.on || st.until > this.campT) continue;
+        if (Math.hypot(den.x - p.x, den.y - p.y) > DEN_WAKE || Math.hypot(den.x - home.x, den.y - home.y) < 260) continue;
+        const night = this.g.darkness() > 0.15;
+        const n = 2 + (Math.random() < 0.5 ? 1 : 0) + (night ? 1 : 0);
+        for (let k = 0; k < n; k++) {
+          const ang = (k / n) * Math.PI * 2 + Math.random() * 0.6;
+          const x = den.x + Math.cos(ang) * (12 + Math.random() * 14);
+          const y = den.y + Math.sin(ang) * (8 + Math.random() * 8);
+          const foes = foesAt(world, x, y);
+          const type = pickOf(night ? foes.night : foes.day);
+          const w = this.makeWild(type, x, y, rollMonsterLevel(this.dayLevel()));
+          w.den = key;
+          this.wilds.push(w);
+        }
+        st.on = true;
+        st.alive = n;
+        st.fled = false;
+      }
+    }
+  }
+
+  // one of a den's monsters is gone (killed, or lost in the distance): when the last one is, the den rests (or wakes again at once if they only wandered off)
+  denLost(w, killed) {
+    const st = this.dens.get(w.den);
+    w.den = null;
+    if (!st) return;
+    if (!killed) st.fled = true;
+    if (--st.alive > 0) return;
+    st.on = false;
+    st.until = this.campT + (st.fled ? 4 : DEN_RESPAWN);
   }
 
   // Wake the camps near you: each one is three skeletons standing side by side on their post
@@ -3343,7 +3480,7 @@ export class Combat {
         // the warning: a red ring on the ground that fills up
         const k = 1 + s.t / s.delay;
         ctx.save();
-        ctx.globalAlpha = s.mine ? 0.15 + 0.3 * k : 1;
+        ctx.globalAlpha = s.mine ? 0.22 + 0.4 * k : 1;
         ctx.fillStyle = s.mine ? s.color : `rgba(255,60,60,${0.1 + 0.25 * k})`;
         ctx.beginPath();
         ctx.ellipse(Math.round(s.x), Math.round(s.y), s.radius, s.radius * 0.55, 0, 0, Math.PI * 2);
@@ -3360,6 +3497,17 @@ export class Combat {
         const k = s.mine ? s.radius / 26 : 1;
         ctx.drawImage(this.img[`tiny/fx_${s.fx}`], f * 100, 0, 100, 100, Math.round(s.x - 50 * k), Math.round(s.y - 57 * k), 100 * k, 100 * k);
         ctx.restore();
+        if (s.mine && s.t < 1) {
+          // the circle where it landed fades out slowly, so it can be seen
+          ctx.save();
+          ctx.globalAlpha = 0.7 * (1 - s.t);
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(Math.round(s.x), Math.round(s.y), s.radius, s.radius * 0.55, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
       }
     } else if (o.kind === 'projectile' && o.p.id === 'flame') {
       // a lick of fire: white-hot at first, then yellow, orange and red as it dies away
@@ -3547,23 +3695,26 @@ export class Combat {
     const x = Math.round(s.x);
     const y = Math.round(s.y);
 
-    ctx.fillStyle = 'rgba(60,40,30,0.22)';
-    ctx.fillRect(x - 5, y - 1, 10, 3);
+    ctx.fillStyle = 'rgba(40,24,40,0.3)';
+    ctx.fillRect(x - 8, y - 2, 16, 4);
     ctx.save();
     if (s.state === 'dead') ctx.globalAlpha = Math.max(0, Math.min(1, (1.6 - s.stateT) / 0.5));
-    ctx.translate(x, y - FEET_Y);
-    if (s.face < 0) ctx.scale(-1, 1);
-    ctx.drawImage(sheet, frame * FRAME_W, 0, FRAME_W, FRAME_H, -FEET_X, 0, FRAME_W, FRAME_H);
+    // the Decrepit Bones are a small pale sprite: drawn bigger and with a dark edge, so they show against the grass
+    ctx.filter = 'drop-shadow(0 0 1.5px rgba(25,12,35,0.95)) drop-shadow(0 0 1px rgba(25,12,35,0.9))';
+    ctx.translate(x, y);
+    ctx.scale((s.face < 0 ? -1 : 1) * SKELETON_SCALE, SKELETON_SCALE);
+    ctx.drawImage(sheet, frame * FRAME_W, 0, FRAME_W, FRAME_H, -FEET_X, -FEET_Y, FRAME_W, FRAME_H);
     ctx.restore();
+    ctx.filter = 'none';
 
     if (s.state !== 'dead' && s.stunT > 0) this.drawStun(ctx, x, y - 26, s.stunColor);
     if (s.state !== 'dead') {
       ctx.fillStyle = 'rgba(60,40,30,0.7)';
-      ctx.fillRect(x - 7, y - 24, 14, 3);
+      ctx.fillRect(x - 8, y - 34, 16, 3);
       ctx.fillStyle = '#ff7a8f';
-      ctx.fillRect(x - 6, y - 23, Math.round(12 * (s.hp / 3)), 1);
+      ctx.fillRect(x - 7, y - 33, Math.round(14 * (s.hp / 3)), 1);
       if (!s.lv) s.lv = Math.min(10, rollMonsterLevel(Math.min(10, 1 + Math.floor(this.g.day / 2))) + (s.elite ? 3 : 0));
-      this.g.drawLevelTag(ctx, s, x, y, y - 27);
+      this.g.drawLevelTag(ctx, s, x, y, y - 37);
     }
   }
 
@@ -3695,6 +3846,7 @@ export class Combat {
 
   // Progress bar under the hero while the left button is held. The notch marks where a dash unlocks.
   drawChargeBar(ctx, camX, camY, zoom, t) {
+    this.drawRemoteAims(ctx, camX, camY, zoom);
     const wk = this.weapon()?.kind;
     if (this.hold && this.hold.t >= HOLD_MIN * 0.8 && (wk === 'trident' || wk === 'sling' || wk === 'fan')) {
       // where the trident would land: a line from the hero to the cursor, cut off at its range
