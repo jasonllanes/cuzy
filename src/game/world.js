@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { isArenaSeed, isEndlessSeed, isEscapeSeed, isPitchSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch } from './maps';
+import { isArenaSeed, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -22,6 +22,8 @@ export const PITCH_W = 22;
 export const PITCH_H = 12;
 export const GOAL_H = 3;
 export const GOAL_D = 3;
+const RUMBLE_W = 20; // the three-goal pitch is a little squarer
+const RUMBLE_H = 17;
 const PITCH_BEACH = 9; // tiles of beach round the walls (then the sea)
 export const ARENA_ZONE = 9000; // in every Free Roam world the Colosseum also stands far off at this tile, for the duels that happen in the middle of a round
 const ARENA_BOX = 26; // the area around it that belongs to it
@@ -69,12 +71,15 @@ export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
     this.endless = theme === 'apoc' && isEndlessSeed(seedStr); // Survival without waves
-    this.pitch = theme !== 'apoc' && !waves && isPitchSeed(seedStr); // the Beach Ball pitch (a whole world of it)
+    this.rumble = theme !== 'apoc' && !waves && isRumbleSeed(seedStr); // the Beach Rumble pitch: three goals (left, right, top) for up to three teams
+    this.pitch = theme !== 'apoc' && !waves && (isPitchSeed(seedStr) || this.rumble); // the Beach Ball pitch (a whole world of it)
+    this.pw = this.rumble ? RUMBLE_W : PITCH_W; // half the field's width and height, in tiles
+    this.ph = this.rumble ? RUMBLE_H : PITCH_H;
     this.arena = theme !== 'apoc' && !waves && (isArenaSeed(seedStr) || this.pitch); // the Duel colosseum (a whole world of it); the pitch is built the same way
     this.hasArena = theme !== 'apoc' && !waves; // (Free Roam worlds have the Colosseum far off too, where the duels of a running round are fought)
     this.ac = this.arena ? { x: 0, y: 0 } : { x: ARENA_ZONE, y: ARENA_ZONE }; // its middle, in tiles
     this.escape = theme !== 'apoc' && !waves && isEscapeSeed(seedStr); // the Escape zone: loot, zombies and a chopper
-    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripEscape(seedStr))))));
+    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(seedStr)))))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
     this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape); // Free Roam V2: the same world with the Modern Exteriors props on top
@@ -721,8 +726,17 @@ export class World {
   // what a tile is where the Colosseum stands (undefined: not part of it)
   // the Beach Ball pitch: is this tile (lx, ly from the middle) walkable (the field and the two goal pockets)?
   pitchWalk(lx, ly) {
-    if (lx >= -PITCH_W && lx < PITCH_W && ly >= -PITCH_H && ly < PITCH_H) return true;
-    return ly >= -GOAL_H && ly < GOAL_H && ((lx >= -PITCH_W - GOAL_D && lx < -PITCH_W) || (lx >= PITCH_W && lx < PITCH_W + GOAL_D));
+    const W = this.pw;
+    const H = this.ph;
+    if (lx >= -W && lx < W && ly >= -H && ly < H) return true;
+    // (the Rumble pitch has a third goal in the top fence)
+    if (this.rumble && lx >= -GOAL_H && lx < GOAL_H && ly >= -H - GOAL_D && ly < -H) return true;
+    return ly >= -GOAL_H && ly < GOAL_H && ((lx >= -W - GOAL_D && lx < -W) || (lx >= W && lx < W + GOAL_D));
+  }
+
+  // where the middle of a goal mouth is, in pixels (0: left, 1: right, 2: top, on the Rumble pitch)
+  goalCenter(i) {
+    return i === 2 ? { x: 0, y: -this.ph * T } : { x: (i === 0 ? -1 : 1) * this.pw * T, y: 0 };
   }
 
   // 0: the ball is in the left goal (the right team scores), 1: in the right goal (the left team scores), -1: not in a goal
@@ -730,17 +744,23 @@ export class World {
     if (!this.pitch) return -1;
     const lx = px / T;
     const ly = py / T;
+    if (this.rumble && lx >= -GOAL_H && lx < GOAL_H && ly < -this.ph && ly >= -this.ph - GOAL_D) return 2;
     if (ly < -GOAL_H || ly >= GOAL_H) return -1;
-    if (lx < -PITCH_W && lx >= -PITCH_W - GOAL_D) return 0;
-    if (lx >= PITCH_W && lx < PITCH_W + GOAL_D) return 1;
+    if (lx < -this.pw && lx >= -this.pw - GOAL_D) return 0;
+    if (lx >= this.pw && lx < this.pw + GOAL_D) return 1;
     return -1;
   }
 
   // where a player of `team` (0: left side, 1: right side) starts: spread out on their own half (k of n on the team)
   pitchSpawn(team = 0, k = 0, n = 1) {
+    if (this.rumble && team % 3 === 2) {
+      // the top team stands in a line across the top half
+      const col = (k - (n - 1) / 2) * Math.min(46, (this.pw * 2 * T - 40) / Math.max(1, n));
+      return { x: col + 8, y: -this.ph * T * 0.55 };
+    }
     const side = team % 2 === 0 ? -1 : 1;
-    const row = (k - (n - 1) / 2) * Math.min(46, (PITCH_H * 2 * T - 40) / Math.max(1, n));
-    return { x: side * PITCH_W * T * 0.5 + 8, y: row + 12 };
+    const row = (k - (n - 1) / 2) * Math.min(46, (this.ph * 2 * T - 40) / Math.max(1, n));
+    return { x: side * this.pw * T * (this.rumble ? 0.6 : 0.5) + 8, y: row + (this.rumble ? 60 : 12) };
   }
 
   // the little rectangles of the pitch markings (white lines on the sand), made once
@@ -752,22 +772,31 @@ export class World {
       const n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / 2));
       for (let i = 0; i <= n; i++) out.push({ x: Math.round(x0 + ((x1 - x0) * i) / n) - 1, y: Math.round(y0 + ((y1 - y0) * i) / n) - 1, w: 2, h: 2 });
     };
-    const W = PITCH_W * T;
-    const H = PITCH_H * T;
+    const W = this.pw * T;
+    const H = this.ph * T;
     const G = GOAL_H * T;
-    line(-W, -H, W, -H);
+    if (this.rumble) {
+      line(-W, -H, -G, -H);
+      line(G, -H, W, -H);
+    } else line(-W, -H, W, -H);
     line(-W, H, W, H);
     line(-W, -H, -W, -G);
     line(-W, G, -W, H);
     line(W, -H, W, -G);
     line(W, G, W, H);
-    line(0, -H, 0, H); // the halfway line
+    if (!this.rumble) line(0, -H, 0, H); // the halfway line
     // the centre circle, and the box in front of each goal
     for (let a = 0; a < 180; a++) out.push({ x: Math.round(Math.cos((a / 180) * Math.PI * 2) * 56) - 1, y: Math.round(Math.sin((a / 180) * Math.PI * 2) * 56) - 1, w: 2, h: 2 });
     for (const sd of [-1, 1]) {
       line(sd * W, -G - 32, sd * (W - 80), -G - 32);
       line(sd * (W - 80), -G - 32, sd * (W - 80), G + 32);
       line(sd * (W - 80), G + 32, sd * W, G + 32);
+    }
+    if (this.rumble) {
+      // the box in front of the top goal
+      line(-G - 32, -H, -G - 32, -H + 80);
+      line(-G - 32, -H + 80, G + 32, -H + 80);
+      line(G + 32, -H + 80, G + 32, -H);
     }
     this.prects = out;
     return out;
@@ -778,10 +807,11 @@ export class World {
     const chunk = { cx, cy, objects: [], rects: [], decor: [], zones: [], doors: [] };
     const inChunk = (tx, ty) => Math.floor(tx / CHUNK) === cx && Math.floor(ty / CHUNK) === cy;
     const s = this.seed;
-    const bx0 = -PITCH_W - GOAL_D - 1;
-    const bx1 = PITCH_W + GOAL_D;
+    const bx0 = -this.pw - GOAL_D - 1;
+    const bx1 = this.pw + GOAL_D;
+    const by0 = -this.ph - 1 - (this.rumble ? GOAL_D : 0);
     // the fence: every tile that is not walkable but touches the field or a goal
-    for (let ty = -PITCH_H - 1; ty <= PITCH_H; ty++) {
+    for (let ty = by0; ty <= this.ph; ty++) {
       for (let tx = bx0; tx <= bx1; tx++) {
         if (this.pitchWalk(tx, ty) || !inChunk(tx, ty)) continue;
         let edge = false;
@@ -792,8 +822,14 @@ export class World {
       }
     }
     // the goals: a net in each pocket, in the colour of the team that defends it (left: red, right: blue)
-    for (const side of [0, 1]) {
-      const gx = side === 0 ? -PITCH_W - GOAL_D : PITCH_W; // left edge of the pocket, in tiles
+    for (const side of this.rumble ? [0, 1, 2] : [0, 1]) {
+      if (side === 2) {
+        // the top goal: the net runs up from the field, so it is wider than it is deep
+        if (!inChunk(-GOAL_H, -this.ph - GOAL_D)) continue;
+        chunk.objects.push({ kind: 'goalnet', team: 2, top: true, x: 0, y: -this.ph * T, gx: -GOAL_H * T, gy: (-this.ph - GOAL_D) * T, w: GOAL_H * 2 * T, h: GOAL_D * T });
+        continue;
+      }
+      const gx = side === 0 ? -this.pw - GOAL_D : this.pw; // left edge of the pocket, in tiles
       if (!inChunk(gx, -GOAL_H)) continue;
       chunk.objects.push({ kind: 'goalnet', team: side, x: gx * T + (GOAL_D * T) / 2, y: GOAL_H * T, gx: gx * T, gy: -GOAL_H * T, w: GOAL_D * T, h: GOAL_H * 2 * T });
     }
@@ -805,7 +841,7 @@ export class World {
       for (let tx = cx * CHUNK; tx < (cx + 1) * CHUNK; tx += 2) {
         if (this.type(tx, ty) !== SAND) continue;
         const outX = Math.max(bx0 - tx, tx - bx1, 0);
-        const outY = Math.max(-PITCH_H - 1 - ty, ty - PITCH_H, 0);
+        const outY = Math.max(by0 - ty, ty - this.ph, 0);
         if (outX === 0 && outY === 0) continue; // (inside the fence)
         if (Math.max(outX, outY) < 2) continue; // (keep the fence itself clear)
         if (hash2(tx, ty, s + 6900) > 0.16) continue;
@@ -815,7 +851,7 @@ export class World {
     }
     // the goal flags: a red sand castle behind the left goal, a blue one behind the right
     for (const [side, key] of [[-1, 'castle_red'], [1, 'castle_blue']]) {
-      const tx = side * (PITCH_W + GOAL_D + 3);
+      const tx = side * (this.pw + GOAL_D + 3);
       if (inChunk(tx, 0)) chunk.objects.push({ kind: 'tree', sheet: `beach/${key}`, sw: 32, sh: 32, sx: 0, sy: 0, x: tx * T, y: 2 * T });
     }
     return chunk;
@@ -824,8 +860,8 @@ export class World {
   arenaTile(x, y) {
     if (!this.hasArena) return undefined;
     if (this.pitch) {
-      const ex = Math.max(-PITCH_W - GOAL_D - 1 - PITCH_BEACH - x, x - (PITCH_W + GOAL_D + PITCH_BEACH), 0);
-      const ey = Math.max(-PITCH_H - 1 - PITCH_BEACH - y, y - (PITCH_H + PITCH_BEACH), 0);
+      const ex = Math.max(-this.pw - GOAL_D - 1 - PITCH_BEACH - x, x - (this.pw + GOAL_D + PITCH_BEACH), 0);
+      const ey = Math.max(-this.ph - 1 - (this.rumble ? GOAL_D : 0) - PITCH_BEACH - y, y - (this.ph + PITCH_BEACH), 0);
       return ex > 0 || ey > 0 ? WATER : SAND; // (the sea all round the beach)
     }
     const lx = x - this.ac.x;

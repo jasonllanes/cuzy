@@ -77,7 +77,9 @@ export default function LayoutEditor({ onClose }) {
         const p = place(c);
         return (
           <div key={c.id} className={`tpos le-item ${sel === c.id ? 'sel' : ''}`} style={placeStyle(p)} onPointerDown={(e) => start(e, c)}>
-            {c.joystick ? (
+            {c.stick ? (
+              <div className="joystick aimstick"><span className="aim-icon">⚔️</span></div>
+            ) : c.joystick ? (
               <div className="joystick"><i className="run-line off" style={lockStyles(lock).line} /><i className="run-lock off" style={lockStyles(lock).dot}>🏃</i><div className="joystick-knob" /></div>
             ) : (
               <div className={`tbtn ${c.cls || ''}`}>

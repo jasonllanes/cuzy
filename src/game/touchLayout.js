@@ -7,9 +7,10 @@ import { useEffect, useState } from 'react';
 
 export const TOUCH = [
   { id: 'joystick', label: 'Joystick', x: 10, y: 80, joystick: true },
-  { id: 'attack', kind: 'attack', label: '⚔️ Attack', icon: '⚔️', text: 'Attack', cls: 'round main', x: 93, y: 80, hold: true },
-  { id: 'throw', kind: 'throw', label: '🎯 Throw', icon: '🎯', text: 'Throw', cls: 'round', x: 80, y: 83 },
-  { id: 'use', kind: 'interact', label: '✋ Use', icon: '✋', text: 'Use', cls: 'round', x: 80, y: 63 },
+  { id: 'attack', kind: 'attack', label: '⚔️ Attack stick', icon: '⚔️', text: 'Attack', stick: true, x: 90, y: 74 },
+  { id: 'charge', kind: 'charge', label: '🔱 Hold to charge', icon: '🔱', text: 'Hold', cls: 'round', x: 77, y: 55, hold: true },
+  { id: 'throw', kind: 'throw', label: '🎯 Throw', icon: '🎯', text: 'Throw', cls: 'round', x: 78, y: 79, hold: true },
+  { id: 'use', kind: 'interact', label: '✋ Use', icon: '✋', text: 'Use', cls: 'round', x: 80, y: 34 },
   { id: 'shield', kind: 'shield', label: '🛡️ Shield', icon: '🛡️', text: 'Shield', dock: 'attack' },
   { id: 'invis', kind: 'invis', label: '👻 Invisible', icon: '👻', text: 'Hide', dock: 'attack' },
   { id: 'hp', kind: 'hp', label: '❤️ HP pack', icon: '❤️', text: 'HP', dock: 'slot0' },
@@ -66,7 +67,7 @@ function hotbarGeom(ctx) {
 }
 
 const BASE = { round: 68, main: 92, small: 44 };
-const sizeOf = (c, mz, ts, sc) => (c.cls?.includes('main') ? BASE.main : c.cls?.includes('round') ? BASE.round : BASE.small) * mz * ts * sc;
+const sizeOf = (c, mz, ts, sc) => (c.stick ? 132 : c.cls?.includes('main') ? BASE.main : c.cls?.includes('round') ? BASE.round : BASE.small) * mz * ts * sc;
 
 // where a control is, how big (1 = normal) and how solid (1 = fully)
 export function placeOf(layout, c, ctx) {

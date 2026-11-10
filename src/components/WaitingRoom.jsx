@@ -96,7 +96,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
   const hostName = ordered.find((p) => p.id === host)?.name || 'the host';
   const duelHumans = ordered.filter((p) => !p.ai);
   const sides = new Set(duelHumans.map((p) => teams[p.id]).filter((t) => t !== undefined && t !== null));
-  const duelReady = room.soccer ? sides.has(0) && sides.has(1) : !room.duel || (room.teams ? new Set(duelHumans.map((p) => teams[p.id]).filter((t) => t !== undefined && t !== null)).size >= 2 : duelHumans.length >= 2);
+  const duelReady = room.soccer ? (room.rumble ? sides.size >= 2 : sides.has(0) && sides.has(1)) : !room.duel || (room.teams ? new Set(duelHumans.map((p) => teams[p.id]).filter((t) => t !== undefined && t !== null)).size >= 2 : duelHumans.length >= 2);
 
   // a computer player takes a seat: a hero nobody else is using, and a name from the list
   const addAi = (slot) => {
@@ -124,7 +124,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         <div className="wait-head">
         <p className="tagline">
           {MODE_LABEL[room.mode] || MODE_LABEL.free}
-          {room.escape ? ` · 🚁 Escape: the chopper lands in ${room.escapeMins || 10} min` : room.soccer ? ` · 🏖️ Beach Ball: first to ${room.target || 5} goals${room.matchMins ? ` · ${room.matchMins} min` : ''}${duelHumans.length === 2 ? ' · 1v1' : ''}` : room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''}
+          {room.escape ? ` · 🚁 Escape: the chopper lands in ${room.escapeMins || 10} min` : room.soccer ? (room.rumble ? ` · 🏖️ Beach Rumble: three goals, first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : ` · 🏖️ Beach Ball: first to ${room.target || 5} goals${room.matchMins ? ` · ${room.matchMins} min` : ''}${duelHumans.length === 2 ? ' · 1v1' : ''}`) : room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''}
           {!room.duel && room.mode === 'free' && room.duelEvery > 0 ? ` · ⚔️ a duel every ${room.duelEvery} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : ''} · 👥 {ordered.length}/{room.max}
         </p>
 
@@ -219,7 +219,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         </div>
         )}
 
-        {imHost && room.teams > 0 && room.mode === 'free' && ordered.length < room.max && (
+        {imHost && (room.teams > 0 || room.escape) && room.mode === 'free' && ordered.length < room.max && (
           <button type="button" className="btn small-btn add-ai" onClick={() => addAi()}>🤖 Add a computer player</button>
         )}
 
@@ -238,7 +238,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <button type="button" className="btn ghost" onClick={onLeave}>← Leave room</button>
           {imHost ? (
             <button type="button" className="btn go" disabled={!duelReady} onClick={() => net.send({ t: 'start' })}>
-              {room.soccer ? (duelReady ? 'Kick off ➜' : 'Both teams need a player') : room.duel ? (duelReady ? 'Start the duel ➜' : room.teams ? 'A duel needs two teams with players' : 'A duel needs two players') : ordered.length > 1 ? `Start with ${ordered.length} players ➜` : 'Start alone ➜'}
+              {room.soccer ? (duelReady ? 'Kick off ➜' : room.rumble ? 'Two teams need a player' : 'Both teams need a player') : room.duel ? (duelReady ? 'Start the duel ➜' : room.teams ? 'A duel needs two teams with players' : 'A duel needs two players') : ordered.length > 1 ? `Start with ${ordered.length} players ➜` : 'Start alone ➜'}
             </button>
           ) : (
             <span className="wait-note">⏳ Waiting for {hostName} to start…</span>

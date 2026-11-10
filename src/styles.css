@@ -1868,3 +1868,47 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .c-pin { position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: #d9a441; border: 2px solid #5e3a14; }
 .compass-panel small { font: 700 0.72rem var(--pixel); background: var(--paper); border: 2px solid var(--wood); border-radius: 10px; padding: 2px 10px; }
 @keyframes c-spin { to { transform: rotate(360deg); } }
+
+/* before a duel: the fighters shop and press Ready */
+.duel-ready { position: fixed; z-index: 36; left: 50%; bottom: 150px; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; text-align: center; padding: 10px 16px; max-width: min(92vw, 380px); background: var(--paper); animation: card-pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.duel-ready b { font: 800 0.9rem var(--pixel); color: var(--ink); }
+.duel-ready small { font-size: 0.72rem; color: var(--ink-soft); }
+.duel-ready .dr-who { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; font: 700 0.74rem var(--pixel); }
+.duel-ready .dr-who .on { color: #2f8f4e; }
+
+/* the attack stick (mobile): like the walking stick, in rose */
+.joystick.aimstick { background: rgba(255, 224, 232, 0.4); border-color: rgba(238, 124, 152, 0.85); }
+.joystick.aimstick.held { border-color: #ee7c98; background: rgba(255, 224, 232, 0.6); }
+.aimstick .aim-icon { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2rem; opacity: 0.55; pointer-events: none; }
+.aimstick .aim-arrow { position: absolute; left: 50%; top: 50%; width: 62px; height: 4px; margin: -2px 0 0 0; transform-origin: 0 50%; background: linear-gradient(to right, rgba(238, 124, 152, 0), #ee7c98); border-radius: 2px; pointer-events: none; }
+.aimstick .joystick-knob { background: rgba(232, 80, 122, 0.92); }
+
+/* phones: the compass and the Ready panel stay clear of the sticks and buttons */
+.game.mobile .compass-panel { right: auto; left: 190px; bottom: 96px; transform: scale(0.62); transform-origin: bottom left; }
+.game.mobile .duel-ready { bottom: auto; top: 118px; max-width: min(60vw, 360px); padding: 6px 12px; }
+.game.mobile .duel-ready small { display: none; }
+
+/* phones: the info panels can be hidden (the eye button) or folded, and the button labels (a guide the touch screen does not need) go */
+.game.mobile .hud-eye { position: absolute; z-index: 14; top: 4px; left: calc(14px + 112px * var(--mz, 0.7) * var(--hs, 1)); width: 30px; height: 30px; padding: 0; display: grid; place-items: center; font-size: 0.95rem; border-radius: 50%; border: 3px solid var(--wood); background: var(--paper); cursor: pointer; transform: scale(calc(var(--mz, 0.7) * var(--hs, 1) * 1.15)); transform-origin: top left; }
+.game.mobile .tbtn small:not(.tbtn-count) { display: none; }
+.game.mobile .tbtn.round .tbtn-icon { font-size: 2rem; }
+.game.mobile .hot-title, .game.mobile .hud-help { display: none !important; }
+.game.mobile .top-fold { pointer-events: auto; font: 700 0.7rem var(--pixel); padding: 2px 10px; border-radius: 999px; border: 2px solid var(--wood); background: var(--paper); color: var(--ink-soft); cursor: pointer; }
+.game.mobile .top-fold:only-child { display: none; }
+.game.mobile .top-stack.folded > :not(.top-fold), .game.mobile.top-folded .bet-panel, .game.mobile.top-folded .duel-ready { display: none; }
+.game.mobile.hud-off :is(.stats-tab, .hud-left-col .hud-left, .top-stack, .escape-bar, .duel-next, .bet-panel, .weather-chip, .wave-hud, .shelter-bar, .hud-right .minimap, .hud-right .coin-row, .soccer-bar) { display: none !important; }
+.game:not(.mobile) .top-fold, .game:not(.mobile) .hud-eye { display: none; }
+.game.mobile .top-stack { top: 42px; gap: 3px; }
+.game.mobile .escape-bar { top: 40px; padding: 2px 12px; }
+.game.mobile .escape-bar small { display: none; }
+.game.mobile .soccer-bar { padding: 3px 12px; transform: scale(0.8) !important; transform-origin: top center; }
+.game.mobile .duel-bar { transform: scale(0.8) !important; transform-origin: top center; }
+.game.mobile .top-fold { font-size: 0.62rem; padding: 1px 8px; }
+
+/* Beach Rumble: three teams, each counting the goals it has let in */
+.soccer-bar.rumble { grid-template-columns: repeat(3, auto); }
+.soccer-bar.rumble .sb-mid { grid-column: 1 / -1; grid-row: 2; }
+.soccer-bar.rumble .sb-you { grid-row: 3; }
+.sb-team small { font-size: 0.7rem; opacity: 0.75; }
+.sb-team.me { text-decoration: underline; text-underline-offset: 4px; }
+.sb-team.out { opacity: 0.35; text-decoration: line-through; }

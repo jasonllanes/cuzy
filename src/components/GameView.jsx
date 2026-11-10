@@ -264,6 +264,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const mobile = controls === 'mobile';
   const [roomSetOpen, setRoomSetOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false); // phones: the stats panel slides in from the left
+  const [hudOff, setHudOff] = useState(() => { try { return window.localStorage.getItem('cuzy-hud-off') === '1'; } catch { return false; } }); // phones: hide all the info panels
+  const [topFold, setTopFold] = useState(false); // phones: fold the scoreboard, duel and bet panels away
+  const toggleHud = () => setHudOff((o) => { const n = !o; try { window.localStorage.setItem('cuzy-hud-off', n ? '1' : '0'); } catch { /* private window */ } return n; });
   const [hudMenuOpen, setHudMenuOpen] = useState(false); // phones: the buttons down the right edge fold away
   const roomSetRef = useRef(false);
   const [confirm, setConfirm] = useState(null); // 'quit' or 'reset': asked before it happens
@@ -646,7 +649,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const hints = chatOpen && cheatsOn && (chatText === '' || chatText.startsWith('-')) ? COMMANDS.filter((c) => `-${c.name}`.startsWith(typed) || chatText === '') : [];
 
   return (
-    <div className={`game ${mobile ? 'mobile' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
+    <div className={`game ${mobile ? 'mobile' : ''} ${mobile && hudOff ? 'hud-off' : ''} ${mobile && topFold ? 'top-folded' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
       <div className="game-canvas">
         <canvas ref={canvasRef} />
       </div>
@@ -693,6 +696,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         )}
       </div>
 
+      {mobile && (
+        <button type="button" className="hud hud-eye" onClick={toggleHud} aria-label={hudOff ? 'Show the info panels' : 'Hide the info panels'} title={hudOff ? 'Show the info panels' : 'Hide the info panels'}>{hudOff ? '👁' : '🙈'}</button>
+      )}
       {mobile && (
         <button type="button" className="hud stats-tab" onClick={() => setStatsOpen((o) => !o)} aria-label={statsOpen ? 'Hide stats' : 'Show stats'}>
           ❤ {hp100(hud.hp)} · ⭐ {hud.level || 1} <b>{statsOpen ? '◂' : '▸'}</b>
@@ -986,8 +992,18 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <small>{hud.escape.boarded ? `You are on board · ${hud.escape.outN}/${hud.escape.total} aboard` : hud.escape.phase === 'extract' ? `It leaves when the clock runs out · ${hud.escape.outN}/${hud.escape.total} aboard · use the compass` : 'Loot, survive the zombies, and find a compass'}</small>
         </div>
       )}
-      <div className="top-stack">
-      {hud.soccer && (
+      <div className={`top-stack ${topFold ? 'folded' : ''}`}>
+      {mobile && <button type="button" className="top-fold" onClick={() => setTopFold((f) => !f)}>{topFold ? '▸ Show the match panels' : '▾ Hide the match panels'}</button>}
+      {hud.soccer?.rumble && (
+        <div className="soccer-bar rumble panel small">
+          {[0, 1, 2].map((t) => (
+            <span key={t} className={`sb-team ${hud.soccer.out.includes(t) ? 'out' : ''} ${hud.soccer.team === t ? 'me' : ''}`} style={{ color: ['#e8506a', '#4a9be8', '#4fbf6a'][t] }}>{['🔴', '🔵', '🟢'][t]} {hud.soccer.goals[t]}<small>/{hud.soccer.target}</small></span>
+          ))}
+          <span className="sb-mid"><b>{hud.soccer.left !== null ? `${Math.floor(hud.soccer.left / 60)}:${String(Math.floor(hud.soccer.left % 60)).padStart(2, '0')}` : '⚽'}</b><small>{hud.soccer.sudden ? 'next goal wins!' : 'most goals wins'}</small></span>
+          <small className="sb-you">You are {['🔴 red · defend the left goal', '🔵 blue · defend the right goal', '🟢 green · defend the top goal'][hud.soccer.team] || ''} · score in the others</small>
+        </div>
+      )}
+      {hud.soccer && !hud.soccer.rumble && (
         <div className="soccer-bar panel small">
           <span className="sb-team red">🔴 {hud.soccer.goals[0]}</span>
           <span className="sb-mid"><b>{hud.soccer.left !== null ? `${Math.floor(hud.soccer.left / 60)}:${String(Math.floor(hud.soccer.left % 60)).padStart(2, '0')}` : '⚽'}</b><small>{hud.soccer.sudden ? 'next goal wins!' : `first to ${hud.soccer.target}`}</small></span>
@@ -1016,6 +1032,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {hud.duel?.prep && (
+        <div className="duel-ready panel small">
+          <b>⚔️ Get ready: the duel starts in {hud.duel.call}s</b>
+          <small>Buy anything you want in the shop (B), then press Ready. It starts at once when every fighter is ready.</small>
+          <div className="dr-who">{hud.duel.prep.who.map((w) => <span key={w.id} className={w.ready ? 'on' : ''}>{w.ready ? '✅' : '⏳'} {w.name}</span>)}</div>
+          <button type="button" className="btn go" disabled={hud.duel.prep.mine} onClick={() => gameRef.current?.duelReady()}>{hud.duel.prep.mine ? 'Waiting for the others…' : '✅ Ready'}</button>
         </div>
       )}
       {hud.duel && <BetPanel duel={hud.duel} game={gameRef.current} />}

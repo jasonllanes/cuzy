@@ -108,6 +108,56 @@ function Joystick({ game, lockDist }) {
   );
 }
 
+// The aim stick: the same kind of stick as the walking one, for attacking. Put a thumb on it and the hero swings the way it points
+// (nothing pointed: straight ahead), over and over, while the other thumb keeps walking, so you can run one way and fight the other.
+function AimStick({ game }) {
+  const base = useRef(null);
+  const active = useRef(null);
+  const [knob, setKnob] = useState(null);
+  const point = (e) => {
+    const r = base.current.getBoundingClientRect();
+    const k = r.width / 132;
+    let dx = (e.clientX - (r.left + r.width / 2)) / k;
+    let dy = (e.clientY - (r.top + r.height / 2)) / k;
+    const raw = Math.hypot(dx, dy);
+    game?.touchAtk(raw > 14 ? Math.atan2(dy, dx) : null);
+    if (raw > 50) {
+      dx = (dx / raw) * 50;
+      dy = (dy / raw) * 50;
+    }
+    setKnob({ x: dx, y: dy, aim: raw > 14 ? Math.atan2(dy, dx) : null });
+  };
+  const end = () => {
+    active.current = null;
+    setKnob(null);
+    game?.touchAtkEnd();
+  };
+  return (
+    <div
+      ref={base}
+      className={`joystick aimstick ${knob ? 'held' : ''}`}
+      onPointerDown={(e) => {
+        active.current = e.pointerId;
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* the finger is already gone */
+        }
+        point(e);
+      }}
+      onPointerMove={(e) => active.current === e.pointerId && point(e)}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onContextMenu={(e) => e.preventDefault()}
+      aria-label="Attack stick"
+    >
+      <span className="aim-icon">⚔️</span>
+      {knob?.aim != null && <i className="aim-arrow" style={{ transform: `rotate(${knob.aim}rad)` }} />}
+      <div className="joystick-knob" style={knob ? { transform: `translate(${knob.x}px, ${knob.y}px)` } : { opacity: 0 }} />
+    </div>
+  );
+}
+
 // A round button. `hold` buttons also report how far you drag from them, which becomes the aim.
 function TouchButton({ c, game, cooldown = 0, text, disabled = false, onTap }) {
   const ref = useRef(null);
@@ -135,7 +185,7 @@ function TouchButton({ c, game, cooldown = 0, text, disabled = false, onTap }) {
     else game?.touchPress(c.kind, c.hold ? angle(e) : null);
   };
   const drag = (e) => {
-    if (down.current && c.hold) game?.setTouchAim(angle(e));
+    if (down.current && c.hold) game?.setTouchAim(angle(e), c.kind === 'throw' ? 'thr' : 'chg');
   };
   const release = (e) => {
     if (!down.current) return;
@@ -158,7 +208,7 @@ function TouchButton({ c, game, cooldown = 0, text, disabled = false, onTap }) {
       title={c.label}
     >
       <span className="tbtn-icon">{c.icon}</span>
-      <small>{text ?? c.text}</small>
+      <small className={text !== undefined ? 'tbtn-count' : undefined}>{text ?? c.text}</small>
       {cooldown > 0 && <i className="tbtn-cd" style={{ height: `${Math.min(100, cooldown * 100)}%` }} />}
     </button>
   );
@@ -185,7 +235,6 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
     invis: hud.invisCd ? hud.invisCd / 25 : 0,
     hp: hud.cds?.hp ? hud.cds.hp / 6 : 0,
     stam: hud.cds?.stam ? hud.cds.stam / 5 : 0,
-    attack: hud.dashCd ? Math.min(1, hud.dashCd / 1.2) : 0,
   };
   const taps = { chat: onChat, shop: onShop, hp: () => onSupply?.('hp'), stam: () => onSupply?.('stam') };
   return (
@@ -206,7 +255,7 @@ export default function TouchControls({ game, hud, survival, waves, onChat, onSh
         const item = c.id === 'throw' && survival ? { ...c, label: '🔫 Shoot', icon: '🔫', text: 'Shoot' } : c;
         return (
           <div className="tpos" key={c.id} style={placeStyle(p)}>
-            {c.joystick ? <Joystick game={game} lockDist={lockDistOf(layout)} /> : <TouchButton c={item} game={game} cooldown={cooldownOf[c.id] || 0} text={text} disabled={disabled} onTap={taps[c.id]} />}
+            {c.joystick ? <Joystick game={game} lockDist={lockDistOf(layout)} /> : c.stick ? <AimStick game={game} /> : <TouchButton c={item} game={game} cooldown={cooldownOf[c.id] || 0} text={text} disabled={disabled} onTap={taps[c.id]} />}
           </div>
         );
       })}

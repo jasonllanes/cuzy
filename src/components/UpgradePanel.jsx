@@ -107,13 +107,13 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
 
         {tab === 'air' && survival && (
           <div className="recruit-note">
-            <b>✈️ Air support</b> (buy it any time, as often as you like)
-            {hud.wave?.air > 0 && <p className="sell-empty">{hud.wave.air} in the sky right now.</p>}
+            <b>✈️ Air support</b> (3 aircraft in the sky at once, and 3 calls per wave for the whole team)
+            <p className="sell-empty">Called this wave: {hud.wave?.airUsed ?? 0} / {hud.wave?.airMax ?? 3}{hud.wave?.air > 0 ? ` · ${hud.wave.air} in the sky right now` : ''}</p>
             <div className="recruit-list">
               {Object.entries(AIR_SUPPORT).map(([kind, a]) => (
                 <div key={kind} className="recruit-chip hire rar rar-epic">
                   <span><b>{a.icon} {a.name}</b><small>{a.blurb}</small></span>
-                  <button className="btn go small-btn" disabled={hud.coins < a.cost} onClick={() => game.buyAir(kind)}>🪙 {a.cost}</button>
+                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airUsed ?? 0) >= (hud.wave?.airMax ?? 3) || (hud.wave?.air ?? 0) >= 3} onClick={() => game.buyAir(kind)}>🪙 {a.cost}</button>
                 </div>
               ))}
             </div>

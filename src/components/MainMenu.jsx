@@ -10,7 +10,7 @@ import MusicButton from './MusicButton';
 import V2Sprite from './V2Sprite';
 import Avatar from './Avatar';
 import MapPreview from './MapPreview';
-import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
+import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
 
@@ -36,7 +36,7 @@ function useLobby(net) {
   return state;
 }
 
-export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, onTraining, onTrainingV2, onV2, onExitV2, onSaveName, v2 = false, notice = '', inviteCode = '' }) {
+export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, onMaze, onTraining, onTrainingV2, onV2, onExitV2, onSaveName, v2 = false, notice = '', inviteCode = '' }) {
   const invite = inviteCode || invitedCode(); // an invitation from inside the game, or from a link
   // someone tapped an invite link: skip the setup walk and ask only for a name and a hero (until they ask for the full menu)
   const [fullMenu, setFullMenu] = useState(false);
@@ -66,6 +66,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   // game modes of their own (Free Roam rounds with a fixed world and fixed rules): they are set up in the room, and can still be tuned there
   const SPECIAL = {
     beach: { icon: '🏖️', name: 'Beach Ball', seed: PITCH_SEED, together: true, blurb: 'A cozy ball game: two teams, one beach ball, a goal at each end. Kick it by walking into it. 1v1 with two players.' },
+    rumble: { icon: '🌴', name: 'Beach Rumble', seed: RUMBLE_SEED, together: true, blurb: 'The free for all version of Beach Ball: up to three teams on a pitch with three goals (left, right and top). Defend yours and score in the others: a goal counts for the team of whoever touched the ball last.' },
     escape: { icon: '🚁', name: 'Escape', seed: ESCAPE_SEED, together: false, blurb: 'Open world survival: loot buildings and cars for guns, grenades and a compass, fight the zombies, and reach the chopper that lands far away before it leaves. No shop.' },
     duel: { icon: '🏛️', name: 'Duel', seed: ARENA_SEED, together: true, blurb: 'A 1v1 in the Colosseum against the clock (everyone else watches, and can bet). Pick the fighters in the room.' },
   };
@@ -157,7 +158,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const create = () =>
     run(
       net
-        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, duel: gameType === 'duel', soccer: gameType === 'beach', escape: gameType === 'escape', player: { name: myName(), hero: activeHeroId } })
+        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, duel: gameType === 'duel', soccer: gameType === 'beach' || gameType === 'rumble', rumble: gameType === 'rumble', escape: gameType === 'escape', player: { name: myName(), hero: activeHeroId } })
         .then((joined) => {
           // a room server that was started before Wave Defense existed quietly makes an ordinary room
           if (gameMode !== 'free' && joined.room.mode !== gameMode) {
@@ -174,7 +175,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     setError('');
     try {
       const surv = gameMode === 'survival';
-      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : special ? `${myName()}'s ${special.name.toLowerCase()}` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, duel: gameType === 'duel', soccer: gameType === 'beach', escape: gameType === 'escape', allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
+      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : special ? `${myName()}'s ${special.name.toLowerCase()}` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, duel: gameType === 'duel', soccer: gameType === 'beach' || gameType === 'rumble', rumble: gameType === 'rumble', escape: gameType === 'escape', allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
     } catch (err) {
       // no room available (offline, or the rooms table is not set up): say so, and play without one if asked again
       if (noRoomOk) {
@@ -304,7 +305,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             offlineText={net.offlineText}
           />
         ) : (
-          <MenuHome view={view} setView={setView} onPlay={() => start('solo')} onMulti={() => { setMode('together'); setError(''); setView('multi'); }} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} onTrainingV2={onTrainingV2} onV2={onV2} notice={notice} assets={assets} onAccountName={(n) => setName((cur) => (cur.trim() ? cur : n.slice(0, 14)))} />
+          <MenuHome view={view} setView={setView} onMaze={onMaze} onPlay={() => start('solo')} onMulti={() => { setMode('together'); setError(''); setView('multi'); }} name={name} setName={setName} online={status === 'online'} onTraining={onTraining} onTrainingV2={onTrainingV2} onV2={onV2} notice={notice} assets={assets} onAccountName={(n) => setName((cur) => (cur.trim() ? cur : n.slice(0, 14)))} />
         )}
       </div>
     );
@@ -422,6 +423,13 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                   <small>{sp.blurb}</small>
                 </button>
               ))}
+              {!v2 && onMaze && (
+                <button type="button" className="type-card" onClick={onMaze}>
+                  <span className="type-emoji" style={{ fontSize: '2.6rem' }}>🍓</span>
+                  <b>Maze Rush</b>
+                  <small>An endless Pac-Man style maze: collect the fruit on the list, dodge the monsters, find the portal. Solo, 2 players on one keyboard, or online.</small>
+                </button>
+              )}
             </div>
             {fromMulti ? (
               <div className="nav-row">
@@ -542,7 +550,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <p className="hint">
                   {endless
                     ? <>Hold the shelter for as long as you can{mode === 'together' ? ', everyone defending the same base' : ''}. There are no waves: the zombies never stop, and every batch is harder than the last. 👹 A <b>Colossus</b> turns up every 5th batch.</>
-                    : <>Survive <b>{survWaves} waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. They and the 👹 <b>Colossus</b> bosses get stronger and higher level the further you get.</>} The difficulty and the number of waves can be changed in the room settings.
+                    : <>Survive <b>{survWaves} waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. They, the 🦇 bats (shoot them), the archers, the 🧙 wizards and the 👹 <b>Colossus</b> and <b>Werebear</b> bosses get stronger and higher level the further you get.</>} The difficulty and the number of waves can be changed in the room settings.
                 </p>
                 <div className="diff-row" role="radiogroup" aria-label="How many waves">
                   {WAVE_COUNTS.map((n) => (

@@ -77,7 +77,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
           <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Everyone in the room gets the new world.'}</small></div>
           <select value={duel ? 'colosseum' : soccer ? 'pitch' : escape ? 'escape' : mapIdOf(room.seed, room.mode)} disabled={locked || duel || soccer || escape} onChange={(e) => onChange({ map: e.target.value })}>
             {duel && <option value="colosseum">🏛️ Colosseum</option>}
-            {soccer && <option value="pitch">🏖️ Beach Pitch</option>}
+            {soccer && <option value="pitch">{room.rumble ? '🏖️ Beach Rumble Pitch (3 goals)' : '🏖️ Beach Pitch'}</option>}
             {escape && <option value="escape">🚁 Escape Zone</option>}
             {(free ? FREE_MAPS : SURVIVAL_MAPS).map((m) => <option key={m.id} value={m.id}>{m.icon} {m.name}</option>)}
           </select>
@@ -94,6 +94,9 @@ export default function RoomSettings({ room, count, editable, onChange, players 
             {[0, 25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n ? `🪙 ${n}` : 'None'}</option>)}
           </select>
         </div>
+        {free && (
+          <Switch label="Max stats" hint="Everyone starts with every shop upgrade (health, stamina, damage, armor, attack speed...) at its top level." on={room.maxStats !== false} disabled={!editable || room.started} onChange={(v) => onChange({ maxStats: v })} />
+        )}
         <div className="set-row">
           <div className="set-label"><b>Startup wood</b><small>Wood everyone begins the round with (for crafting weapons)</small></div>
           <select value={room.startWood || 0} disabled={!editable || room.started} onChange={(e) => onChange({ startWood: Number(e.target.value) })}>
@@ -161,6 +164,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
           <Switch label="Beach Ball match" hint={soccer ? 'Two teams, one beach ball and a goal at each end: kick it by walking into it (run or dash for a hard kick) and roll it into the other team’s goal. With only two players it is a 1v1.' : 'A cozy ball game on a beach pitch: two teams, one ball, a goal at each end. No fighting, no monsters.'} on={soccer} disabled={locked} onChange={(v) => onChange({ soccer: v })} />
           {soccer && (
             <>
+              <Switch label="Rumble: free for all" hint="Three teams and a pitch with three goals (left, right and top). Defend your own goal and score in the others: a goal counts for the team of the player who touched the ball last (an own goal counts for nobody)." on={!!room.rumble} disabled={locked || room.started} onChange={(v) => onChange({ rumble: v })} />
               <div className="set-row">
                 <div className="set-label"><b>Goals to win</b><small>The first team to score this many wins the match.</small></div>
                 <select value={room.target || 5} disabled={locked} onChange={(e) => onChange({ target: Number(e.target.value) })}>
@@ -168,13 +172,13 @@ export default function RoomSettings({ room, count, editable, onChange, players 
                 </select>
               </div>
               <div className="set-row">
-                <div className="set-label"><b>Match time</b><small>{room.matchMins ? 'When the whistle blows the team with more goals wins. If it is level, the next goal wins.' : 'No clock: play to the goal target.'}</small></div>
+                <div className="set-label"><b>Match time</b><small>{room.matchMins ? (room.rumble ? 'When the whistle blows the team with the most goals wins. If it is level, the next goal by one of them wins.' : 'When the whistle blows the team with more goals wins. If it is level, the next goal wins.') : 'No clock: play to the goal target.'}</small></div>
                 <select value={room.matchMins ?? 5} disabled={locked} onChange={(e) => onChange({ matchMins: Number(e.target.value) })}>
                   {[0, 2, 3, 5, 10, 15].map((n) => <option key={n} value={n}>{n ? `${n} min` : 'No clock'}</option>)}
                 </select>
               </div>
               <div className="set-row">
-                <div className="set-label"><b>Shuffle teams</b><small>Deals everyone out to the red and blue teams at random. Players can also pick a side in the waiting room.</small></div>
+                <div className="set-label"><b>Shuffle teams</b><small>Deals everyone out to the teams at random. Players can also pick a side in the waiting room.</small></div>
                 <button type="button" className="btn go small-btn" disabled={locked} onClick={() => onChange({ shuffleTeams: true })}>🎲 Shuffle</button>
               </div>
             </>

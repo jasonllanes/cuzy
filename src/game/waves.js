@@ -9,7 +9,8 @@ const PREP_BETWEEN = 14;
 const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
 const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
 const MAX_ALIVE = 60;
-const MAX_AIR = 8; // aircraft in the sky at once
+export const MAX_AIR = 3; // aircraft in the sky at once
+export const MAX_AIR_PER_WAVE = 3; // and how many a wave (or a batch, in Endless) may call in all
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
 export const BARRICADE_COST = 4; // a Barricade Box from the shop
 export const REPAIR_COST = 2; // per destroyed barricade planted back
@@ -18,6 +19,17 @@ export const BOSS_WIND = 1.6; // seconds the red mark shows before a boss skill 
 export const bossDashHalf = (scale) => 9 + 4 * scale;
 const BOSS_DASH_SPEED = 250;
 const BOSS_DASH_TIME = 0.4;
+// [[name, how many], ...] of a list of monster types (for the boss announcements)
+const countNames = (types) => {
+  const out = [];
+  for (const t of types) {
+    const name = MONSTERS[t].name.replace(/^The /, '');
+    const g = out.find((q) => q[0] === name);
+    if (g) g[1]++;
+    else out.push([name, 1]);
+  }
+  return out;
+};
 const POWER_SLOW = 0.35; // monsters move and strike at this fraction of their normal pace while it lasts
 const SNAPSHOT_EVERY = 0.125; // Wave Defense and Survival snapshots per second to the room: a few less keeps busy rooms under Supabase's message limit
 const HOUSE_SOFTNESS = 0.35; // the house shrugs off hits better than a single barricade does
@@ -86,7 +98,8 @@ export class WaveSim {
     this.baseLevel = 0;
     this.lightLevel = 0; // the shelter's lamps (Survival): one level for the whole team
     this.mendLevel = 0; // the shelter's self-repair (Survival): it heals this much more every second, for the whole team
-    this.airs = []; // the air strikes in the sky (as many as were bought: there is no waiting)
+    this.airs = []; // the air strikes in the sky (3 at most at a time, and 3 calls a wave)
+    this.airUsed = 0; // aircraft called in during this wave
     this.airBombs = []; // bombs on their way down
     this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES; // how many waves the run lasts (the host picks it); 0 is endless
     this.endless = !!game.world.endless || game.waveCount === 0; // Endless Survival: no waves, the zombies just keep coming
@@ -156,6 +169,8 @@ export class WaveSim {
       baseLevel: this.baseLevel,
       mendLevel: this.mendLevel || 0,
       air: this.airs.length,
+      airUsed: this.airUsed || 0,
+      airMax: MAX_AIR_PER_WAVE,
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       allies: this.allies.length,
@@ -295,6 +310,7 @@ export class WaveSim {
     const bossBurst = isBoss(last);
     const want = bossBurst ? this.queue.length : Math.min(this.burstSize, room);
     let made = 0;
+    const madeTypes = [];
     // (a side with only water or a crowd of players on it is skipped: another side is tried)
     for (let attempt = 0; attempt < 14 && !made; attempt++) {
       const base = Math.random() * Math.PI * 2;
@@ -305,14 +321,16 @@ export class WaveSim {
         if (!this.spawnMonster(type, a)) break;
         this.queue.pop();
         made++;
+        madeTypes.push(type);
       }
     }
-    if (bossBurst && made) this.emit({ type: 'boss', n: made, wave: this.wave, endless: this.endless });
+    if (bossBurst && made) this.emit({ type: 'boss', n: made, wave: this.wave, endless: this.endless, list: countNames(madeTypes) });
     return made > 0;
   }
 
   startWave() {
     this.wave++;
+    if (this.endless) this.airUsed = 0; // (a new batch)
     const players = this.g.waveTargets().length; // (the Colossus bosses are scaled to the size of the team)
     const list = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players, this.total);
     // the bosses go last: the queue is spawned from its end
@@ -340,10 +358,11 @@ export class WaveSim {
     this.powerAt = Math.random() < 0.75 ? Math.min(7 + Math.floor(Math.random() * 6), Math.max(3, Math.floor(this.waveTotal * 0.6))) : 0;
     this.phase = 'fight';
     const bosses = this.queue.filter((t) => MONSTERS[t].boss).length;
-    this.emit({ type: 'start', wave: this.wave, boss: !this.endless && this.wave === this.total, bosses, endless: this.endless });
+    this.emit({ type: 'start', wave: this.wave, boss: !this.endless && this.wave === this.total, bosses, endless: this.endless, list: countNames(this.queue.filter((t) => MONSTERS[t].boss)) });
   }
 
   finishWave() {
+    this.airUsed = 0; // the next wave may call three more
     if (this.wave >= this.total) {
       this.phase = 'victory';
       this.emit({ type: 'win' });
@@ -398,20 +417,48 @@ export class WaveSim {
       if (!relax && !flyer && this.nearWater(x, y, 28)) continue;
       if (!relax && this.g.seenFrom(x, y)) continue; // zombies come in from outside the screen, never on it
       this.spawnFail = 0;
-      // in Survival every wave is a little tougher and quicker than the last
-      const apoc = this.theme === 'apoc';
-      // monsters (the bosses too) get stronger the further into the run it is, whatever its length
-      const prog = progressOf(this.wave, this.endless ? 0 : this.total);
-      const lv = def.boss ? Math.min(10, Math.max(1, Math.ceil(prog * 0.8))) : rollMonsterLevel(prog);
-      const hp = Math.max(1, Math.round(def.hp * this.diff.hp * lvHp(lv) * (apoc ? 1 + 0.06 * (prog - 1) : 1)));
-      this.monsters.push({
-        lv, sp: (apoc ? Math.min(1.6, 1 + 0.03 * (prog - 1)) : 1) * lvSpeed(lv), id: this.nextId++, type, x, y, hp, max: hp, face: 1, state: 'walk', t: 0, anim: Math.random() * 4,
-        cd: 0.5 + Math.random(), atk: 0, kx: 0, ky: 0, stuck: 0, dirv: 0,
-      });
+      this.makeMonster(type, x, y);
       return true;
     }
     this.spawnFail = (this.spawnFail || 0) + 1;
     return false;
+  }
+
+  // a new monster at (x, y)
+  makeMonster(type, x, y, level = 0) {
+    const def = MONSTERS[type];
+    // in Survival every wave is a little tougher and quicker than the last
+    const apoc = this.theme === 'apoc';
+    // monsters (the bosses too) get stronger the further into the run it is, whatever its length
+    const prog = progressOf(this.wave, this.endless ? 0 : this.total);
+    const lv = level || (def.boss ? Math.min(10, Math.max(1, Math.ceil(prog * 0.8))) : rollMonsterLevel(prog));
+    const hp = Math.max(1, Math.round(def.hp * this.diff.hp * lvHp(lv) * (apoc ? 1 + 0.06 * (prog - 1) : 1)));
+    const m = {
+      lv, sp: (apoc ? Math.min(1.6, 1 + 0.03 * (prog - 1)) : 1) * lvSpeed(lv), id: this.nextId++, type, x, y, hp, max: hp, face: 1, state: 'walk', t: 0, anim: Math.random() * 4,
+      cd: 0.5 + Math.random(), atk: 0, kx: 0, ky: 0, stuck: 0, dirv: 0,
+    };
+    this.monsters.push(m);
+    return m;
+  }
+
+  // The Zombie Wizard raises a pair of zombies beside it now and then (never more than four of its own at a time)
+  wizardSummon(m, def, dt) {
+    m.sumT = (m.sumT ?? 3 + Math.random() * 3) - dt;
+    if (m.sumT > 0) return;
+    const mine = this.monsters.filter((q) => q.maker === m.id && q.state !== 'dead').length;
+    if (mine >= 4 || this.monsters.length >= MAX_ALIVE + 12) {
+      m.sumT = 2;
+      return;
+    }
+    m.sumT = 9 + Math.random() * 4;
+    m.atk = 0.5;
+    const kind = this.wave >= 7 && Math.random() < 0.4 ? 'z_runner' : this.wave >= 5 && Math.random() < 0.3 ? 'z_axe' : def.summon;
+    for (let k = 0; k < 2; k++) {
+      const z = this.makeMonster(kind, m.x + (k ? 18 : -18), m.y + 6, Math.max(1, (m.lv || 1) - 1));
+      z.maker = m.id;
+      z.cd = 1;
+    }
+    this.emit({ type: 'summon', x: Math.round(m.x), y: Math.round(m.y) });
   }
 
   // ---------- monsters ----------
@@ -486,6 +533,7 @@ export class WaveSim {
     // which way a four-direction sprite should look: 0 down, 1 up, 2 right, 3 left
     m.dirv = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 2 : 3) : dy >= 0 ? 0 : 1;
 
+    if (def.summon && m.state !== 'dead') this.wizardSummon(m, def, dt);
     if (def.kind === 'shoot') {
       const inRange = dist <= def.range;
       if (!inRange) this.step(m, def, (dx / dist) * speed * dt, (dy / dist) * speed * dt);
@@ -495,9 +543,10 @@ export class WaveSim {
         const sx = kind === 'house' ? this.center.x - m.x : dx;
         const sy = kind === 'house' ? this.center.y - m.y : dy;
         const sl = Math.hypot(sx, sy) || 1;
+        const sp = def.bolt ? 80 : 95;
         this.shots.push({
-          x: m.x, y: m.y - 6, vx: (sx / sl) * 95, vy: (sy / sl) * 95, life: 1.8,
-          dmg: this.heartDamage(def, m), sd: def.sd * this.diff.dmg, spit: !!def.fly, by: { kind: 'monster', id: m.id, name: def.name },
+          x: m.x, y: m.y - 6, vx: (sx / sl) * sp, vy: (sy / sl) * sp, life: 1.8,
+          dmg: this.heartDamage(def, m), sd: def.sd * this.diff.dmg, spit: !!def.fly, arrow: def.arrow || 0, bolt: !!def.bolt, by: { kind: 'monster', id: m.id, name: def.name },
         });
         m.cd = def.rate;
         m.atk = 0.3;
@@ -515,6 +564,11 @@ export class WaveSim {
       // caught on a tree or a rock: it slides round it (a side is picked and kept for a moment) instead of pushing on for ever
       let mx = (dx / dist) * speed * dt;
       let my = (dy / dist) * speed * dt;
+      if (def.airborne) {
+        // a bat does not fly straight: it swoops from side to side
+        const w = Math.sin(m.anim * 6 + m.id) * 0.9;
+        [mx, my] = [mx - (dy / dist) * speed * dt * w, my + (dx / dist) * speed * dt * w];
+      }
       if (m.slideT > 0) {
         m.slideT -= dt;
         const c = Math.cos((Math.PI / 2.2) * m.slideDir);
@@ -952,7 +1006,7 @@ export class WaveSim {
   // 'carpet': a helicopter sweeps across the whole map and drops bombs along its path. 'gunship': a chopper circles the shelter
   // for a minute, firing its machine gun at the zombies. They can be bought any time, as many as you like (a few at once is plenty).
   callAir(kind) {
-    if (this.phase === 'victory' || this.phase === 'defeat' || this.airs.length >= MAX_AIR) return false;
+    if (this.phase === 'victory' || this.phase === 'defeat' || this.airs.length >= MAX_AIR || this.airUsed >= MAX_AIR_PER_WAVE) return false;
     const c = this.center;
     if (kind === 'carpet') {
       const ang = Math.random() * Math.PI * 2;
@@ -960,6 +1014,7 @@ export class WaveSim {
     } else if (kind === 'gunship') {
       this.airs.push({ kind, t: 0, dur: 60, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false });
     } else return false;
+    this.airUsed++;
     this.emit({ type: 'air', kind });
     return true;
   }
@@ -1086,7 +1141,7 @@ export class WaveSim {
       qb: this.queueCounts().map(([t, n]) => [MONSTER_IDS.indexOf(t), n]),
       m: this.monsters.map((m) => [m.id, MONSTER_IDS.indexOf(m.type), Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10, m.hp, m.max, m.face, m.state === 'dead' ? 2 : m.state === 'hurt' ? 1 : 0, m.atk > 0 ? 1 : 0, m.dirv, m.lv || 1, m.skill ? [m.skill.kind === 'dash' ? 1 : 2, m.skill.phase, Math.round(m.skill.prog * 100) / 100, Math.round(m.skill.ang * 100) / 100] : 0]),
       b: this.barricades.map((b) => [b.id, b.x, b.y, Math.round(b.hp * 10) / 10, b.max, b.v ? 1 : 0, b.r ? 1 : 0]),
-      s: this.shots.map((s) => [Math.round(s.x), Math.round(s.y), s.spit ? 1 : 0]),
+      s: this.shots.map((s) => [Math.round(s.x), Math.round(s.y), s.bolt ? 5 : s.arrow ? 1 + s.arrow : s.spit ? 1 : 0, Math.round(Math.atan2(s.vy, s.vx) * 100)]),
       a: this.allies.map((a) => [a.id, ALLY_KINDS.indexOf(a.kind), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, a.dir, a.moving ? 1 : 0, a.atk > 0 ? 1 : 0]),
       as: this.ashots.map((s) => [Math.round(s.x), Math.round(s.y), s.k || 0, Math.round(Math.atan2(s.vy, s.vx) * 100)]),
       bl: this.baseLevel,
@@ -1094,6 +1149,7 @@ export class WaveSim {
       ml: this.mendLevel || 0,
       ar: this.airs.map((a) => [a.kind === 'carpet' ? 1 : 2, Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10]),
       ab: (this.airBombs || []).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.fall * 100) / 100, b.R]),
+      au: this.airUsed || 0,
       el: Math.round(this.elapsed),
       sm: this.startMode,
       tw: this.endless ? 0 : this.total,
@@ -1175,6 +1231,8 @@ export class WaveMirror {
       teamCap: teamCap(this.baseLevel),
       mendLevel: this.mendLevel || 0,
       air: this.airs.length,
+      airUsed: this.airUsed || 0,
+      airMax: MAX_AIR_PER_WAVE,
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       boss: boss ? { hp: boss.hp, max: boss.max, name: MONSTERS[boss.type].name } : null,
@@ -1226,7 +1284,7 @@ export class WaveMirror {
       return m;
     });
     this.barricades = s.b.map(([id, x, y, hp, max, v, r]) => ({ id, x, y, hp, max, v: !!v, r: !!r }));
-    this.shots = s.s.map(([x, y, spit]) => ({ x, y, spit: !!spit }));
+    this.shots = s.s.map(([x, y, k, ang]) => ({ x, y, spit: k === 1, arrow: k >= 2 && k <= 4 ? k - 1 : 0, bolt: k === 5, ang: (ang || 0) / 100 }));
     const oldAllies = new Map(this.allies.map((a) => [a.id, a]));
     this.allies = (s.a || []).map(([id, ki, x, y, dir, moving, atk]) => {
       const a = oldAllies.get(id) || { id, x, y, anim: Math.random() * 3 };
@@ -1244,6 +1302,7 @@ export class WaveMirror {
       Object.assign(this.airs[i], { kind: k === 1 ? 'carpet' : 'gunship', tx: x, ty: y, ang, firing: !!firing });
     });
     this.airBombs = (s.ab || []).map(([x, y, fall, R]) => ({ x, y, fall, R }));
+    this.airUsed = s.au || 0;
     this.elapsed = s.el || 0;
     this.startMode = s.sm || 'timer';
     if (s.tw !== undefined) {

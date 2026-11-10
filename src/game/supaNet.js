@@ -10,7 +10,7 @@
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
 import { TEAMS, TEAM_COUNTS } from './teams.js';
-import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, seedForMode, seedWithMap } from './maps.js';
+import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, seedForMode, seedWithMap } from './maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -30,6 +30,7 @@ const defaultTarget = (winBy) => (winBy === 'monsters' ? MONSTER_TARGET : KILL_T
 const clampTarget = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(99, Math.max(1, Math.round(Number(v)))) : fallback);
 const cleanBet = (v) => (Number(v) > 0 ? 1 : 0); // betting on the duels: on or off (the players decide how much)
 const BET_WINDOW = 15; // seconds to place a bet before a duel starts
+const PREP_WINDOW = 30; // seconds the fighters get to shop and get ready (the duel starts early when they are all ready)
 const cleanEvery = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.min(60, Math.max(1, Math.round(Number(v)))) : 0); // minutes between the duels of a running round (0 = none)
 const cleanEsc = (v, lo, hi, def) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Math.round(Number(v)))) : def);
 const cleanMatch = (v) => (Number.isFinite(Number(v)) ? Math.min(15, Math.max(0, Math.round(Number(v)))) : 5); // minutes of a Beach Ball match (0: first to the goal target, no clock)
@@ -37,7 +38,7 @@ const cleanMins = (v) => (Number.isFinite(Number(v)) ? Math.min(10, Math.max(1, 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'matchMins', 'escape', 'escapeMins', 'extractMins'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -107,7 +108,9 @@ export class SupaNet {
     this.lobbyReady = false;
     this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0, duel: 0, duelEvent: 0, duelPrep: 0, match: 0, escape: 0 };
     this.esc = null; // the Escape round: { phase: 'wait' | 'extract', left, out: Set of the ones who boarded the chopper }
-    this.goals = [0, 0]; // goals of the Beach Ball match (left team, right team)
+    this.goals = [0, 0, 0]; // goals of the Beach Ball match (left team, right team); in a Rumble: goals each team has conceded
+    this.outTeams = new Set(); // Rumble: the teams that have conceded too many
+    this.suddenSet = new Set(); // Rumble: the teams that are level at the whistle
     this.sudden = false; // time is up and it is level: the next goal wins
     this.matchLeft = null;
     this.record = new Map(); // duel wins and losses for the whole stay in this room: player id -> { w, l }
@@ -156,7 +159,9 @@ export class SupaNet {
     if (this.timers) clearInterval(this.timers.match);
     if (this.timers) clearInterval(this.timers.escape);
     this.esc = null;
-    this.goals = [0, 0];
+    this.goals = [0, 0, 0];
+    this.outTeams = new Set();
+    this.suddenSet = new Set();
     this.sudden = false;
     this.matchLeft = null;
     this.resetDuel?.();
@@ -336,7 +341,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, matchMins, escape, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, rumble, matchMins, escape, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, maxStats, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -359,6 +364,7 @@ export class SupaNet {
       allowLate: allowLate !== false,
       startMoney: Math.min(99999, Math.max(0, Math.round(Number(startMoney)) || 0)), // coins everyone starts a round with
       startWood: Math.min(9999, Math.max(0, Math.round(Number(startWood)) || 0)), // wood everyone starts a round with
+      maxStats: maxStats !== false, // everyone starts with every shop upgrade at its top level (Free Roam)
       allowVisit: allowVisit === undefined ? !free : allowVisit === true, // may players teleport to each other? (on by default in co-op Survival, off in Free Roam fights)
       waves: Number.isInteger(Number(waves)) && Number(waves) >= 0 && Number(waves) <= 99 ? Number(waves) : 10, // how many waves a Survival run lasts (0 = endless)
       waveStart: 'timer', // what starts the next wave in Survival: timer | vote | manual | instant (kept in the channel, not in the rooms table)
@@ -370,6 +376,7 @@ export class SupaNet {
       escapeMins: cleanEsc(escapeMins, 3, 30, 10), // minutes until the chopper lands
       extractMins: cleanEsc(extractMins, 2, 15, 5), // minutes the chopper waits
       soccer: false, // a Beach Ball match (goals, two teams) on a beach pitch (kept in the channel)
+      rumble: false, // ...the three-team free for all with three goals
       matchMins: cleanMatch(matchMins),
       duelEvery: free ? cleanEvery(duelEvery) : 0, // a duel in the Colosseum every this many minutes of a running Free Roam round (0 = none)
       duelPick: 'pick', // who duels next (a 1v1 with spectators): pick (the host) | random | streak (the winner stays, the loser sits out) | robin (everybody in turn)
@@ -384,7 +391,7 @@ export class SupaNet {
     // the game modes that are picked on the menu: a Beach Ball match, or the Escape zone
     if (free && soccer === true) {
       this.cfg = cfg;
-      this.setSoccer(true);
+      this.setSoccer(true, rumble === true);
     }
     if (free && escape === true) {
       this.cfg = cfg;
@@ -677,7 +684,7 @@ export class SupaNet {
       started: this.started,
       host: this.members.get(this.hostId)?.name || '?',
       ...(this.cfg.escape && this.started && this.esc ? { escPhase: this.esc.phase, escLeft: this.esc.left, escOut: [...this.esc.out] } : {}),
-      ...(this.cfg.soccer && this.started ? { soccerGoals: [...this.goals], soccerLeft: this.matchLeft, soccerSudden: this.sudden } : {}),
+      ...(this.cfg.soccer && this.started ? { soccerGoals: [...this.goals], soccerLeft: this.matchLeft, soccerSudden: this.sudden, soccerOut: [...this.outTeams], soccerTied: [...this.suddenSet] } : {}),
       ...(this.cfg.mode === 'free' && ((this.cfg.duel && this.started) || this.duelLive) ? { duelFighters: [...this.fighters], duelFallen: [...this.fallen], duelUnits: Object.fromEntries(this.fighterUnit), duelLive: this.duelLive } : {}),
     };
   }
@@ -988,7 +995,10 @@ export class SupaNet {
         this.request('escaped', {});
         break;
       case 'goal':
-        this.request('goal', { team: Number(m.team) === 1 ? 1 : 0 });
+        this.request('goal', { team: Number(m.team) === 1 ? 1 : 0, conceded: m.conceded === undefined ? undefined : Number(m.conceded), by: m.by === undefined || m.by === null ? undefined : String(m.by).slice(0, 40) });
+        break;
+      case 'duelready':
+        this.request('duelready', {});
         break;
       case 'bet':
         this.request('bet', { on: String(m.on ?? ''), amt: Math.max(0, Math.min(9999999, Math.round(Number(m.amt)) || 0)) });
@@ -1040,7 +1050,7 @@ export class SupaNet {
         else if (m.kind === 'trident') this.bcast({ t: 'fx', id: this.me, kind: 'trident', x: num(m.x), y: num(m.y), a: num(m.a), range: num(m.range), speed: num(m.speed), w: clean(m.w, 20) });
         else if (m.kind === 'cast') this.bcast({ t: 'fx', id: this.me, kind: 'cast', x: num(m.x), y: num(m.y), r: num(m.r), fx: clean(m.fx, 24), hue: num(m.hue), color: clean(m.color, 12) });
         else if (m.kind === 'spin') this.bcast({ t: 'fx', id: this.me, kind: 'spin', a: num(m.a), r: num(m.r), d: num(m.d) });
-        else if (m.kind === 'ball') this.bcast({ t: 'fx', id: this.me, kind: 'ball', i: Math.max(0, Math.min(7, Math.round(Number(m.i)) || 0)), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), z: num(m.z), vz: num(m.vz) });
+        else if (m.kind === 'ball') this.bcast({ t: 'fx', id: this.me, kind: 'ball', i: Math.max(0, Math.min(7, Math.round(Number(m.i)) || 0)), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), z: num(m.z), vz: num(m.vz), by: m.by === undefined || m.by === null ? undefined : String(m.by).slice(0, 40) });
         else if (m.kind === 'throw') this.bcast({ t: 'fx', id: this.me, kind: 'throw', item: clean(m.item, 16), x: num(m.x), y: num(m.y), vx: num(m.vx), vy: num(m.vy), ...(m.g ? { g: clean(m.g, 12) } : {}) });
         break;
       case 'leave':
@@ -1119,14 +1129,14 @@ export class SupaNet {
         this.esc = { phase: msg.phase, left: msg.left, out: new Set((msg.out || []).map(String)) };
         break;
       case 'goalscore':
-        this.goals = [Number(msg.goals?.[0]) || 0, Number(msg.goals?.[1]) || 0];
+        this.goals = [0, 1, 2].map((i) => Number(msg.goals?.[i]) || 0);
         this.sudden = !!msg.sudden;
         break;
       case 'match':
         this.matchLeft = Number.isFinite(msg.left) ? msg.left : null;
         break;
       case 'duelcall':
-        this.duelPrep = { left: msg.window || 0 };
+        if (!(this.isHost && this.duelPrep?.go)) this.duelPrep = { left: msg.window || 0 }; // (the host keeps its own, which holds the ready list)
         this.fighters = new Set((msg.fighters || []).map(String));
         this.fighterUnit = new Map(Object.entries(msg.units || {}));
         break;
@@ -1231,6 +1241,8 @@ export class SupaNet {
         return this.hEscaped(from);
       case 'goal':
         return this.hGoal(from, m);
+      case 'duelready':
+        return this.hDuelReady(from);
       case 'bet':
         return this.hBet(from, m);
       case 'team':
@@ -1357,9 +1369,11 @@ export class SupaNet {
       // a Beach Ball match needs someone on each team
       for (const id of this.members.keys()) if (this.teamMap[id] === undefined) this.assignTeam(id);
       const on = (t) => this.humans().some((h) => this.teamMap[h.id] === t);
-      if (!on(0) || !on(1)) return;
+      if (this.cfg.rumble ? [0, 1, 2].filter(on).length < 2 : !on(0) || !on(1)) return;
     }
-    this.goals = [0, 0];
+    this.goals = [0, 0, 0];
+    this.outTeams = new Set();
+    this.suddenSet = new Set();
     this.sudden = false;
     this.matchLeft = null;
     this.started = true;
@@ -1396,6 +1410,7 @@ export class SupaNet {
     if (typeof m.allowMelee === 'boolean') cfg.allowMelee = m.allowMelee;
     if (typeof m.streakMonsters === 'boolean') cfg.streakMonsters = m.streakMonsters;
     if (m.startMoney !== undefined && !this.started) cfg.startMoney = Math.min(99999, Math.max(0, Math.round(Number(m.startMoney)) || 0));
+    if (typeof m.maxStats === 'boolean' && !this.started) cfg.maxStats = m.maxStats;
     if (m.startWood !== undefined && !this.started) cfg.startWood = Math.min(9999, Math.max(0, Math.round(Number(m.startWood)) || 0));
     if (['easy', 'medium', 'hard'].includes(m.difficulty)) cfg.difficulty = m.difficulty;
     if (!cfg.duel && Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
@@ -1438,6 +1453,11 @@ export class SupaNet {
         if (m.soccer && cfg.duel) this.setDuel(false);
         if (m.soccer && cfg.escape) this.setEscape(false);
         this.setSoccer(m.soccer);
+      }
+      if (cfg.soccer && typeof m.rumble === 'boolean' && m.rumble !== !!cfg.rumble && !this.started) {
+        // Beach Ball <-> Beach Rumble: another pitch, three teams (or two) and the matching target
+        Object.assign(cfg, { rumble: m.rumble, seed: m.rumble ? RUMBLE_SEED : PITCH_SEED, teams: m.rumble ? 3 : 2, target: 5 });
+        this.reassignAll();
       }
       if (cfg.soccer) {
         if (m.target !== undefined) cfg.target = Math.min(20, Math.max(1, Math.round(Number(m.target)) || 5));
@@ -1577,13 +1597,14 @@ export class SupaNet {
   }
 
   // The Beach Ball match: two teams, a ball and two goals, on a beach pitch.
-  setSoccer(on) {
+  setSoccer(on, rumble = false) {
     const cfg = this.cfg;
     if (on) {
       this.preSoccer = { seed: cfg.seed, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams, duelEvery: cfg.duelEvery };
-      Object.assign(cfg, { soccer: true, seed: PITCH_SEED, pvp: false, teams: 2, target: 5, duelEvery: 0 });
+      Object.assign(cfg, { soccer: true, rumble, seed: rumble ? RUMBLE_SEED : PITCH_SEED, pvp: false, teams: rumble ? 3 : 2, target: 5, duelEvery: 0 });
       this.reassignAll();
     } else {
+      cfg.rumble = false;
       const p = this.preSoccer || {};
       Object.assign(cfg, { soccer: false, seed: p.seed && p.seed !== PITCH_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel'), teams: p.teams || 0, duelEvery: p.duelEvery || 0 });
       this.reassignAll();
@@ -1593,10 +1614,40 @@ export class SupaNet {
   // the host's game saw the ball in a goal: it counts, and when a team has the target (or scores in sudden death) the match is won
   hGoal(from, m) {
     if (from !== this.hostId || !this.cfg.soccer || !this.started || this.winning) return;
+    // only a goal that the last player to touch the ball scored in an opposing goal counts (not an own goal, not a ball nobody touched)
+    const toucher = m.by === undefined ? undefined : this.teamMap[String(m.by)];
+    if (this.cfg.rumble) return this.hRumbleGoal(Number(m.conceded), toucher);
     const team = Number(m.team) === 1 ? 1 : 0;
+    if (toucher !== team) {
+      this.out({ t: 'goalscore', goals: [...this.goals], team: -1, nothing: toucher === undefined ? 'none' : 'own', sudden: this.sudden });
+      return;
+    }
     this.goals[team]++;
     this.out({ t: 'goalscore', goals: [...this.goals], team, sudden: this.sudden });
     if (this.goals[team] >= (this.cfg.target || 5) || this.sudden) this.finishSoccer(team);
+  }
+
+  // Rumble: the teams that have somebody in them
+  teamsInPlay() {
+    return new Set([...this.members.keys()].map((id) => this.teamMap[id]).filter((t) => t !== undefined && t >= 0 && t < 3));
+  }
+
+  // Rumble: the ball went into goal `d`. Only the team of the player who touched it last can score, and only in somebody else's goal.
+  // First to the target wins; at the whistle the most goals wins, and when the best are level the next goal by one of them decides it.
+  hRumbleGoal(d, toucher) {
+    if (!(d >= 0 && d <= 2)) return;
+    const say = (extra = {}) => this.out({ t: 'goalscore', rumble: true, goals: [...this.goals], conceded: d, scorer: -1, out: [], tied: [...this.suddenSet], sudden: this.sudden, ...extra });
+    if (toucher === undefined || toucher === d) {
+      say({ nothing: toucher === undefined ? 'none' : 'own' });
+      return;
+    }
+    if (this.sudden && !this.suddenSet.has(toucher)) {
+      say({ nothing: 'late' }); // (a team that was not level cannot win it now)
+      return;
+    }
+    this.goals[toucher]++;
+    say({ scorer: toucher });
+    if (this.sudden || this.goals[toucher] >= (this.cfg.target || 5)) this.finishSoccer(toucher);
   }
 
   startMatch() {
@@ -1614,6 +1665,17 @@ export class SupaNet {
       if (n++ % 2 === 0 || left <= 10) this.out({ t: 'match', left: this.matchLeft });
       if (left > 0) return;
       clearInterval(this.timers.match);
+      if (this.cfg.rumble) {
+        // the most goals wins; level at the top: the next goal by one of those teams decides it
+        const live = [...this.teamsInPlay()];
+        const best = Math.max(...live.map((t) => this.goals[t]));
+        const tied = live.filter((t) => this.goals[t] === best);
+        if (tied.length <= 1) return this.finishSoccer(tied[0] ?? 0);
+        this.sudden = true;
+        this.suddenSet = new Set(tied);
+        this.out({ t: 'goalscore', rumble: true, goals: [...this.goals], conceded: -1, scorer: -1, out: [], tied, sudden: true });
+        return undefined;
+      }
       if (this.goals[0] === this.goals[1]) {
         this.sudden = true; // level at the whistle: the next goal wins
         this.out({ t: 'goalscore', goals: [...this.goals], team: -1, sudden: true });
@@ -1822,7 +1884,7 @@ export class SupaNet {
   // middle of a round: the fighters are called to the Colosseum when the window closes) or 'round' (the round is in the Colosseum).
   openBets(kind) {
     const betting = !!this.cfg.bet && this.humans().some((h) => !this.fighters.has(h.id));
-    const window = betting ? BET_WINDOW : kind === 'event' ? 5 : 0;
+    const window = Math.max(betting ? BET_WINDOW : 0, PREP_WINDOW);
     const go = () => {
       this.duelPrep = null;
       clearTimeout(this.timers.duelPrep);
@@ -1834,10 +1896,20 @@ export class SupaNet {
       this.startDuelClock();
     };
     if (!window) return go();
-    this.duelPrep = { left: window };
+    this.duelPrep = { left: window, ready: new Set(), go };
     this.out({ t: 'duelcall', did: this.duelSeq || 0, kind, fighters: [...this.fighters], units: Object.fromEntries(this.fighterUnit), window, bet: betting });
     clearTimeout(this.timers.duelPrep);
     this.timers.duelPrep = setTimeout(go, window * 1000);
+  }
+
+  // a fighter pressed Ready (after shopping): the duel starts at once when all of them have
+  hDuelReady(from) {
+    const p = this.duelPrep;
+    if (!p || !p.ready || !this.fighters.has(from)) return;
+    p.ready.add(from);
+    this.out({ t: 'duelready', list: [...p.ready] });
+    const humans = [...this.fighters].filter((id) => this.members.get(id) && !this.members.get(id).ai);
+    if (humans.length && humans.every((id) => p.ready.has(id))) p.go();
   }
 
   betList() {
@@ -1958,7 +2030,9 @@ export class SupaNet {
     clearInterval(this.timers.match);
     clearInterval(this.timers.escape);
     this.esc = null;
-    this.goals = [0, 0];
+    this.goals = [0, 0, 0];
+    this.outTeams = new Set();
+    this.suddenSet = new Set();
     this.sudden = false;
     this.matchLeft = null;
     clearTimeout(this.timers.duelPrep);

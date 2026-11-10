@@ -12,7 +12,7 @@ import AccountBox from './AccountBox';
 
 
 // The main menu: Play, Multiplay, Settings, About and Exit, and the pages behind them.
-export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, onTrainingV2, onV2, name, setName, online, notice = '', assets, onAccountName }) {
+export default function MenuHome({ view, setView, onPlay, onMulti, onMaze, onTraining, onTrainingV2, onV2, name, setName, online, notice = '', assets, onAccountName }) {
   const [gone, setGone] = useState(false);
   const [msg, setMsg] = useState('');
   const [access, setAccess] = useState(isUnlocked); // the developer tools are locked until the code is typed in Settings
@@ -57,6 +57,12 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onTraining, o
             <b><span className="home-ico">{assets ? <><Avatar assets={assets} id="v2:scout1" size={50} /><Avatar assets={assets} id="v2:postman2" size={50} /></> : null}</span>Multiplayer</b>
             <small><i className={`status-dot ${online ? 'on' : ''}`} />{online ? 'See the open rooms, or create your own' : 'See the open rooms, or create your own (connecting…)'}</small>
           </button>
+          {onMaze && (
+            <button type="button" className="home-btn" onClick={onMaze}>
+              <b><span className="home-ico"><V2Sprite theme="graveyard" name="Little_Pumpkin_1" scale={2} /></span>Maze Rush</b>
+              <small>Pac-Man style: grab the fruit, dodge the monsters, find the portal. Solo, 2 players or online</small>
+            </button>
+          )}
           <button type="button" className="home-btn" onClick={() => setView('settings')}>
             <b><span className="home-ico"><V2Sprite theme="worksite" name="Tool_Box_1" scale={1.25} /></span>Settings</b>
             <small>Sound, your name and saved games</small>

@@ -64,7 +64,7 @@ export default function Bestiary({ onClose, survival }) {
           <input className="bestiary-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name…" aria-label="Search the creatures" />
           <button className="btn small-btn" onClick={onClose} aria-label="Close">✕</button>
         </header>
-        <p className="hint">Tap a creature for details. {survival ? 'In Survival you mostly meet the zombies, and the Colossus bosses.' : 'Which ones you meet depends on the map and the time of day.'}</p>
+        <p className="hint">Tap a creature for details. {survival ? 'In Survival you meet the zombies, bats (only shots reach them), archers, wizards that raise zombies, and the Colossus and Werebear bosses.' : 'Which ones you meet depends on the map and the time of day.'}</p>
         <div className="bestiary-body">
           {groups.map(([title, list]) => (
             <section key={title}>

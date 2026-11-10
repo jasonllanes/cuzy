@@ -55,6 +55,16 @@ Object.assign(MONSTERS, {
   z_armor: { name: 'Armored', apoc: 'axe', kind: 'walk', hp: 16, speed: 21, dmg: 3, sd: 6, kb: 0.25, tint: 'grayscale(0.9) brightness(0.85) contrast(1.4)' },
 });
 
+// Survival's newcomers (Tiny RPG art): a bat that only bullets and thrown things can reach, archers that shoot from a distance, a wizard that
+// raises zombies and throws bolts, and the Werebear boss
+//   airborne: melee cannot touch it (swords, axes, dashes pass under it): it has to be shot
+//   summon:   the zombie type it raises   bolt: its shots are magic orbs
+Object.assign(MONSTERS, {
+  sv_bat: { name: 'Night Bat', tiny: 'bat', kind: 'fly', hp: 4, speed: 58, dmg: 1, sd: 1, reach: 12, swings: ['atk1', 'atk2'], airborne: true },
+  sv_wizard: { name: 'Zombie Wizard', tiny: 'wizard', kind: 'shoot', hp: 16, speed: 18, dmg: 2, sd: 3, range: 112, rate: 2.6, bolt: true, summon: 'z_small', swings: ['atk1', 'atk2'] },
+  sv_werebear: { name: 'Werebear', tiny: 'werebear', kind: 'walk', hp: 170, speed: 20, dmg: 4, sd: 14, scale: 1.7, kb: 0.05, boss: true, reach: 24, swings: ['atk1', 'atk2', 'atk3'] },
+});
+
 export const MONSTER_IDS = Object.keys(MONSTERS);
 export const MONSTER_SPRITES = MONSTER_IDS.map((id) => MONSTERS[id].sprite).filter(Boolean);
 
@@ -78,14 +88,14 @@ export const WAVES = [
 export const WAVES_APOC = [
   [['z_small', 10]],
   [['z_small', 10], ['z_runner', 3], ['z_axe', 2]],
-  [['z_small', 10], ['z_runner', 5], ['z_axe', 5]],
-  [['z_small', 10], ['z_runner', 6], ['z_axe', 6], ['z_big', 2]],
-  [['z_small', 12], ['z_runner', 8], ['z_axe', 6], ['z_armor', 3], ['z_big', 2]], // + Colossus bosses (see bossesFor)
-  [['z_small', 12], ['z_runner', 10], ['z_axe', 8], ['z_armor', 4], ['z_big', 3]],
-  [['z_small', 14], ['z_runner', 12], ['z_axe', 8], ['z_armor', 6], ['z_big', 4]],
-  [['z_small', 14], ['z_runner', 14], ['z_axe', 10], ['z_armor', 8], ['z_big', 5]],
-  [['z_small', 16], ['z_runner', 16], ['z_axe', 12], ['z_armor', 10], ['z_big', 7]],
-  [['z_big', 8], ['z_armor', 10], ['z_axe', 14], ['z_runner', 16], ['z_small', 20]], // + Colossus bosses (see bossesFor)
+  [['z_small', 10], ['z_runner', 5], ['z_axe', 5], ['sv_bat', 3]],
+  [['z_small', 10], ['z_runner', 6], ['z_axe', 6], ['z_big', 2], ['sv_bat', 4], ['t_skarcher', 2]],
+  [['z_small', 12], ['z_runner', 8], ['z_axe', 6], ['z_armor', 3], ['z_big', 2], ['sv_bat', 5], ['t_skarcher', 3], ['t_archer', 2]], // + Colossus bosses (see bossTypes)
+  [['z_small', 12], ['z_runner', 10], ['z_axe', 8], ['z_armor', 4], ['z_big', 3], ['sv_bat', 6], ['t_skarcher', 3], ['t_archer', 3], ['sv_wizard', 1]],
+  [['z_small', 14], ['z_runner', 12], ['z_axe', 8], ['z_armor', 6], ['z_big', 4], ['sv_bat', 7], ['t_skarcher', 4], ['t_archer', 3], ['sv_wizard', 2]],
+  [['z_small', 14], ['z_runner', 14], ['z_axe', 10], ['z_armor', 8], ['z_big', 5], ['sv_bat', 8], ['t_skarcher', 4], ['t_archer', 4], ['sv_wizard', 2]],
+  [['z_small', 16], ['z_runner', 16], ['z_axe', 12], ['z_armor', 10], ['z_big', 7], ['sv_bat', 10], ['t_skarcher', 5], ['t_archer', 5], ['sv_wizard', 3]],
+  [['z_big', 8], ['z_armor', 10], ['z_axe', 14], ['z_runner', 16], ['z_small', 20], ['sv_bat', 12], ['t_skarcher', 6], ['t_archer', 6], ['sv_wizard', 4]], // + the bosses (see bossTypes)
 ];
 
 // Endless Survival: no waves to wait for. Zombies keep coming in batches (a "stage" is only how hard the batch is), and every
@@ -98,7 +108,7 @@ export function endlessList(stage, diff, players = 1) {
     const count = Math.max(1, Math.round(n * diff.count * 0.55 * grow));
     for (let i = 0; i < count; i++) list.push(type);
   }
-  for (let i = 0; i < endlessBosses(stage, diff, players); i++) list.push('z_boss');
+  for (const b of endlessBossTypes(stage, diff, players)) list.push(b);
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [list[i], list[j]] = [list[j], list[i]];
@@ -119,6 +129,20 @@ export const bossesFor = (wave, diff, players = 1, total = 10) => {
   return base ? Math.max(1, Math.round(base * bossScale(players))) : 0;
 };
 
+// Which bosses a wave brings: the Colossus halfway, and at the end (and on the 3/4 mark of a long run) the Werebear, with a Colossus beside it
+export function bossTypes(wave, diff, players = 1, total = 10) {
+  const n = bossesFor(wave, diff, players, total);
+  if (!n) return [];
+  const last = wave === total || (total >= 20 && wave === Math.round(total * 0.75));
+  const bears = last ? Math.max(1, Math.ceil(n / 2)) : 0;
+  return [...Array(n - bears).fill('z_boss'), ...Array(bears).fill('sv_werebear')];
+}
+export function endlessBossTypes(stage, diff, players = 1) {
+  const n = endlessBosses(stage, diff, players);
+  const bears = n && stage % 10 === 0 ? Math.max(1, Math.ceil(n / 2)) : 0;
+  return [...Array(n - bears).fill('z_boss'), ...Array(bears).fill('sv_werebear')];
+}
+
 // A run of `total` waves is the ten-wave story stretched (or squeezed): which row of the table a wave uses, and how much more
 // than the last row a long run asks for
 export const stageOf = (wave, total = 10) => (total === 10 ? wave : Math.min(10, Math.max(1, Math.ceil((10 * wave) / total))));
@@ -138,8 +162,14 @@ export const DIFFICULTY_IDS = Object.keys(DIFFICULTY);
 export function waveCounts(wave, diff, theme = 'cozy', players = 1, total = 10) {
   const table = (theme === 'apoc' ? WAVES_APOC : WAVES)[stageOf(wave, total) - 1] || [];
   const out = table.map(([type, n]) => [type, Math.max(1, Math.round(n * diff.count * growthOf(wave, total)))]);
-  const bosses = theme === 'apoc' ? bossesFor(wave, diff, players, total) : 0;
-  return bosses ? [['z_boss', bosses], ...out] : out;
+  const bosses = theme === 'apoc' ? bossTypes(wave, diff, players, total) : [];
+  const groups = [];
+  for (const b of bosses) {
+    const g = groups.find((q) => q[0] === b);
+    if (g) g[1]++;
+    else groups.push([b, 1]);
+  }
+  return groups.length ? [...groups, ...out] : out;
 }
 
 export function waveList(wave, diff, theme = 'cozy', players = 1, total = 10) {
@@ -148,7 +178,7 @@ export function waveList(wave, diff, theme = 'cozy', players = 1, total = 10) {
     const count = Math.max(1, Math.round(n * diff.count * growthOf(wave, total))); // never fewer than one, so bosses always show up
     for (let i = 0; i < count; i++) list.push(type);
   }
-  if (theme === 'apoc') for (let i = 0; i < bossesFor(wave, diff, players, total); i++) list.push('z_boss');
+  if (theme === 'apoc') for (const b of bossTypes(wave, diff, players, total)) list.push(b);
   // shuffle so the strong ones are mixed in with the weak
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -240,3 +270,6 @@ Object.assign(MONSTERS, {
   t_priest: { name: 'Priest', tiny: 'priest', kind: 'shoot', hp: 8, speed: 20, dmg: 1, sd: 2, range: 100, rate: 3.4, cast: ['priest_attack'], radius: 16, delay: 0.8, swings: ['atk1'], skill: 'heal' },
   t_bat: { name: 'Cave Bat', tiny: 'bat', kind: 'fly', hp: 3, speed: 50, dmg: 1, sd: 1, reach: 12, swings: ['atk1', 'atk2'] },
 });
+
+// (the Tiny RPG monsters above were added after the list was first made: Survival sends monsters by their place in it)
+MONSTER_IDS.splice(0, MONSTER_IDS.length, ...Object.keys(MONSTERS));

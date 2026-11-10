@@ -48,6 +48,7 @@ export const SURVIVAL_BASE = 'cuzy-survival';
 // a friendly name for whatever world a seed makes
 export function mapNameOf(seed) {
   if (isArenaSeed(seed)) return 'Colosseum';
+  if (isRumbleSeed(seed)) return 'Beach Rumble Pitch';
   if (isPitchSeed(seed)) return 'Beach Ball Pitch';
   if (isEscapeSeed(seed)) return 'Escape Zone';
   const { base, map } = splitSeed(seed);
@@ -74,6 +75,10 @@ export const stripArena = (s) => String(s).replace(/~arena$/, '');
 export const PITCH_SEED = 'beachpitch-1~pitch';
 export const isPitchSeed = (s) => /~pitch$/.test(String(s));
 export const stripPitch = (s) => String(s).replace(/~pitch$/, '');
+// The Beach Rumble pitch: a free for all with three teams and three goals (left, right and top), made on its own beach
+export const RUMBLE_SEED = 'beachrumble-1~rumble';
+export const isRumbleSeed = (s) => /~rumble$/.test(String(s));
+export const stripRumble = (s) => String(s).replace(/~rumble$/, '');
 // The Escape zone: an open world full of buildings to loot, zombies, and a chopper that arrives somewhere far away (Free Roam room with Escape on)
 export const ESCAPE_SEED = 'asphalt-358~esc';
 export const isEscapeSeed = (s) => /~esc$/.test(String(s));

@@ -21,6 +21,8 @@ export class Balls {
     this.list = [];
     this.syncT = 0;
     this.touchT = 0;
+    this.kickAge = 9; // seconds since this player last kicked a ball (and which one)
+    this.kickBall = -1;
     this.mine = new Set(); // the balls this player kicked last (and so keeps everyone up to date on)
     this.spawn();
   }
@@ -53,16 +55,32 @@ export class Balls {
     }
   }
 
+  // who touches a ball is remembered (`by`): a goal only counts for the team of whoever touched it last
+  myId() {
+    return String(this.g.mp?.you ?? 'me');
+  }
+
   // another player's kick: take their word for where the ball is and how it moves
   adopt(m) {
     const b = this.list.find((x) => x.i === m.i);
     if (!b) return;
+    b.by = m.by !== undefined && m.by !== null ? String(m.by) : m.id !== undefined ? String(m.id) : b.by;
+    if (this.kickAge < 0.3 && this.kickBall === b.i) {
+      // two players kicked it at the same moment (the ball between them): both games settle on the same middle ground, instead of
+      // each one snapping to the other's kick and back again (that was the lag and the jitter)
+      const avg = (a, c) => (a + c) / 2;
+      Object.assign(b, { x: avg(b.x, m.x), y: avg(b.y, m.y), vx: avg(b.vx, m.vx), vy: avg(b.vy, m.vy), z: Math.max(b.z, m.z), vz: Math.max(b.vz, m.vz) });
+      this.mine.delete(b.i);
+      this.touchT = 0.3; // (and neither pushes it again for a moment)
+      return;
+    }
     Object.assign(b, { x: m.x, y: m.y, vx: m.vx, vy: m.vy, z: m.z, vz: m.vz });
     this.mine.delete(b.i);
   }
 
   // something other than a footstep hits a ball (a sword, a thrown item): it flies off the way the hit was going
-  hit(b, dx, dy, power) {
+  hit(b, dx, dy, power, who = null) {
+    b.by = who !== null ? String(who) : this.myId();
     const d = Math.hypot(dx, dy) || 1;
     const wet = this.g.world.type(Math.floor(b.x / T), Math.floor(b.y / T)) === WATER;
     const k = wet ? Math.min(power, 120) : power;
@@ -70,6 +88,8 @@ export class Balls {
     b.vy = (dy / d) * k;
     b.vz = wet ? 0 : 90;
     b.z = wet ? 0 : Math.max(b.z, 1);
+    this.kickAge = 0;
+    this.kickBall = b.i;
     this.mine.add(b.i);
     this.send(b);
     this.syncT = SYNC_EVERY;
@@ -77,13 +97,14 @@ export class Balls {
   }
 
   send(b) {
-    this.g.mp?.net.send({ t: 'fx', kind: 'ball', i: b.i, x: b.x, y: b.y, vx: b.vx, vy: b.vy, z: b.z, vz: b.vz });
+    this.g.mp?.net.send({ t: 'fx', kind: 'ball', i: b.i, x: b.x, y: b.y, vx: b.vx, vy: b.vy, z: b.z, vz: b.vz, by: b.by });
   }
 
   update(dt) {
     const g = this.g;
     const p = g.player;
     this.touchT = Math.max(0, this.touchT - dt);
+    this.kickAge += dt;
     this.syncT -= dt;
     for (const b of this.list) {
       // in water or lava the ball floats: it loses its hop at once and rolls on ever more slowly until it stops
@@ -138,7 +159,9 @@ export class Balls {
         const dx = b.x - p.x;
         const dy = b.y - (p.y - 4);
         const d = Math.hypot(dx, dy);
-        if (d < R + 7) {
+        // (a ball that is already leaving this player fast is not kicked again: nothing to send)
+        const away = d > 0.5 ? (b.vx * dx + b.vy * dy) / d : 0;
+        if (d < R + 7 && away < 110) {
           const nx = d > 0.5 ? dx / d : 1;
           const ny = d > 0.5 ? dy / d : 0;
           const dashing = !!g.combat?.dash;
@@ -148,7 +171,10 @@ export class Balls {
           b.vy = ny * power;
           b.vz = wet ? 0 : 95 + (dashing ? 40 : 0);
           b.z = wet ? 0 : Math.max(b.z, 1);
-          this.touchT = 0.18;
+          this.touchT = 0.25;
+          this.kickAge = 0;
+          this.kickBall = b.i;
+          b.by = this.myId();
           this.mine.add(b.i);
           this.send(b);
           this.syncT = SYNC_EVERY;
@@ -160,7 +186,7 @@ export class Balls {
     if (g.world.pitch) {
       this.goalLock = Math.max(0, (this.goalLock || 0) - dt);
       if (this.kickoffT > 0 && (this.kickoffT -= dt) <= 0) {
-        for (const b of this.list) Object.assign(b, { x: 8, y: 8, vx: 0, vy: 0, z: 0, vz: 0 });
+        for (const b of this.list) Object.assign(b, { x: 8, y: 8, vx: 0, vy: 0, z: 0, vz: 0, by: undefined });
         this.mine.add(0);
         this.send(this.list[0]);
         this.syncT = SYNC_EVERY;
@@ -171,7 +197,8 @@ export class Balls {
           if (side < 0) continue;
           this.goalLock = 4;
           this.kickoffT = 2.6;
-          g.mp.net.send({ t: 'goal', team: side === 0 ? 1 : 0 }); // (the ball in the left goal: the right team scored)
+          // (the ball in the left goal: the right team could score; in a Rumble it is whichever team's goal it is) and who touched it last, because only their team can score
+          g.mp.net.send({ t: 'goal', team: side === 0 ? 1 : 0, by: b.by, ...(g.world.rumble ? { conceded: side } : {}) });
         }
       }
     }

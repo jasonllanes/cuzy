@@ -1,0 +1,109 @@
+/* Maze Rush */
+
+.mz-menu { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; padding: 16px; overflow-y: auto; background: radial-gradient(circle at 30% 20%, #ffe6c8, #ffc9d8 55%, #b9a3ff); }
+.mz-card { width: min(560px, 100%); padding: 22px 22px 18px; display: grid; gap: 14px; text-align: center; }
+.mz-head h1 { margin: 6px 0 4px; font: 700 2.4rem var(--pixel); color: var(--rose-dark); letter-spacing: 1px; }
+.mz-head p { margin: 0 auto; max-width: 44ch; font-size: 0.92rem; color: var(--ink-soft); }
+.mz-logo { display: inline-flex; gap: 6px; }
+.mz-logo img { width: 40px; height: 40px; image-rendering: pixelated; animation: mz-bob 1.6s ease-in-out infinite; }
+.mz-logo img:nth-child(2) { animation-delay: 0.25s; }
+.mz-logo img:nth-child(3) { animation-delay: 0.5s; }
+@keyframes mz-bob { 50% { transform: translateY(-5px); } }
+.mz-best { display: block; margin-top: 6px; color: var(--ink-soft); }
+.mz-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mz-mode { display: grid; gap: 4px; padding: 14px 10px; text-align: center; background: var(--cream); border: 3px solid var(--wood); border-radius: 14px; box-shadow: 0 4px 0 var(--wood-dark); font-family: var(--body); color: var(--ink); cursor: pointer; transition: transform 0.1s; }
+.mz-mode:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--rose); }
+.mz-mode:disabled { opacity: 0.5; cursor: not-allowed; }
+.mz-mode b { font: 700 1.1rem var(--pixel); }
+.mz-mode small { font-size: 0.74rem; color: var(--ink-soft); }
+.mz-load { grid-column: 1 / -1; color: var(--ink-soft); }
+.mz-modes .notice { grid-column: 1 / -1; }
+.mz-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; }
+.mz-local { display: grid; gap: 10px; justify-items: center; }
+.mz-local h2 { margin: 0; font: 700 1.3rem var(--pixel); }
+.mz-pick { display: flex; gap: 28px; justify-content: center; }
+.mz-pick > div { display: grid; gap: 6px; justify-items: center; font: 700 0.85rem var(--pixel); }
+.mz-heroes { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; max-height: 150px; overflow-y: auto; padding: 4px; }
+.mz-heroes button { background: var(--cream); border: 2px solid var(--wood); border-radius: 10px; padding: 2px; cursor: pointer; }
+.mz-heroes button.on { border-color: var(--rose); background: #ffe3ea; }
+.mz-code { font: 700 3rem var(--pixel); letter-spacing: 0.35em; padding: 4px 0 4px 0.35em; background: var(--cream); border: 3px dashed var(--wood-dark); border-radius: 14px; }
+.mz-code-in { width: 9ch; text-align: center; font: 700 2rem var(--pixel); letter-spacing: 0.3em; padding: 6px; border-radius: 12px; border: 3px solid var(--wood); background: var(--cream); color: var(--ink); text-transform: uppercase; }
+.mz-roster { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.mz-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 3px; background: rgba(255, 250, 240, 0.92); border: 2px solid var(--wood); border-radius: 999px; font: 700 0.78rem var(--pixel); color: var(--ink); }
+.mz-chip em { font-style: normal; }
+.mz-chip img { width: 18px; height: 18px; image-rendering: pixelated; }
+.mz-chip.out { opacity: 0.55; filter: grayscale(0.8); }
+.mz-chip.ice { border-color: #4aa3df; background: #e3f5ff; }
+.mz-how { text-align: left; font-size: 0.82rem; color: var(--ink-soft); }
+.mz-how summary { cursor: pointer; font-weight: 800; }
+.mz-how ul { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+
+/* the game */
+.mz-run { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; background: radial-gradient(ellipse at center, color-mix(in srgb, var(--mz-bg, #223) 70%, #fff 10%), color-mix(in srgb, var(--mz-bg, #223) 55%, #000) 100%); color: #fff; }
+.mz-hud { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 14px; padding: 8px 12px; background: rgba(20, 14, 30, 0.72); border-bottom: 3px solid rgba(255, 255, 255, 0.18); font-family: var(--pixel); }
+.mz-lvl { display: grid; line-height: 1.15; }
+.mz-lvl b { font-size: 1.15rem; color: #ffe066; }
+.mz-lvl span { font-size: 0.8rem; opacity: 0.9; }
+.mz-goals { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; }
+.mz-goal { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px 2px 4px; background: rgba(255, 255, 255, 0.14); border-radius: 999px; font-style: normal; transition: background 0.2s; }
+.mz-goal img { width: 26px; height: 26px; image-rendering: pixelated; }
+.mz-goal i { font-style: normal; font-weight: 700; font-size: 0.95rem; }
+.mz-goal.done { background: rgba(111, 224, 138, 0.38); }
+.mz-goal.done i { color: #b9ffcb; }
+.mz-portal { font-size: 0.8rem; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); opacity: 0.8; }
+.mz-portal.open { background: #7a4ee0; opacity: 1; animation: mz-pulse 0.9s ease-in-out infinite; }
+@keyframes mz-pulse { 50% { transform: scale(1.07); box-shadow: 0 0 14px #b497ff; } }
+.mz-side { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.mz-side .mz-chip { background: rgba(255, 250, 240, 0.9); }
+.mz-score { font-size: 1.05rem; color: #ffe066; padding: 0 4px; }
+.mz-stage { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; touch-action: none; }
+.mz-canvas { image-rendering: pixelated; max-width: 100%; max-height: 100%; border-radius: 6px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
+.mz-banner { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); display: grid; gap: 4px; justify-items: center; padding: 14px 26px; border-radius: 18px; background: rgba(20, 14, 30, 0.82); border: 3px solid rgba(255, 255, 255, 0.3); text-align: center; font-family: var(--pixel); animation: card-pop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) both; pointer-events: none; max-width: 94%; }
+.mz-banner small { opacity: 0.8; font-size: 0.85rem; }
+.mz-banner b { font-size: 1.7rem; color: #ffe066; }
+.mz-banner.clear b { color: #8af7a5; }
+.mz-need { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; align-items: center; font-size: 0.95rem; }
+.mz-need span { display: inline-flex; align-items: center; gap: 3px; }
+.mz-need img { width: 24px; height: 24px; image-rendering: pixelated; }
+.mz-new { color: #ff9aa6; font-size: 0.9rem; }
+.mz-over { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; background: rgba(18, 4, 10, 0.72); text-align: center; font-family: var(--pixel); }
+.mz-over h2 { margin: 0; font-size: 2.6rem; color: #ff4b5c; text-shadow: 0 3px 0 #3a0610; }
+.mz-over p { margin: 0; font-size: 1.05rem; }
+.mz-over .mz-best { opacity: 0.8; font-size: 0.85rem; }
+.mz-wait { opacity: 0.8; }
+.mz-foot { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 6px 12px; background: rgba(20, 14, 30, 0.72); font: 700 0.8rem var(--pixel); }
+.mz-icon { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.45); background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 0.9rem; cursor: pointer; }
+.mz-icon:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* the arrows for a phone */
+.mz-pad { display: none; }
+@media (pointer: coarse) {
+  .mz-pad { position: absolute; right: 14px; bottom: 54px; width: 150px; height: 150px; display: grid; grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr; gap: 4px; z-index: 6; }
+  .mz-pad button { background: rgba(255, 255, 255, 0.28); border: 2px solid rgba(255, 255, 255, 0.6); border-radius: 14px; color: #fff; font-size: 1.4rem; touch-action: none; }
+  .mz-pad-up { grid-area: 1 / 2; }
+  .mz-pad-left { grid-area: 2 / 1; }
+  .mz-pad-right { grid-area: 2 / 3; }
+  .mz-pad-down { grid-area: 3 / 2; }
+}
+@media (max-width: 640px) {
+  .mz-modes { grid-template-columns: 1fr; }
+  .mz-hud { padding: 6px 8px; }
+  .mz-lvl b { font-size: 1rem; }
+}
+
+/* a short screen (a phone on its side): every pixel goes to the maze */
+@media (max-height: 520px) {
+  .mz-foot { display: none; }
+  .mz-hud { padding: 3px 10px; }
+  .mz-lvl b { font-size: 0.95rem; }
+  .mz-goal img { width: 20px; height: 20px; }
+  .mz-banner { top: 2%; flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 14px; padding: 5px 16px; border-radius: 12px; }
+  .mz-banner b { font-size: 1.05rem; }
+  .mz-banner small, .mz-need, .mz-new { font-size: 0.78rem; }
+  .mz-need img { width: 18px; height: 18px; }
+  .mz-over h2 { font-size: 1.8rem; }
+  .mz-menu { place-items: start center; }
+}
+@media (pointer: coarse) and (max-height: 520px) {
+  .mz-pad { bottom: 10px; width: 132px; height: 132px; }
+}

@@ -1186,7 +1186,7 @@ export class Combat {
     for (const o of this.g.world.treesNear(cx, cy, sp.r + 8)) {
       if (!sp.hit.has(`t${o.tkey}`) && reached(o.x, o.y - 5)) this.chopTrees(o.x, o.y - 5, 1, sp.dmg, null, 0, sp.hit);
     }
-    for (const m of this.monstersNear(cx, cy, sp.r)) {
+    for (const m of this.meleeNear(cx, cy, sp.r)) {
       if (sp.hit.has(`m${m.id}`) || !reached(m.x, bodyY(m))) continue;
       sp.hit.add(`m${m.id}`);
       this.hitMonster(m, sp.dmg, cx, cy, 160);
@@ -1234,7 +1234,7 @@ export class Combat {
       }
     }
     this.chopTrees(cx, cy, 17, d.dmg, null, 0, d.hit); // a dash cuts through trees too
-    for (const m of this.monstersNear(cx, cy, 17)) {
+    for (const m of this.meleeNear(cx, cy, 17)) {
       if (d.hit.has(`m${m.id}`)) continue;
       d.hit.add(`m${m.id}`);
       this.hitMonster(m, d.dmg, cx - Math.cos(d.a) * 10, cy - Math.sin(d.a) * 10, 190);
@@ -1645,11 +1645,11 @@ export class Combat {
     // enemies are thrown back away from the blast: the closer, the harder
     for (const m of this.monstersNear(b.x, b.y, b.R)) {
       const d = Math.hypot(m.x - b.x, bodyY(m) - b.y);
-      this.hitMonster(m, this.isNormalFoe(m) ? Math.max(9, m.hp) : 9, b.x, b.y, 160 + 240 * Math.max(0, 1 - d / b.R));
+      this.hitMonster(m, this.isNormalFoe(m) ? Math.max(13, m.hp) : 13, b.x, b.y, 300 + 380 * Math.max(0, 1 - d / b.R));
     }
     for (const s of this.skeletons) {
       const d = Math.hypot(s.x - b.x, s.y - 8 - b.y);
-      if (s.state !== 'dead' && d <= b.R) this.damageSkeleton(s, 9, b.x, b.y, 180 + 240 * (1 - d / b.R));
+      if (s.state !== 'dead' && d <= b.R) this.damageSkeleton(s, 13, b.x, b.y, 300 + 380 * (1 - d / b.R));
     }
     // ...and so are rival heroes in the circle (in a fight room): the closer, the harder, wherever they stand (water too)
     if (this.g.fight) {
@@ -3164,7 +3164,7 @@ export class Combat {
       const d = Math.hypot(sx, sy);
       if (d <= reach && (d < 12 || Math.abs(wrapAngle(Math.atan2(sy, sx) - a)) < arc)) this.strike('skel', s, w, cx, cy, struck);
     }
-    for (const m of this.monstersNear(cx, cy, this.meleeReach() + (reach - SWORD_REACH))) {
+    for (const m of this.meleeNear(cx, cy, this.meleeReach() + (reach - SWORD_REACH))) {
       const sc = MONSTERS[m.type].scale || 1;
       const sx = m.x - cx;
       const sy = bodyY(m) - cy;
@@ -3199,6 +3199,19 @@ export class Combat {
     if (m.wild) this.damageWild(m, dmg, fx, fy, kb);
     else this.g.wave.hitMonster(m.id, dmg, fx, fy, kb);
     this.floaters.push({ x: m.x, y: m.y - 10 * sc - 6, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
+  }
+
+  // the same, for a blade, a spin or a dash: a flying monster (the Night Bat) is out of reach of those, only shots and throws get it
+  meleeNear(cx, cy, reach) {
+    const out = [];
+    for (const m of this.monstersNear(cx, cy, reach)) {
+      if (!MONSTERS[m.type].airborne) out.push(m);
+      else if (this.g.t - (this.airNoteT ?? -9) > 1.6) {
+        this.airNoteT = this.g.t;
+        this.floaters.push({ x: m.x, y: m.y - 24, text: 'too high! shoot it', color: '#8fd0ff', t: 0 });
+      }
+    }
+    return out;
   }
 
   // monsters whose body overlaps a circle at (cx, cy)

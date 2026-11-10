@@ -13,6 +13,7 @@ import { AiPlayers } from './aiPlayers';
 import { Streaks } from './streaks';
 import { sfx } from './sfx';
 import { TEAMS } from './teams';
+import { Crowd } from './crowd';
 import { store } from './store';
 import { loadedThemes } from '../v2/assets';
 import { AIR_SUPPORT, REPAIR_HEAL, mendCost, repairKitCost, FREE_UPGRADES, BOAT_COST, MAX_LEVEL, REVIVE, SKILL_SHOP, SUPPLY_CAP, SUPPLY_SHOP, THROW_SHOP, UPGRADES, WOOD_SHOP, emptyUpgrades, upgradeCost } from './upgrades';
@@ -20,6 +21,13 @@ import { AIR_SUPPORT, REPAIR_HEAL, mendCost, repairKitCost, FREE_UPGRADES, BOAT_
 // how far above the feet a hero's name tag floats; the villager is shorter than the others
 const tagHeight = (hero) => (hero.kind === 'v2' ? 36 : hero.kind === 'retro' ? 26 : hero.kind === 'dev' ? 30 : hero.kind === 'sunny' ? 27 : hero.kind === 'apoc' ? 25 : 36);
 
+// "2 Colossuses and 1 Werebear": the bosses of a Survival wave, from the event's [[name, count], ...] list
+const plural = (name) => (/s$/.test(name) ? `${name}es` : `${name}s`);
+const bossText = (ev) => {
+  const list = ev.list?.length ? ev.list : [['Colossus', ev.n || ev.bosses || 1]];
+  return list.map(([name, n]) => `${n} ${n > 1 ? plural(name) : name}`).join(' and ');
+};
+const bossNames = (ev) => (ev.list?.length ? ev.list.map(([name]) => name).join(' and ') : 'Colossus');
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
 import { DOOR, ROOM, SPOTS, designFor, drawRoom, roomBlocked, spotsOf } from './interior';
@@ -163,7 +171,7 @@ export class Game {
     this.boarded = false; // you are on the chopper
     this.chopper = null; // the chopper once it has landed: { x, y, t }
     this.compassOpen = false;
-    this.soccer = world.pitch && this.mp ? { goals: [...(session.room.soccerGoals || [0, 0])], left: session.room.soccerLeft ?? null, sudden: !!session.room.soccerSudden, target: session.room.target || 5, mins: session.room.matchMins || 0 } : null;
+    this.soccer = world.pitch && this.mp ? { goals: [...(session.room.soccerGoals || [0, 0, 0])], rumble: !!world.rumble, out: [...(session.room.soccerOut || [])], tied: [...(session.room.soccerTied || [])], left: session.room.soccerLeft ?? null, sudden: !!session.room.soccerSudden, target: session.room.target || 5, mins: session.room.matchMins || 0 } : null;
     this.remotes = new Map();
     this.myBubble = null;
     this.dead = null; // set while you are downed: { t, dur, by, last }
@@ -181,6 +189,8 @@ export class Game {
     this.xp = 0;
     this.touchMode = false; // mobile controls: the screen is not a mouse
     this.aimOverride = null; // a touch aim: an angle, or 'auto' for the nearest enemy
+    this.tAim = { atk: null, chg: null, thr: null }; // the touch aims, one per control (the aim stick, the charge button, the throw button): an angle, 'auto', or null when that control is not held
+    this.tAimLast = 'atk';
     this.cheats = !session || !!session.room?.allowCheats; // alone you may always cheat; in a room the host decides
     this.weatherT = 0;
     this.cloudCanvas = null;
@@ -321,11 +331,15 @@ export class Game {
     }
     this.collected = new Set(saved?.collected || []);
     this.combat = demo ? null : new Combat(this, assets.img, saved?.kills || 0);
+    this.crowd = null; // the Beach Ball crowd
+    this.goalConfetti = []; // the paper that flies when a goal is scored
     this.balls = null; // (beach balls, on the maps with a sea: made once the game has its home and world)
     // solo vs AI: computer rivals in the free world
     this.bots = !demo && !session && mode === 'free' && bots > 0 ? new Bots(this, bots, difficulty) : null;
     // Free Roam keeps its shop upgrades and quick-slot supplies with the seed's save
     if (saved?.upgrades) this.upgrades = { ...emptyUpgrades(), ...saved.upgrades };
+    this.maxStats = mode === 'free' && !demo && !training && session?.room?.maxStats !== false; // Free Roam starts with every shop upgrade maxed (a room setting)
+    if (this.maxStats) this.applyMaxStats();
     this.level = Math.max(1, Math.min(MAX_CHAR_LEVEL, Math.round(saved?.level) || 1));
     this.xp = Math.max(0, Number(saved?.xp) || 0);
     this.weapons = sanitizeWeapons(saved?.weapons); // swords bought in the Free Roam shop
@@ -684,6 +698,11 @@ export class Game {
     if (inside && this.canHaveInterior()) this.enterHouse(true);
   }
 
+  // every Free Roam shop upgrade at its top level
+  applyMaxStats() {
+    for (const u of FREE_UPGRADES) this.upgrades[u.id] = MAX_LEVEL;
+  }
+
   // Wipes the seed's progress and puts the hero back at spawn.
   resetProgress() {
     this.collected.clear();
@@ -695,6 +714,7 @@ export class Game {
     this.foraged = 0;
     this.bots?.reset();
     this.upgrades = emptyUpgrades();
+    if (this.maxStats) this.applyMaxStats();
     this.level = 1;
     this.xp = 0;
     this.weapons = emptyWeapons();
@@ -814,11 +834,19 @@ export class Game {
     const pool = this.poolMap();
     const call = this.duelCall;
     return {
+      prep: call && fighting && call.left > 0 ? { mine: !!call.myReady || call.ready.has(me), who: call.fighters.map((id) => ({ id, name: id === me ? 'You' : this.remotes.get(id)?.name || '…', ready: call.ready.has(id) || (id === me && !!call.myReady) })) } : null,
       call: call ? Math.max(0, Math.ceil(call.left)) : null, // seconds left to bet (the fight starts after)
       canBet: !!call && call.bet && call.left > 0 && !this.duelFighters.includes(me),
       pool, bets: this.duelPool.length, myBet: this.myBet, coins: this.coins,
       left: this.duelLeft, units: list, watching: !!this.spectating || !!this.camWatch, out: fighting && !!this.dead, fighting, canWatch: !!this.duelEvent && !fighting,
     };
+  }
+
+  // a fighter is done shopping: tell the host (the duel starts when every fighter is ready)
+  duelReady() {
+    if (!this.duelCall || !this.mp || this.duelCall.myReady) return;
+    this.duelCall.myReady = true;
+    this.mp.net.send({ t: 'duelready' });
   }
 
   // where the camera goes in a duel when you are only watching: the middle of the fighters still standing
@@ -992,6 +1020,77 @@ export class Game {
       const after = c.after;
       this.celeb = null;
       after?.();
+    }
+  }
+
+  // Beach Rumble: the ball went into a goal; it counts for the team of whoever touched it last, unless that was an own goal
+  rumbleGoal(m) {
+    const s = this.soccer;
+    s.tied = [...(m.tied || [])];
+    const me = this.teamMap[this.mp.you];
+    if (m.conceded === -1 && m.sudden) {
+      this.onToast?.(`⏱ Time! ${s.tied.map((t) => TEAMS[t].icon).join(' ')} are level: the next goal by one of them wins!`);
+      return;
+    }
+    if (m.nothing) {
+      this.onToast?.(m.nothing === 'own' ? '🙈 Own goal: it does not count!' : m.nothing === 'late' ? 'That goal does not count in sudden death.' : 'No goal: nobody touched the ball last.');
+      return;
+    }
+    const t = m.scorer;
+    if (!TEAMS[t]) return;
+    this.onAnnounce?.({ title: '⚽ GOAL!', sub: `${TEAMS[t].icon} ${TEAMS[t].name} scores in the ${['left', 'right', 'top'][m.conceded]} goal! (${s.goals[t]}/${s.target})`, tier: 2, mine: me === t });
+    sfx.play(me === t ? 'win' : 'wave');
+    const b = this.balls?.list[0];
+    this.crowd?.goal(t);
+    this.goalConfettiBurst(TEAMS[t].color);
+    if (b) this.combat.floaters.push({ x: b.x, y: b.y - 30, text: 'GOAL!', color: TEAMS[t].color, t: 0, big: true });
+  }
+
+  // a goal: confetti shoots up from the bottom corners and rains over the screen (in the scoring team's colours)
+  goalConfettiBurst(teamColor) {
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const z = this.zoom;
+    const colors = [teamColor, teamColor, '#ffd24a', '#ffffff', '#7ddc6f', '#5ac8fa', '#ff9a3d'];
+    const piece = (x, y, vx, vy) => this.goalConfetti.push({
+      x, y, vx, vy, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 12, flip: Math.random() * 6.28, t: 0,
+      w: z * (1.2 + Math.random() * 1.5), h: z * (0.8 + Math.random() * 1.1), color: colors[Math.floor(Math.random() * colors.length)],
+    });
+    for (let i = 0; i < 60; i++) {
+      piece(W * 0.03, H * 0.97, z * (40 + Math.random() * 150), -z * (160 + Math.random() * 190));
+      piece(W * 0.97, H * 0.97, -z * (40 + Math.random() * 150), -z * (160 + Math.random() * 190));
+    }
+    for (let i = 0; i < 70; i++) piece(Math.random() * W, -Math.random() * H * 0.6, (Math.random() - 0.5) * z * 30, z * (20 + Math.random() * 40));
+    if (this.goalConfetti.length > 600) this.goalConfetti.splice(0, this.goalConfetti.length - 600);
+  }
+
+  updateGoalConfetti(dt) {
+    if (!this.goalConfetti.length) return;
+    const z = this.zoom;
+    const H = this.canvas.height;
+    for (const b of this.goalConfetti) {
+      b.t += dt;
+      b.vy += z * 190 * dt;
+      b.vy = Math.min(b.vy, z * 70 + (b.vy < 0 ? b.vy : 0));
+      b.vx *= 1 - Math.min(1, 1.4 * dt);
+      b.x += (b.vx + Math.sin(b.t * 3 + b.flip) * z * 14) * dt;
+      b.y += b.vy * dt;
+      b.rot += b.vr * dt;
+      b.flip += dt * 9;
+    }
+    this.goalConfetti = this.goalConfetti.filter((b) => b.y < H + 20 && b.t < 6);
+  }
+
+  drawGoalConfetti() {
+    const ctx = this.ctx;
+    for (const b of this.goalConfetti) {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.rot);
+      ctx.scale(1, Math.cos(b.flip));
+      ctx.fillStyle = b.color;
+      ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+      ctx.restore();
     }
   }
 
@@ -2180,15 +2279,20 @@ export class Game {
     const c = this.combat;
     if (ev.type === 'start' && ev.endless) {
       // Endless: there are no waves to announce, only the Colossus that turns up now and then
-      if (ev.bosses > 0) this.onToast?.(`${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming at the end of this batch!`);
+      if (ev.bosses > 0) this.onToast?.(`${bossText(ev)} ${ev.bosses > 1 ? 'are' : 'is'} coming at the end of this batch!`);
     } else if (ev.type === 'start') {
       sfx.play('wave');
-      if (this.world.apoc && ev.bosses > 0) this.onToast?.(`${ev.boss ? 'FINAL WAVE! ' : `Wave ${ev.wave}: `}${ev.bosses} Colossus${ev.bosses > 1 ? 'es are' : ' is'} coming at the end of it!`);
+      if (this.world.apoc && ev.bosses > 0) this.onToast?.(`${ev.boss ? 'FINAL WAVE! ' : `Wave ${ev.wave}: `}${bossText(ev)} ${ev.bosses > 1 ? 'are' : 'is'} coming at the end of it!`);
       else this.onToast?.(ev.boss ? 'FINAL WAVE! The Crushing Cyclops is coming!' : `Wave ${ev.wave} is coming!`);
     } else if (ev.type === 'boss') {
       // the bosses of the wave have arrived (the last burst)
       sfx.play('wave');
-      this.announceBoss(ev.endless ? '☠ A COLOSSUS IS HERE' : ev.wave >= 10 ? '☠ FINAL BOSS' : `☠ WAVE ${ev.wave}: THE BOSS ARRIVES`, `${ev.n} Colossus${ev.n > 1 ? 'es' : ''} · follow the red arrow to find ${ev.n > 1 ? 'them' : 'it'}`);
+      this.announceBoss(ev.endless ? `☠ ${bossNames(ev).toUpperCase()} ${ev.n > 1 ? 'ARE' : 'IS'} HERE` : ev.wave >= 10 ? '☠ FINAL BOSS' : `☠ WAVE ${ev.wave}: THE BOSS ARRIVES`, `${bossText(ev)} · follow the red arrow to find ${ev.n > 1 ? 'them' : 'it'}`);
+    } else if (ev.type === 'summon') {
+      // the Zombie Wizard raises the dead
+      c.spells.push({ x: ev.x, y: ev.y, t: 0, fx: 'necro_summon', frames: TINY.fx.necro_summon, fxOnly: true });
+      c.floaters.push({ x: ev.x, y: ev.y - 30, text: 'rise!', color: '#c58bff', t: 0 });
+      sfx.play('wave', 0.4);
     } else if (ev.type === 'surge') {
       sfx.play('wave');
       this.onToast?.(`🧟 A pack of ${ev.n} runners is charging in from the ${ev.dir}!`);
@@ -2246,7 +2350,7 @@ export class Game {
       this.onToast?.('The base is already as strong as it gets.');
     } else if ((d.op === 'mendUp' || d.op === 'mendHeal' || d.op === 'air') && !d.ok) {
       this.giveCoins(this.paidFor?.[d.op] || 0); // it did not happen: the coins come back
-      this.onToast?.(d.op === 'air' ? 'Too many aircraft are in the sky already. Try again in a moment.' : 'The shelter is already in perfect shape.');
+      this.onToast?.(d.op === 'air' ? 'No air support right now: at most 3 aircraft in the sky, and 3 calls per wave.' : 'The shelter is already in perfect shape.');
     }
   }
 
@@ -3019,7 +3123,7 @@ export class Game {
     (this.paidFor ||= {}).air = info.cost;
     if (this.wave.callAir(kind) === false) {
       this.giveCoins(info.cost);
-      this.onToast?.('Too many aircraft are in the sky already. Try again in a moment.');
+      this.onToast?.('No air support right now: at most 3 aircraft in the sky, and 3 calls per wave.');
     }
   }
 
@@ -3351,6 +3455,10 @@ export class Game {
     } else if (m.swing) {
       row = info[m.swing.anim] ? m.swing.anim : 'atk1';
       f = Math.floor((m.swing.t / m.swing.dur) * info[row][1]);
+    } else if (this.wave && !m.wild && m.atk > 0 && info.atk1) {
+      // a Survival monster that is hitting or casting right now
+      row = 'atk1';
+      f = Math.floor(m.anim * 14) % info.atk1[1];
     } else if (m.skill?.phase === 1) {
       row = 'walk';
       f = Math.floor(m.anim * 16);
@@ -3799,10 +3907,34 @@ export class Game {
     const w = this.wave;
     this.ghostWhy = null;
     for (const s of w.shots) {
-      ctx.fillStyle = s.spit ? '#8fe35a' : '#f4e9cf';
-      ctx.fillRect(Math.round(s.x) - 1, Math.round(s.y) - 1, 3, 3);
-      ctx.fillStyle = s.spit ? '#4c9a2c' : '#8a6a44';
-      ctx.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+      if (s.arrow && this.img[`tiny/arrow${s.arrow}`]) {
+        // an archer's arrow, with a pale streak behind it so it can be seen
+        ctx.save();
+        ctx.translate(Math.round(s.x), Math.round(s.y));
+        ctx.rotate(s.ang || 0);
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillRect(-30, -0.5, 24, 1.5);
+        ctx.shadowColor = 'rgba(20,10,0,0.95)';
+        ctx.shadowBlur = 3;
+        ctx.drawImage(this.img[`tiny/arrow${s.arrow}`], -24, -24, 48, 48);
+        ctx.restore();
+      } else if (s.bolt) {
+        // the wizard's bolt: a glowing purple orb
+        const pulse = 0.6 + 0.3 * Math.sin(this.t * 18);
+        ctx.fillStyle = `rgba(170,90,255,${0.3 * pulse})`;
+        ctx.beginPath();
+        ctx.arc(Math.round(s.x), Math.round(s.y), 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#c58bff';
+        ctx.fillRect(Math.round(s.x) - 2, Math.round(s.y) - 2, 4, 4);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(Math.round(s.x) - 1, Math.round(s.y) - 1, 2, 2);
+      } else {
+        ctx.fillStyle = s.spit ? '#8fe35a' : '#f4e9cf';
+        ctx.fillRect(Math.round(s.x) - 1, Math.round(s.y) - 1, 3, 3);
+        ctx.fillStyle = s.spit ? '#4c9a2c' : '#8a6a44';
+        ctx.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+      }
     }
     // where barricades were destroyed: a faint red ghost, so you know what a repair would plant back
     for (const r of w.wrecks) {
@@ -3964,13 +4096,17 @@ export class Game {
       this.duelTp = null;
       this.endDuelEvent(m);
     } else if (m.t === 'goalscore' && this.soccer) {
-      this.soccer.goals = [Number(m.goals?.[0]) || 0, Number(m.goals?.[1]) || 0];
+      this.soccer.goals = [0, 1, 2].map((i) => Number(m.goals?.[i]) || 0);
       this.soccer.sudden = !!m.sudden;
-      if (m.team === 0 || m.team === 1) {
+      if (m.rumble) this.rumbleGoal(m);
+      else if (m.nothing) this.onToast?.(m.nothing === 'own' ? '🙈 Own goal: it does not count!' : 'No goal: nobody touched the ball last.');
+      else if (m.team === 0 || m.team === 1) {
         const mine = this.teamMap[this.mp.you] === m.team;
         this.onAnnounce?.({ title: '⚽ GOAL!', sub: `${TEAMS[m.team].icon} ${TEAMS[m.team].name} team scores!`, tier: 2, mine });
         sfx.play(mine ? 'win' : 'wave');
         const b = this.balls?.list[0];
+        this.crowd?.goal(m.team);
+        this.goalConfettiBurst(TEAMS[m.team].color);
         if (b) this.combat.floaters.push({ x: b.x, y: b.y - 30, text: 'GOAL!', color: m.team === 0 ? '#ff5d7a' : '#5aaee8', t: 0, big: true });
       } else if (m.sudden) this.onToast?.('⏱ Time! It is level: the next goal wins!');
     } else if (m.t === 'match' && this.soccer) {
@@ -3988,10 +4124,12 @@ export class Game {
         this.myBet = null;
       }
       this.duelPreview = null;
-      this.duelCall = { left: Number(m.window) || 0, bet: !!m.bet, kind: m.kind, fighters: (m.fighters || []).map(String), units: m.units || {} };
+      this.duelCall = { left: Number(m.window) || 0, bet: !!m.bet, kind: m.kind, fighters: (m.fighters || []).map(String), units: m.units || {}, ready: new Set(), myReady: false };
       this.duelNextLeft = null;
       const names = this.duelFighters.map((id) => (id === me ? 'you' : this.remotes.get(id)?.name || 'someone'));
-      this.onToast?.(this.duelFighters.includes(me) ? `⚔️ You are called to a duel in ${Math.round(m.window)}s! Finish what you are doing.` : m.bet ? `🎲 A duel is about to start (${names.join(' vs ')}): place your bets!` : `⚔️ A duel is about to start (${names.join(' vs ')}).`);
+      this.onToast?.(this.duelFighters.includes(me) ? `⚔️ You are called to a duel in ${Math.round(m.window)}s! Buy what you need (B), then press Ready.` : m.bet ? `🎲 A duel is about to start (${names.join(' vs ')}): place your bets!` : `⚔️ A duel is about to start (${names.join(' vs ')}).`);
+    } else if (m.t === 'duelready') {
+      if (this.duelCall) this.duelCall.ready = new Set((m.list || []).map(String));
     } else if (m.t === 'duelbets') {
       this.duelPool = m.list || [];
     } else if (m.t === 'duelgo' || m.t === 'duelcancel') {
@@ -4466,7 +4604,12 @@ export class Game {
       if (this.mouseHeld[2] && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot); // right click always throws what is selected in the backpack
       // still holding left click when the last throw, shot or cast is over: the charge bar starts again by itself
       if (this.mouseHeld[0] && !this.dead && !this.celeb && !this.wave && !this.combat.hold && !this.combat.dash && !this.combat.spin && !this.combat.thrown && !this.paused && this.rules?.melee !== false && this.combat.canFight()) this.combat.holdStart();
+      // the aim stick is held: keep swinging that way (the sword's own cool-down sets the pace)
+      if (this.tAim.atk !== null && !this.wave && !this.dead && !this.celeb && !this.paused && !this.combat.hold && !this.combat.dash && !this.combat.spin) this.combat.attack();
       this.updateCelebration(dt);
+      if (this.soccer && !this.crowd && this.home) this.crowd = new Crowd(this);
+      this.crowd?.update(dt);
+      this.updateGoalConfetti(dt);
       for (const f of this.reviveFxs) f.t += dt;
       if (this.reviveFxs.length) this.reviveFxs = this.reviveFxs.filter((f) => f.t < (f.mine ? 5 : 2.4));
       if (this.reviveFlash > 0) this.reviveFlash = Math.max(0, this.reviveFlash - dt * 1.3);
@@ -4476,7 +4619,7 @@ export class Game {
       if (!this.balls && !this.demo && this.home) this.balls = new Balls(this);
       this.balls?.update(dt);
       if (!this.inside && !this.dungeon) this.bots?.update(dt);
-      if (this.mp?.pvp && this.hostId === this.mp.you && this.home) {
+      if (this.mp && (this.mp.pvp || this.soccer || this.escape) && this.hostId === this.mp.you && this.home) {
         if (!this.aiSim && [...this.remotes.values()].some((r) => r.ai)) this.aiSim = new AiPlayers(this, this.difficultyId);
         this.aiSim?.update(dt);
       }
@@ -4585,7 +4728,7 @@ export class Game {
       bullets: this.bullets,
       gunSel: !!(this.escape && ITEMS[this.inventory[this.selectedSlot]?.id]?.gun),
       compass: this.compassHud(),
-      soccer: this.soccer ? { goals: this.soccer.goals, left: this.soccer.left, sudden: this.soccer.sudden, target: this.soccer.target, team: this.teamMap[this.mp.you] ?? 0 } : null,
+      soccer: this.soccer ? { goals: this.soccer.goals, rumble: this.soccer.rumble, out: this.soccer.out || [], tied: this.soccer.tied || [], left: this.soccer.left, sudden: this.soccer.sudden, target: this.soccer.target, team: this.teamMap[this.mp.you] ?? 0 } : null,
       nextDuel: this.nextDuelHud(),
       marks: this.duelMarks(),
       wave: this.wave?.hudState() || null,
@@ -5388,8 +5531,44 @@ export class Game {
     return Math.atan2(vy, vx);
   }
 
-  setTouchAim(ang) {
-    if (this.aimOverride !== null) this.aimOverride = ang ?? 'auto';
+  // the aim is the angle of whichever control was dragged last (a held control that was not dragged aims for you)
+  syncAim() {
+    let any = false;
+    for (const k of [this.tAimLast, 'chg', 'atk', 'thr']) {
+      const v = this.tAim[k];
+      if (v === null) continue;
+      any = true;
+      if (typeof v === 'number') {
+        this.aimOverride = v;
+        return;
+      }
+    }
+    this.aimOverride = any ? 'auto' : null;
+  }
+
+  setTouchAim(ang, src = 'chg') {
+    if (this.tAim[src] === null) return;
+    this.tAim[src] = ang ?? 'auto';
+    this.tAimLast = src;
+    this.syncAim();
+  }
+
+  // the aim stick: a finger is on it (`ang` is where it points, null: straight ahead) and the hero attacks that way over and over,
+  // whatever the walking stick is doing. (In Wave Defense it is the old press and release.)
+  touchAtk(ang) {
+    if (this.frozen || this.dead || this.celeb || !this.combat) return;
+    const first = this.tAim.atk === null;
+    this.tAim.atk = ang ?? 'auto';
+    this.tAimLast = 'atk';
+    this.syncAim();
+    if (first && this.wave) this.combat.holdStart();
+  }
+
+  touchAtkEnd() {
+    if (this.tAim.atk === null) return;
+    if (this.wave && this.combat?.hold) this.combat.holdEnd();
+    this.tAim.atk = null;
+    this.syncAim();
   }
 
   // a button went down. `ang` is where the finger was dragged to (null: aim for me)
@@ -5397,12 +5576,17 @@ export class Game {
     if (this.frozen || this.dead || this.celeb || !this.combat) return;
     const c = this.combat;
     switch (kind) {
-      case 'attack':
-        this.aimOverride = ang ?? 'auto';
-        c.holdStart(); // a tap swings; holding and letting go dashes
+      case 'charge':
+        // hold it to charge the weapon's big move (a trident or sling is hurled, a staff casts, an axe spins); let go to do it
+        this.tAim.chg = ang ?? 'auto';
+        this.tAimLast = 'chg';
+        this.syncAim();
+        c.holdStart();
         break;
       case 'throw':
-        this.aimOverride = ang ?? 'auto';
+        this.tAim.thr = ang ?? 'auto';
+        this.tAimLast = 'thr';
+        this.syncAim();
         this.mouseHeld[2] = true;
         break;
       case 'interact':
@@ -5441,14 +5625,19 @@ export class Game {
 
   touchRelease(kind, ang = null) {
     switch (kind) {
-      case 'attack':
-        if (ang !== null) this.aimOverride = ang;
+      case 'charge':
+        if (ang !== null) {
+          this.tAim.chg = ang;
+          this.syncAim();
+        }
         if (this.combat?.hold) this.combat.holdEnd();
-        this.aimOverride = null;
+        this.tAim.chg = null;
+        this.syncAim();
         break;
       case 'throw':
         this.mouseHeld[2] = false;
-        this.aimOverride = null;
+        this.tAim.thr = null;
+        this.syncAim();
         break;
       case 'interact':
         this.spaceDown = false;
@@ -6065,6 +6254,7 @@ export class Game {
       if (!this.spectating) drawList.push({ kind: 'player', y: this.player.y + (this.mount ? 0.2 : 0) });
       this.combat.collect(drawList);
       this.balls?.collect(drawList);
+      this.crowd?.collect(drawList);
       for (const r of this.remotes.values()) {
         if (r.hidden) continue;
         drawList.push({ kind: 'remote', r, y: r.y });
@@ -6111,7 +6301,7 @@ export class Game {
         }
         case 'goalnet': {
           // a goal: posts at the mouth, a back and sides of net, in the colour of the team that guards it
-          const col = o.team === 0 ? '232,80,106' : '74,155,232';
+          const col = o.team === 0 ? '232,80,106' : o.team === 2 ? '79,191,106' : '74,155,232';
           ctx.save();
           ctx.fillStyle = `rgba(${col},0.16)`;
           ctx.fillRect(o.gx, o.gy, o.w, o.h);
@@ -6127,6 +6317,18 @@ export class Game {
             ctx.lineTo(o.gx + o.w, o.gy + k);
           }
           ctx.stroke();
+          if (o.top) {
+            // (the top goal opens downwards: the posts stand at its left and right ends)
+            const mouthY = o.gy + o.h;
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(o.gx - 4, mouthY - 2, 9, 4);
+            ctx.fillRect(o.gx + o.w - 4, mouthY - 2, 9, 4);
+            ctx.fillStyle = `rgb(${col})`;
+            ctx.fillRect(o.gx - 4, mouthY - 1, 3, 2);
+            ctx.fillRect(o.gx + o.w + 2, mouthY - 1, 3, 2);
+            ctx.restore();
+            break;
+          }
           const mouth = o.team === 0 ? o.gx + o.w : o.gx; // the open side, towards the field
           ctx.fillStyle = '#fff';
           ctx.fillRect(mouth - 2, o.gy - 4, 4, 9); // the two posts
@@ -6288,6 +6490,9 @@ export class Game {
           if ((this.wave && this.world.apoc) || (this.escape && ITEMS[this.inventory[this.selectedSlot]?.id]?.gun)) this.combat.drawGun(ctx, this.player.x, this.player.y);
           if (!this.wave) this.drawHealthBar(ctx, { x: this.player.x, y: this.player.y - this.rideLift(), hp: this.combat.hp, max: this.combat.maxHp, hero: this.hero, lv: this.level });
           break;
+        case 'crowd':
+          this.crowd.draw(ctx, o.s);
+          break;
         case 'remote': {
           const lift = this.remoteLift(o.r);
           this.drawTeamRing(ctx, o.r.x, o.r.y, this.teamOf(o.r));
@@ -6362,6 +6567,8 @@ export class Game {
       this.drawPeers(camX, camY);
       this.drawBossArrows(camX, camY);
       this.drawKillerHighlight(camX, camY);
+      this.crowd?.drawBubbles(camX, camY);
+      this.drawGoalConfetti();
       this.drawCelebration(camX, camY);
       if (this.ghostCount && !this.ghostWhy) {
         const [sx, sy] = this.toScreen(this.ghostCount.x, this.ghostCount.y - 30, camX, camY);

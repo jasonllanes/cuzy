@@ -17,6 +17,7 @@ import AccessGate from './components/AccessGate';
 import { isUnlocked } from './game/access';
 import WaitingRoom from './components/WaitingRoom';
 import InviteToasts from './components/InviteToasts';
+import MazeGame from './maze/MazeGame';
 
 const PROFILE_KEY = 'cuzi-profile';
 const REJOIN_KEY = 'cuzy-rejoin';
@@ -119,6 +120,7 @@ export default function App() {
   const [invites, setInvites] = useState([]); // pop-up invitations from other players
   const [training, setTraining] = useState(() => /[#?&/]training(?!-v2)\b/.test(`${window.location.hash}${window.location.search}`)); // the developer training ground (#/training)
   const [trainingV2, setTrainingV2] = useState(() => /[#?&/]training-v2\b/.test(`${window.location.hash}${window.location.search}`)); // the Free Roam V2 training room (#/training-v2)
+  const [maze, setMaze] = useState(() => /[?&]maze=/.test(window.location.search)); // Maze Rush, a game of its own
   const [v2Mode, setV2Mode] = useState(false); // the main menu in Free Roam V2 mode: the same game, with the modern props in its worlds
   const [, setAccessTick] = useState(0); // re-render once the access code has been accepted
   const [trainingMap, setTrainingMap] = useState(FREE_MAPS[0].id); // the training ground's map and hero survive a map swap
@@ -148,7 +150,7 @@ export default function App() {
   // background music: a tune for the menus
   const playingNow = playing && !(session && lobby);
   // (while a game is on screen it picks its own: the opening scene, the map, the ending)
-  const tune = training || trainingV2 || playingNow ? null : v2Mode ? 'city' : 'menu';
+  const tune = training || trainingV2 || maze || playingNow ? null : v2Mode ? 'city' : 'menu';
   useEffect(() => {
     if (tune) music.play(tune);
   }, [tune]);
@@ -327,7 +329,7 @@ export default function App() {
   if (error) return <div className="splash">Oh no, something went wrong loading the meadow. ({error.message})</div>;
   if (!assets) return <div className="splash"><span className="splash-dot" /> Gathering acorns…</div>;
   // the welcome page: sign in with Google, or play as a guest (not asked again on this browser; invite links and the dev tools skip it)
-  const skipWelcome = guest || reconnect || /[?&](room|play)=|#\/?training/.test(`${window.location.search}${window.location.hash}`);
+  const skipWelcome = guest || reconnect || /[?&](room|play|maze)=|#\/?training/.test(`${window.location.search}${window.location.hash}`);
   if (cloudOn && !account?.google && !skipWelcome) {
     if (account === undefined) return <div className="splash"><span className="splash-dot" /> Gathering acorns…</div>;
     return <Welcome onGuest={() => { chooseGuest(true); setGuest(true); }} />;
@@ -339,6 +341,10 @@ export default function App() {
         <button type="button" className="btn ghost small-btn" onClick={() => { rejoinClear(); setReconnect(null); }}>Cancel</button>
       </div>
     );
+  }
+
+  if (maze) {
+    return <MazeGame assets={assets} profile={profile} onExit={() => { setMaze(false); if (window.location.search) window.history.replaceState(null, '', window.location.pathname); }} />;
   }
 
   let screen;
@@ -363,7 +369,7 @@ export default function App() {
   } else if (playing) {
     screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else {
-    screen = <MainMenu onTraining={() => setTraining(true)} onTrainingV2={() => setTrainingV2(true)} onV2={() => setV2Mode(true)} onExitV2={() => setV2Mode(false)} v2={v2Mode} onSaveName={saveName} notice={notice} key={pendingInvite || (v2Mode ? 'v2menu' : 'menu')} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
+    screen = <MainMenu onMaze={() => setMaze(true)} onTraining={() => setTraining(true)} onTrainingV2={() => setTrainingV2(true)} onV2={() => setV2Mode(true)} onExitV2={() => setV2Mode(false)} v2={v2Mode} onSaveName={saveName} notice={notice} key={pendingInvite || (v2Mode ? 'v2menu' : 'menu')} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }
   return (
     <>
