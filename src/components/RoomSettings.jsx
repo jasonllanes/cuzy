@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import MapPickerModal from './MapPickerModal';
 import { TEAM_COUNTS } from '../game/teams';
 import { DIFFICULTY, DIFFICULTY_IDS, WAVE_COUNTS } from '../game/monsters';
 import { FREE_MAPS, SURVIVAL_MAPS, mapIdOf } from '../game/maps';
@@ -52,7 +54,8 @@ const MODE_PATCH = {
   duel: { mode: 'free', ...OFF, duel: true },
 };
 
-export default function RoomSettings({ room, count, editable, onChange, players = [] }) {
+export default function RoomSettings({ room, count, editable, onChange, players = [], assets = null, net = null, name = '', hero = '' }) {
+  const [mapOpen, setMapOpen] = useState(false); // the map page (with its preview), opened from here instead of a drop-down
   const free = room.mode === 'free';
   const locked = !editable || room.started; // the mode, the map, the Colosseum round and the startup money are fixed once the round starts
   const escape = !!room.escape; // the Escape zone: loot, zombies and a chopper
@@ -86,13 +89,17 @@ export default function RoomSettings({ room, count, editable, onChange, players 
           </div>
         )}
         <div className="set-row">
-          <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Everyone in the room gets the new world.'}</small></div>
-          <select value={duel ? 'colosseum' : soccer ? 'pitch' : escape ? 'escape' : mapIdOf(room.seed, room.mode)} disabled={locked || duel || soccer || escape} onChange={(e) => onChange({ map: e.target.value })}>
-            {duel && <option value="colosseum">🏛️ Colosseum</option>}
-            {soccer && <option value="pitch">{room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch'}</option>}
-            {escape && <option value="escape">🚁 Escape Zone</option>}
-            {(free ? FREE_MAPS : SURVIVAL_MAPS).map((m) => <option key={m.id} value={m.id}>{m.icon} {m.name}</option>)}
-          </select>
+          <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Opens the map page, with a preview. Everyone in the room gets the new world.'}</small></div>
+          {(() => {
+            const fixed = duel || soccer || escape;
+            const cur = duel ? '🏛️ Colosseum' : soccer ? (room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch') : escape ? '🚁 Escape Zone' : (() => { const m = (free ? FREE_MAPS : SURVIVAL_MAPS).find((x) => x.id === mapIdOf(room.seed, room.mode)); return m ? `${m.icon} ${m.name}` : 'Custom world'; })();
+            return (
+              <div className="map-now">
+                <b>{cur}</b>
+                {!fixed && <button type="button" className="btn small-btn" disabled={locked || !assets} onClick={() => setMapOpen(true)}>🗺 Change map…</button>}
+              </div>
+            );
+          })()}
         </div>
         <div className="set-row">
           <div className="set-label"><b>Max players</b><small>{count} in the room now</small></div>
@@ -143,6 +150,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       )}
 
       <Section icon="👥" title="Players" note={[room.allowLate !== false ? 'late join' : 'no late join', room.allowVisit ? 'visit' : null, room.allowCheats ? 'cheats' : null].filter(Boolean).join(' · ')}>
+        <Switch label="Private room" hint="Hidden from the room list: only people with the room code or the invite link can join" on={!!room.private} disabled={!editable} onChange={(v) => onChange({ private: v })} />
         <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
         <Switch label="Allow visit" hint="Teleport straight to another player (Room button, then Visit)" on={!!room.allowVisit} disabled={!editable} onChange={(v) => onChange({ allowVisit: v })} />
         <Switch label="Allow cheats?" hint="Chat commands like -gold 100 or -level 5 (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />
@@ -291,6 +299,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
           )}
         </Section>
       )}
+      {mapOpen && assets && <MapPickerModal assets={assets} net={net} room={room} name={name} hero={hero} onClose={() => setMapOpen(false)} onPick={(p) => { setMapOpen(false); onChange(p); }} />}
     </section>
   );
 }

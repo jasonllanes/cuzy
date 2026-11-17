@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { RETRO_COUNT, SURVIVOR_COLORS, V2_CHARS, heroById, isRetro, isSurvivor, isV2Char, retroId, survivorId } from '../game/heroes';
 import { randomName } from '../game/rng';
 import SpritePreview from './SpritePreview';
 import WorldBackdrop from './WorldBackdrop';
-import { DIFFICULTY, DIFFICULTY_IDS, WAVE_COUNTS } from '../game/monsters';
+import { DIFFICULTY } from '../game/monsters';
+import { menuPath, menuRoute, onHash, roomFromHash, setHash } from '../game/router';
 import MenuHome from './MenuHome';
 import MultiMenu from './MultiMenu';
 import MusicButton from './MusicButton';
@@ -12,13 +13,22 @@ import Avatar from './Avatar';
 import MapPreview from './MapPreview';
 import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
-const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8);
+const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8) || roomFromHash(); // (an invite link, or the address #/room/CODE)
 
-// the menu is a short walk: who are you, what are you playing, alone or with friends, who do you play as, then how
+// what you picked in the setup walk is kept for this tab, so a reload (or the back button) lands on the same page with the same choices
+const WIZ_KEY = 'cuzy-wizard';
+const readWizard = () => {
+  try {
+    return JSON.parse(window.sessionStorage.getItem(WIZ_KEY)) || {};
+  } catch {
+    return {};
+  }
+};
+
+// the menu is a short walk: who are you, what are you playing, who do you play as, then which map (alone or together was already chosen on the main menu)
 const STEPS = [
   ['name', 'Name'],
   ['game', 'Game'],
-  ['who', 'Players'],
   ['hero', 'Hero'],
   ['play', 'Map'],
 ];
@@ -41,11 +51,14 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   // someone tapped an invite link: skip the setup walk and ask only for a name and a hero (until they ask for the full menu)
   const [fullMenu, setFullMenu] = useState(false);
   const inviting = !!invite && !fullMenu;
-  const [step, setStep] = useState('name');
-  const [view, setView] = useState(v2 ? 'wizard' : 'home'); // the main menu, or 'wizard' (the setup pages), 'settings', 'about', 'exit'
+  const r0 = useMemo(() => (v2 ? { view: 'wizard', step: 'name' } : menuRoute()), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const saved = useMemo(() => (r0.view === 'wizard' ? readWizard() : {}), [r0]);
+  const sv = (k, d) => (saved[k] !== undefined ? saved[k] : d);
+  const [step, setStep] = useState(r0.step);
+  const [view, setView] = useState(r0.view); // the main menu, or 'wizard' (the setup pages), 'settings', 'board', 'about', 'exit'
   const stepIndex = STEPS.findIndex(([id]) => id === step);
   const [name, setName] = useState(initial.name);
-  const [fromMulti, setFromMulti] = useState(false); // the setup walk was opened from Multiplay: the name is already saved, and it is about creating a room
+  const [fromMulti, setFromMulti] = useState(sv('fromMulti', false)); // the setup walk was opened from Multiplay: the name is already saved, and it is about creating a room
   // a name you type is kept right away, so it never has to be typed again
   useEffect(() => {
     const n = name.trim();
@@ -56,9 +69,9 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   }, [name]);
 
   // two kinds of game: the cozy Free Roam world (which can also host a wave defense), and Survival
-  const [gameType, setGameType] = useState(!v2 && initial.mode === 'survival' ? 'survival' : 'free');
+  const [gameType, setGameType] = useState(sv('gameType', !v2 && initial.mode === 'survival' ? 'survival' : 'free'));
   const freeMode = 'free'; // Free Roam is just Roam here: Wave Defense and vs AI are not offered any more
-  const [mode, setMode] = useState(invite ? 'together' : 'solo');
+  const [mode, setMode] = useState(invite ? 'together' : sv('mode', 'solo'));
   const [aiCount, setAiCount] = useState(initial.bots || 3);
   // 'ai' is a solo-only Free Roam flavour: an ordinary fight world with computer rivals
   const vsAi = gameType === 'free' && freeMode === 'ai' && mode === 'solo';
@@ -75,7 +88,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
 
   // Free Roam heroes: the Super Retro World pack
   const [hero, setHero] = useState(() => {
-    const id = isSurvivor(initial.hero) ? initial.cozyHero : initial.hero;
+    const id = saved.hero || (isSurvivor(initial.hero) ? initial.cozyHero : initial.hero);
     return isRetro(id) || isV2Char(id) ? heroById(id).id : retroId(1);
   });
   // Survival's survivor, in a jacket colour
@@ -89,8 +102,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const activeHeroId = hero; // the same heroes in every game type, Survival included
   const activeHero = heroById(activeHeroId);
   const selected = heroById(hero);
-  const [freeMap, setFreeMap] = useState(FREE_MAPS.find((m) => m.seed === splitSeed(initial.seed).base)?.id || FREE_MAPS[0].id);
-  const [survMap, setSurvMap] = useState(splitSeed(initial.seed).map); // Survival's map, kept in the seed after a ~
+  const [freeMap, setFreeMap] = useState(sv('freeMap', FREE_MAPS.find((m) => m.seed === splitSeed(initial.seed).base)?.id || FREE_MAPS[0].id));
+  const [survMap, setSurvMap] = useState(sv('survMap', splitSeed(initial.seed).map)); // Survival's map, kept in the seed after a ~
   // the map you pick decides the world seed (maps are named, not typed in)
   // "Random map": a map picked at random (and a fresh layout of it) each time the menu is opened or the card is pressed
   const [dice, setDice] = useState(() => Math.random());
@@ -128,10 +141,43 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const profile = () => ({ name, hero: activeHeroId, cozyHero: hero, survColor, seed: fullSeed(), mode: gameMode, difficulty, waves: survWaves, bots: vsAi ? aiCount : 0, winBy: gameMode === 'free' ? winBy : 'duel' });
   const myName = () => name.trim() || 'Friend';
 
+  const [, setTick] = useState(0);
   const go = (next) => {
     setError('');
     setStep(next);
   };
+
+  // ---- the address follows the page, and the page follows the address (back button, reload, a link) ----
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(WIZ_KEY, JSON.stringify({ gameType, mode, hero, freeMap, survMap, fromMulti }));
+    } catch {
+      /* private window */
+    }
+  }, [gameType, mode, hero, freeMap, survMap, fromMulti]);
+  useEffect(() => {
+    if (v2) return;
+    // (a setup page after the name needs a name: without one you are sent back to the first page)
+    if (view === 'wizard' && step !== 'name' && !name.trim()) {
+      setStep('name');
+      return;
+    }
+    const a = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+    if (['room', 'game', 'maze', 'training', 'training-v2'].includes(a)) return; // (those belong to the game screens)
+    setHash(menuPath(view, step));
+  }, [view, step]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (v2) return undefined;
+    return onHash(() => {
+      const a = window.location.hash.replace(/^#\/?/, '').split('/')[0];
+      if (a === 'room') setTick((n) => n + 1); // (a link to a room: the invite page shows up)
+      if (['room', 'game', 'maze', 'training', 'training-v2'].includes(a)) return;
+      const rt = menuRoute();
+      setError('');
+      setView(rt.view);
+      setStep(rt.step);
+    });
+  }, [v2]);
 
   const submit = (e) => {
     e.preventDefault();
@@ -326,7 +372,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
       <div className="cloud c2" />
       <div className="cloud c3" />
 
-      <form className={`panel menu-card ${step === 'hero' || step === 'play' ? 'wide' : ''}`} onSubmit={submit}>
+      <form className="panel menu-card wide" onSubmit={submit}>
         <header className="logo">
           <span className="logo-spark"><V2Sprite theme="graveyard" name="Little_Pumpkin_1" scale={3} /></span>
           <h1>{v2 ? 'Cuzy V2' : 'Cuzy'}</h1>
@@ -423,55 +469,13 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                   <small>{sp.blurb}</small>
                 </button>
               ))}
-              {!v2 && onMaze && (
-                <button type="button" className="type-card" onClick={onMaze}>
-                  <span className="type-emoji" style={{ fontSize: '2.6rem' }}>🍓</span>
-                  <b>Maze Rush</b>
-                  <small>An endless Pac-Man style maze: collect the fruit on the list, dodge the monsters, find the portal. Solo, 2 players on one keyboard, or online.</small>
-                </button>
-              )}
             </div>
             {fromMulti ? (
               <div className="nav-row">
                 <button type="button" className="btn ghost" onClick={() => setView('multi')}>← Back</button>
                 <button type="button" className="btn go" onClick={() => go('hero')}>Next ➜</button>
               </div>
-            ) : nav('name', 'who')}
-          </section>
-        )}
-
-        {/* ---------- 3. alone or together ---------- */}
-        {step === 'who' && (
-          <section className="page">
-            <div className="step">Playing alone, or with friends?</div>
-            <div className="type-cards big" role="radiogroup" aria-label="Players">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={mode === 'solo'}
-                className={`type-card ${mode === 'solo' ? 'on' : ''}`}
-                disabled={!!special?.together}
-                title={special?.together ? `${special.name} needs other players` : undefined}
-                style={special?.together ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
-                onClick={() => !special?.together && setMode('solo')}
-              >
-                <span className="type-emoji"><Avatar assets={assets} id="v2:scout3" size={64} /></span>
-                <b>Solo</b>
-                <small>{survival ? 'Just you against the horde.' : 'Just you, with the option of computer rivals to fight.'}</small>
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={mode === 'together'}
-                className={`type-card ${mode === 'together' ? 'on' : ''}`}
-                onClick={() => setMode('together')}
-              >
-                <span className="type-emoji"><Avatar assets={assets} id="v2:scout1" size={56} /><Avatar assets={assets} id="v2:postman2" size={56} /></span>
-                <b>Together <span className={`dot ${status}`} title={online ? 'Room server online' : 'Room server offline'} /></b>
-                <small>Host or join a room with up to 10 players on the same Wi-Fi.</small>
-              </button>
-            </div>
-            {nav('game', 'hero')}
+            ) : nav('name', 'hero')}
           </section>
         )}
 
@@ -529,7 +533,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <p className="hero-blurb">Selected: <b>{selected.label}</b>. {survival ? 'Your hero faces the horde in Survival too. ' : ''}Super Retro World pixel heroes (credit: Gif, Noiracide &amp; Romi).</p>
               </>
             )}
-            {nav(fromMulti ? 'game' : 'who', 'play')}
+            {nav('game', 'play')}
           </section>
         )}
 
@@ -541,35 +545,9 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
             <div className="summary">
               <button type="button" className="summary-chip" onClick={() => go('name')} title="Change name">👤 {myName()}</button>
               <button type="button" className="summary-chip" onClick={() => go('game')} title="Change game">{survival ? '☠️ Survival' : special ? `${special.icon} ${special.name}` : '🌳 Free Roam'}</button>
-              <button type="button" className="summary-chip" onClick={() => go('who')} title="Change players">{mode === 'solo' ? '🌱 Solo' : '🏡 Together'}</button>
+              <span className="summary-chip static">{mode === 'solo' ? '🌱 Solo' : '🏡 Together'}</span>
               <button type="button" className="summary-chip" onClick={() => go('hero')} title="Change hero">🧍 {activeHero.label}</button>
             </div>
-
-            {gameMode === 'survival' && (
-              <div className="wave-setup">
-                <p className="hint">
-                  {endless
-                    ? <>Hold the shelter for as long as you can{mode === 'together' ? ', everyone defending the same base' : ''}. There are no waves: the zombies never stop, and every batch is harder than the last. 👹 A <b>Colossus</b> turns up every 5th batch.</>
-                    : <>Survive <b>{survWaves} waves</b> of zombies around the shelter{mode === 'together' ? ', everyone defending the same base' : ''}. They, the 🦇 bats (shoot them), the archers, the 🧙 wizards and the 👹 <b>Colossus</b> and <b>Werebear</b> bosses get stronger and higher level the further you get.</>} The difficulty and the number of waves can be changed in the room settings.
-                </p>
-                <div className="diff-row" role="radiogroup" aria-label="How many waves">
-                  {WAVE_COUNTS.map((n) => (
-                    <button key={n} type="button" role="radio" aria-checked={survWaves === n} className={`diff-chip ${survWaves === n ? 'on' : ''}`} onClick={() => setSurvWaves(n)}>
-                      <b>{n === 0 ? '♾️ Endless' : `🌊 ${n} waves`}</b>
-                      <small>{n === 0 ? 'No end: as long as you can' : n <= 5 ? 'A short run' : n === 10 ? 'The classic' : 'A long run'}</small>
-                    </button>
-                  ))}
-                </div>
-              <div className="diff-row" role="radiogroup" aria-label="Difficulty">
-                  {DIFFICULTY_IDS.map((id) => (
-                    <button key={id} type="button" role="radio" aria-checked={difficulty === id} className={`diff-chip ${difficulty === id ? 'on' : ''} ${id}`} title={DIFFICULTY[id].blurb} onClick={() => setDifficulty(id)}>
-                      <b>{DIFFICULTY[id].name}</b>
-                      <small>{DIFFICULTY[id].blurb}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {special && <p className="hint special-blurb">{special.icon} <b>{special.name}</b>: {special.blurb} The world and the rules are set for you; the host can still tune them in the room settings.</p>}
             {!special && <div className="layout-box">
@@ -594,21 +572,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 )}
                 {error && <div className="notice error">{error}</div>}
 
-                <div className="sub-label">Your room</div>
-                <div className="row">
-                  <input value={roomName} maxLength={24} placeholder={`${myName()}'s meadow`} autoComplete="off" onChange={(e) => setRoomName(e.target.value)} />
-                  <select value={max} onChange={(e) => setMax(Number(e.target.value))} aria-label="Max players">
-                    {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n} players</option>)}
-                  </select>
-                </div>
-                <label className="check-row">
-                  <input type="checkbox" checked={lateJoin} onChange={(e) => setLateJoin(e.target.checked)} /> Allow late join <small>(people can join after the round has started)</small>
-                </label>
-                {gameMode !== 'free' ? (
-                  <p className="hint">{gameMode === 'survival' ? '☠️ Survival' : '🌊 Wave defense'} is co-op: everyone is on the same side.</p>
-                ) : (
-                  <p className="hint">⚔️ Free Roam rooms are fight mode: swords and throws hurt other players. {winBy === 'monsters' ? 'First to 15 monster kills wins.' : 'First to 10 kills wins.'}</p>
-                )}
+                <p className="hint">You can set the number of waves, the difficulty, the room size and more in the room settings, once the room is open.</p>
               </div>
             )}
 

@@ -1242,7 +1242,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               <h2>⚙️ Room settings</h2>
               <button className="btn small-btn" onClick={() => setRoomSetOpen(false)} aria-label="Close">✕</button>
             </header>
-            <RoomSettings room={live} count={peers.length} players={peers} editable={isHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+            <RoomSettings room={live} count={peers.length} players={peers} editable={isHost} assets={assets} net={net} name={profile.name} hero={profile.hero} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
           </div>
         </div>
       )}

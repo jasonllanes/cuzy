@@ -223,7 +223,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           <button type="button" className="btn small-btn add-ai" onClick={() => addAi()}>🤖 Add a computer player</button>
         )}
 
-        <RoomSettings room={room} count={ordered.length} players={ordered} editable={imHost} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
+        <RoomSettings room={room} count={ordered.length} players={ordered} editable={imHost} assets={assets} net={net} name={profile?.name} hero={profile?.hero} onChange={(patch) => net.send({ t: 'settings', ...patch })} />
 
           </div>
           <aside className="wait-side">

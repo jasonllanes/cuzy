@@ -125,6 +125,12 @@ export function seedWithMap(seed, mode, mapId) {
   return `${roll ? `${free.seed}@${roll}` : free.seed}${/~v2$/.test(String(seed)) ? '~v2' : ''}`;
 }
 
+// the same world with another layout roll ("@abc1" after the base)
+export function withRoll(seed, roll) {
+  const [head, ...rest] = String(seed).split('~');
+  return [`${head.split('@')[0]}@${roll}`, ...rest].join('~');
+}
+
 // The host switched a room between Free Roam and Survival: the matching map (same name where both have one, otherwise
 // the first of the other mode), keeping a layout roll if there was one
 export function seedForMode(seed, mode) {

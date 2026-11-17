@@ -10,7 +10,7 @@
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
 import { TEAMS, TEAM_COUNTS } from './teams.js';
-import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, seedForMode, seedWithMap } from './maps.js';
+import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, seedForMode, seedWithMap, withRoll } from './maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -38,7 +38,7 @@ const cleanMins = (v) => (Number.isFinite(Number(v)) ? Math.min(10, Math.max(1, 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins', 'private'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -49,9 +49,11 @@ function friendly(error) {
   return error?.message || String(error);
 }
 
+const LOCK = '🔒'; // a private room keeps this in front of its name in the rooms table: it is not listed, but whoever has the code or the link can join
 const rowToSummary = (r) => ({
   code: r.code,
-  name: r.name,
+  name: String(r.name).startsWith(LOCK) ? String(r.name).slice(LOCK.length) : r.name,
+  private: String(r.name).startsWith(LOCK),
   seed: r.seed,
   max: r.max,
   pvp: r.pvp,
@@ -67,10 +69,11 @@ const rowToSummary = (r) => ({
   count: r.count,
   started: r.started,
   host: r.host_name,
+  t0: Number(r.t0) || 0, // when the room was opened (ms): the list can be shown newest first
 });
 
 const cfgToRow = (cfg) => ({
-  name: cfg.name,
+  name: cfg.private ? `${LOCK}${cfg.name}` : cfg.name,
   seed: cfg.seed,
   max: cfg.max,
   mode: cfg.mode,
@@ -324,7 +327,7 @@ export class SupaNet {
       this.rooms = [];
     } else {
       this.problem = '';
-      this.rooms = data.map(rowToSummary);
+      this.rooms = data.map(rowToSummary).filter((r) => !r.private); // (private rooms are not in the list)
       // tidy up rooms whose host vanished long ago
       this.sb.from('rooms').delete().lt('updated_at', new Date(Date.now() - DELETE_AFTER_MS).toISOString()).then(() => {}, () => {});
     }
@@ -341,7 +344,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, rumble, matchMins, escape, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, maxStats, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, rumble, matchMins, escape, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, maxStats, isPrivate, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -362,6 +365,7 @@ export class SupaNet {
       streakMonsters: streakMonsters === true,
       teams: free && [2, 3, 4].includes(Number(teams)) ? Number(teams) : 0, // 0 = free for all
       allowLate: allowLate !== false,
+      private: isPrivate === true, // not in the room list: only people with the code or the link can join
       startMoney: Math.min(99999, Math.max(0, Math.round(Number(startMoney)) || 0)), // coins everyone starts a round with
       startWood: Math.min(9999, Math.max(0, Math.round(Number(startWood)) || 0)), // wood everyone starts a round with
       maxStats: maxStats !== false, // everyone starts with every shop upgrade at its top level (Free Roam)
@@ -1403,6 +1407,7 @@ export class SupaNet {
     if (typeof m.allowLate === 'boolean') cfg.allowLate = m.allowLate;
     if (typeof m.allowCheats === 'boolean') cfg.allowCheats = m.allowCheats;
     if (typeof m.allowVisit === 'boolean') cfg.allowVisit = m.allowVisit;
+    if (typeof m.private === 'boolean') cfg.private = m.private;
     if (m.waves !== undefined && Number.isInteger(Number(m.waves)) && Number(m.waves) >= 0 && Number(m.waves) <= 99) cfg.waves = Number(m.waves);
     if (['timer', 'vote', 'manual', 'instant'].includes(m.waveStart)) cfg.waveStart = m.waveStart;
     // these can be changed at any time, even in the middle of a round
@@ -1416,7 +1421,10 @@ export class SupaNet {
     if (!cfg.duel && Number.isFinite(Number(m.max))) cfg.max = Math.min(MAX_PLAYERS, Math.max(2, this.members.size, Math.round(Number(m.max))));
     // the rest is decided before the round
     if (!this.started) {
-      if (typeof m.map === 'string' && !cfg.duel) cfg.seed = seedWithMap(cfg.seed, cfg.mode, m.map); // another map (the same mode, and the same layout roll)
+      if (typeof m.map === 'string' && !cfg.duel) {
+        cfg.seed = seedWithMap(cfg.seed, cfg.mode, m.map); // another map (the same mode, and the same layout roll)
+        if (typeof m.roll === 'string' && /^[a-z0-9]{1,8}$/.test(m.roll)) cfg.seed = withRoll(cfg.seed, m.roll); // ...or a freshly generated layout of it
+      }
       // Free Roam <-> Survival: the map, the start of the day and the fighting rules follow the mode
       if (['free', 'survival'].includes(m.mode) && m.mode !== cfg.mode) {
         if (cfg.duel) this.setDuel(false);

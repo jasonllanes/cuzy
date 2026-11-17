@@ -19,6 +19,7 @@ import WaitingRoom from './components/WaitingRoom';
 import InviteToasts from './components/InviteToasts';
 import MazeGame from './maze/MazeGame';
 import FeedbackHost from './components/FeedbackForm';
+import { hashSegs, onHash, roomFromHash, setHash } from './game/router';
 
 const PROFILE_KEY = 'cuzi-profile';
 const REJOIN_KEY = 'cuzy-rejoin';
@@ -121,13 +122,13 @@ export default function App() {
   const [invites, setInvites] = useState([]); // pop-up invitations from other players
   const [training, setTraining] = useState(() => /[#?&/]training(?!-v2)\b/.test(`${window.location.hash}${window.location.search}`)); // the developer training ground (#/training)
   const [trainingV2, setTrainingV2] = useState(() => /[#?&/]training-v2\b/.test(`${window.location.hash}${window.location.search}`)); // the Free Roam V2 training room (#/training-v2)
-  const [maze, setMaze] = useState(() => /[?&]maze=/.test(window.location.search)); // Maze Rush, a game of its own
+  const [maze, setMaze] = useState(() => /[?&]maze=/.test(window.location.search) || hashSegs()[0] === 'maze'); // Maze Rush, a game of its own
   const [v2Mode, setV2Mode] = useState(false); // the main menu in Free Roam V2 mode: the same game, with the modern props in its worlds
   const [, setAccessTick] = useState(0); // re-render once the access code has been accepted
   const [trainingMap, setTrainingMap] = useState(FREE_MAPS[0].id); // the training ground's map and hero survive a map swap
   const [trainingHero, setTrainingHero] = useState('retro:1');
   const [travel, setTravel] = useState(null); // the Traveling Map: what the team carries to the next place ({ carry, shelter, n })
-  const [pendingInvite, setPendingInvite] = useState(''); // an accepted invitation: the name and character page for that room
+  const [pendingInvite, setPendingInvite] = useState(() => (rejoinGet() ? '' : roomFromHash())); // (the address #/room/CODE is an invite to that room) // an accepted invitation: the name and character page for that room
   const [notice, setNotice] = useState(''); // something to tell the player on the main menu
   // a room we were in before the page was reloaded: we try to go back to it once everything has loaded
   const [reconnect, setReconnect] = useState(() => {
@@ -196,6 +197,17 @@ export default function App() {
     [net],
   );
 
+  // Route protection: while you are in a game or a room the address says so (#/room/CODE or #/game), and the back button or a hand-typed
+  // address cannot take you out of it: leaving is done with the Quit / Leave buttons.
+  useEffect(() => {
+    if (!playing || training || trainingV2) return undefined;
+    const want = session ? `room/${session.room.code}` : 'game';
+    setHash(want, true);
+    return onHash(() => {
+      if (hashSegs().join('/') !== want) setHash(want, true);
+    });
+  }, [playing, session?.room?.code, training, trainingV2]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const remember = (p) => {
     const next = { ...p, name: p.name.trim() || 'Friend', seed: p.seed.trim() || 'sunny-meadow-101' };
     setProfile(next);
@@ -224,6 +236,7 @@ export default function App() {
     setTravel(null);
     setSession(null);
     setPlaying(true);
+    setHash('game');
   };
 
   // `joined` is the server's reply to create/join; the room decides the world seed
@@ -237,6 +250,7 @@ export default function App() {
     setLobby(!joined.started);
     setPlaying(true);
     setPendingInvite('');
+    setHash(`room/${joined.room.code}`);
     rejoinSet({ code: joined.room.code, room: joined.room, started: !!joined.started, name: next.name, hero: p.hero, host: joined.host === joined.you });
   };
 
@@ -324,9 +338,11 @@ export default function App() {
     setLobby(false);
     setPlaying(false);
     setPendingInvite(String(invite.code).toUpperCase().slice(0, 8));
+    setHash(`room/${String(invite.code).toUpperCase().slice(0, 8)}`, true);
   };
 
   const exit = () => {
+    setHash('', true); // (back on the main menu's address)
     rejoinClear(); // leaving on purpose: no going back after a reload
     setTravel(null);
     if (session) net.leave();
@@ -356,7 +372,7 @@ export default function App() {
   }
 
   if (maze) {
-    return <MazeGame assets={assets} profile={profile} onExit={() => { setMaze(false); if (window.location.search) window.history.replaceState(null, '', window.location.pathname); }} />;
+    return <MazeGame assets={assets} profile={profile} onExit={() => { setHash('', true); setMaze(false); if (window.location.search) window.history.replaceState(null, '', window.location.pathname); }} />;
   }
 
   let screen;
@@ -381,7 +397,7 @@ export default function App() {
   } else if (playing) {
     screen = <GameView key={`game-${travel?.n || 0}`} travel={travel} onTravel={onTravel} assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else {
-    screen = <MainMenu onMaze={() => setMaze(true)} onTraining={() => setTraining(true)} onTrainingV2={() => setTrainingV2(true)} onV2={() => setV2Mode(true)} onExitV2={() => setV2Mode(false)} v2={v2Mode} onSaveName={saveName} notice={notice} key={pendingInvite || (v2Mode ? 'v2menu' : 'menu')} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
+    screen = <MainMenu onMaze={() => { setHash('maze'); setMaze(true); }} onTraining={() => setTraining(true)} onTrainingV2={() => setTrainingV2(true)} onV2={() => setV2Mode(true)} onExitV2={() => setV2Mode(false)} v2={v2Mode} onSaveName={saveName} notice={notice} key={pendingInvite || (v2Mode ? 'v2menu' : 'menu')} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }
   return (
     <>
