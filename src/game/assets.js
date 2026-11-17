@@ -22,7 +22,7 @@ const NAMES = [
   'critters/crabs', 'critters/crow', 'critters/seesaw1', 'critters/seesaw2', 'critters/boat_left', 'critters/boat_right', 'critters/boat_up', 'critters/boat_down', 'critters/mine_boom', 'critters/mine_sheet', 'items/grenade_stun', 'items/grenade_smoke',
   ...['scout1', 'scout2', 'scout3', 'scout4', 'scout5', 'scout6', 'postman1', 'postman2', 'postman3'].map((n) => `v2/chars/${n}`),
   'interior/farm', 'interior/modern', 'interior/rb',
-  ...['dj', 'spot', 'stretcher', 'drone1', 'helix', 'portal', 'boom', 'ghost', 'laser', 'heli', 'singer1', 'singer2', 'singer3', 'flame1', 'flame2', 'flame3', 'flame4', 'flame5', 'flame6'].map((n) => `fx/${n}`), // animated Modern Exteriors sheets: the beach concert, drones, portal door, explosion and the friendly ghost
+  ...['dj', 'spot', 'stretcher', 'drone1', 'drone2', 'drone3', 'drone4', 'helix', 'portal', 'boom', 'ghost', 'laser', 'heli', 'singer1', 'singer2', 'singer3', 'flame1', 'flame2', 'flame3', 'flame4', 'flame5', 'flame6'].map((n) => `fx/${n}`), // animated Modern Exteriors sheets: the beach concert, drones, portal door, explosion and the friendly ghost
   'dev/chars',
   'maps/tidal', 'maps/emerald', 'maps/crystal', 'maps/marsh', 'maps/lava', 'maps/beach', 'maps/wood', 'guns/pistol', 'guns/sidearm', 'guns/glock', 'guns/m1911', 'guns/sawedoff', 'guns/uzi', 'guns/lever', 'guns/magnum', 'guns/pump', 'guns/deagle', 'guns/ak47', 'guns/raygun', 'guns/sniper', 'guns/laser', 'guns/fireplasma', 'guns/quantum', 'guns/shotgun', 'guns/rifle', 'guns/plasma', 'maps/asphalt', 'maps/mountain', 'props/beach_ball',
   ...Array.from({ length: 40 }, (_, i) => `weapons/w${String(i + 1).padStart(2, '0')}`),

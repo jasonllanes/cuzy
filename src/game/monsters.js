@@ -49,7 +49,7 @@ Object.assign(MONSTERS, {
   z_small: { name: 'Walker', apoc: 'small', kind: 'walk', hp: 3, speed: 34, dmg: 1, sd: 2 },
   z_axe: { name: 'Axe Zombie', apoc: 'axe', kind: 'walk', hp: 7, speed: 22, dmg: 2, sd: 5, kb: 0.6 },
   z_big: { name: 'Brute', apoc: 'big', kind: 'walk', hp: 26, speed: 15, dmg: 3, sd: 9, kb: 0.2 },
-  z_boss: { name: 'The Colossus', apoc: 'big', kind: 'walk', hp: 190, speed: 13, dmg: 5, sd: 16, scale: 2, kb: 0.05, boss: true },
+  z_boss: { name: 'The Colossus', apoc: 'big', kind: 'walk', hp: 480, speed: 14, dmg: 6, sd: 18, scale: 2, kb: 0.05, boss: true, armor: 0.3 }, // (a big tough brute: 480 health, and it shrugs off 30% of every hit)
   // Survival's extra threats (same art as the walkers, tinted): a sprinter that is hard to hit, and a slow one that soaks up hits
   z_runner: { name: 'Runner', apoc: 'small', kind: 'walk', hp: 2, speed: 64, dmg: 1, sd: 2, tint: 'hue-rotate(150deg) saturate(2.2) brightness(1.1)' },
   z_armor: { name: 'Armored', apoc: 'axe', kind: 'walk', hp: 16, speed: 21, dmg: 3, sd: 6, kb: 0.25, tint: 'grayscale(0.9) brightness(0.85) contrast(1.4)' },

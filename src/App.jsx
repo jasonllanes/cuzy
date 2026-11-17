@@ -21,6 +21,7 @@ import MazeGame from './maze/MazeGame';
 import FeedbackHost from './components/FeedbackForm';
 import { hashSegs, onHash, roomFromHash, setHash } from './game/router';
 import FxTransitionHost from './components/FxTransitionHost';
+import { setIconImages } from './game/iconImages';
 import { FAST, LEAVE, START, pick, playTransition } from './game/fxTransition';
 
 const PROFILE_KEY = 'cuzi-profile';
@@ -148,6 +149,7 @@ export default function App() {
     // the cloud copy of your profile and saves is pulled in while the art loads (it gives up after a few seconds)
     Promise.all([loadAssets(), store.sync()]).then(([a]) => {
       setProfile(initialProfile());
+      setIconImages(a.img); // (item icons come from the loaded art, so a failed request cannot leave a slot empty)
       setAssets(a);
     }, setError);
   }, []);

@@ -18,6 +18,7 @@ const AIRP = {
   drone: { fire: 0.22, dmg: 0.8, range: 150, dur: 45, chase: 290, fly: 95 },
   helix: { fire: 0.13, dmg: 1.0, range: 195, dur: 60, chase: 370, fly: 130 },
 };
+export const AIR_DUR = { drone: 45, helix: 60 }; // (how long a drone stays: its landing starts near the end)
 export const AIR_CODES = ['', 'carpet', 'gunship', 'drone', 'helix']; // (how an aircraft's kind travels in the room's snapshots)
 export const MAX_AIR_PER_WAVE = 3; // how many carpet bombings, and how many gunships, EACH player may call in a wave (or a batch, in Endless)
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
@@ -869,6 +870,7 @@ export class WaveSim {
     const m = this.monsters.find((x) => x.id === id);
     if (!m || m.state === 'dead') return;
     const def = MONSTERS[m.type];
+    if (def.armor) dmg *= 1 - def.armor; // (the big brute shrugs off part of every hit)
     if (splat) this.g.combat?.splat(m.x, m.y, null, m.hp - dmg <= 0 ? 2 : 1, fx, fy);
     m.hp -= dmg;
     if (m.hp <= 0) {
@@ -1138,7 +1140,7 @@ export class WaveSim {
       const len = Math.hypot(x1 - x0, y1 - y0);
       this.airs.push({ kind, t: 0, dur: len / 164, len, ang: Math.atan2(y1 - y0, x1 - x0), x: x0, y: y0, dropT: 0.4 });
     } else if (AIRP[kind]) {
-      this.airs.push({ kind, t: 0, dur: AIRP[kind].dur, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false });
+      this.airs.push({ kind, t: 0, dur: AIRP[kind].dur, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false, skin: Math.floor(Math.random() * 4) });
     } else return false;
     mine[kind]++;
     this.airUsed++;
@@ -1332,7 +1334,7 @@ export class WaveSim {
       bl: this.baseLevel,
       sl: this.lightLevel || 0,
       ml: this.mendLevel || 0,
-      ar: this.airs.map((a) => [Math.max(1, AIR_CODES.indexOf(a.kind)), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10]),
+      ar: this.airs.map((a) => [Math.max(1, AIR_CODES.indexOf(a.kind)), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10, a.skin || 0]),
       ab: (this.airBombs || []).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.fall * 100) / 100, b.R]),
       au: this.airUsed || 0,
       abp: this.airBy,
@@ -1484,9 +1486,9 @@ export class WaveMirror {
     this.mendLevel = s.ml || 0;
     const sky = Array.isArray(s.ar) && Array.isArray(s.ar[0]) ? s.ar : [];
     this.airs.length = Math.min(this.airs.length, sky.length);
-    sky.forEach(([k, x, y, ang, firing], i) => {
+    sky.forEach(([k, x, y, ang, firing, tt, skin], i) => {
       if (!this.airs[i]) this.airs[i] = { x, y };
-      Object.assign(this.airs[i], { kind: AIR_CODES[k] || 'gunship', tx: x, ty: y, ang, firing: !!firing });
+      Object.assign(this.airs[i], { kind: AIR_CODES[k] || 'gunship', tx: x, ty: y, ang, firing: !!firing, t: tt || 0, skin: skin || 0 });
     });
     this.airBombs = (s.ab || []).map(([x, y, fall, R]) => ({ x, y, fall, R }));
     this.airUsed = s.au || 0;

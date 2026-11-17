@@ -93,6 +93,7 @@ function inFan(w, p, reach) {
 const pickOf = (a) => a[Math.floor(Math.random() * a.length)];
 const MINION = 't_skeleton';
 // laid on the ground: a landmine blows up, a trap stuns (both when something steps on them)
+const MAX_MINES = 20; // how many landmines and traps one player can have laid at a time
 const MINES = { landmine: { kind: 'mine', R: 42 }, beartrap: { kind: 'trap', R: 34 } };
 const MINE_ARM = 1.2; // seconds until a laid mine is armed
 const CRAB_LOOT = [['coin', 1, 5, 10], ['egg', 0.12, 1, 1]];
@@ -1434,6 +1435,12 @@ export class Combat {
     const item = inv[slot]?.id;
     const def = MINES[item];
     if (!def) return;
+    if (this.mines.length >= MAX_MINES) {
+      // twenty at a time: when one goes off there is room for another
+      this.g.onToast?.(`You can have ${MAX_MINES} mines and traps laid at once. Wait until one goes off.`);
+      this.throwCd = 0.3;
+      return;
+    }
     const a = this.aim();
     const [cx, cy] = this.center();
     let dist = 30;

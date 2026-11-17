@@ -6,7 +6,7 @@ import { Combat, GUNS, SHIELD_DUR } from './combat';
 import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
 import { TINY } from './tiny';
-import { BARRICADE_COST, BARRICADE_RECT, REPAIR_COST, WaveMirror, WaveSim, bossDashHalf } from './waves';
+import { AIR_DUR, BARRICADE_COST, BARRICADE_RECT, REPAIR_COST, WaveMirror, WaveSim, bossDashHalf } from './waves';
 import { ALLIES } from './allies';
 import { Bots } from './bots';
 import { AiPlayers } from './aiPlayers';
@@ -44,6 +44,7 @@ import { HOUSE_SPRITE } from './world';
 import { devLayout, drawHero, heroById } from './heroes';
 import { playTransition } from './fxTransition';
 import { Pfx, bakedLoop, drawBaked } from './pfx';
+import { AIR_PHASE, DRONES, SCOUT_SKINS, droneFrame } from './drones';
 
 // how much longer than you a mount can sprint: a chicken lasts 2x, a cow 3x as long
 export const MONSTER_TARGET = 15; // monster kills that win a "monster kills" round
@@ -3997,22 +3998,26 @@ export class Game {
   // the aircraft: a shadow on the ground and the helicopter high above it (the bomber's sweep, or the gunship's circle)
   drawAir(ctx, air) {
     if (air.kind === 'drone' || air.kind === 'helix') {
-      // the small drones: 16x32 frames, the rotor loop (drone: frames 12-14, Helix: 21-23)
-      const heli = air.kind === 'helix';
-      const sheet = this.img[heli ? 'fx/helix' : 'fx/drone1'];
+      // the drones: the clean sheets (picture frames only), taking off when called, a short loop while they fly and a landing at the end
+      const skin = air.kind === 'helix' ? 'helix' : SCOUT_SKINS[(air.skin || 0) % SCOUT_SKINS.length];
+      const d = DRONES[skin];
+      const sheet = this.img[`fx/${skin}`];
       if (!sheet) return;
-      const f = (heli ? 20 : 11) + (Math.floor(this.t * 14) % 3);
-      const k = heli ? 2 : 1.8;
-      const alt = 40 + Math.sin(this.t * 3 + air.x) * 2;
+      const left = (AIR_DUR[air.kind] || 45) - (air.t || 0);
+      const f = droneFrame(d, air.t || 0, left);
+      const lift = Math.min(1, (air.t || 0) / AIR_PHASE) * Math.min(1, Math.max(0, left) / AIR_PHASE); // (up while taking off, down while landing)
+      const alt = 6 + 34 * lift + Math.sin(this.t * 3 + air.x) * 1.5 * lift;
+      const w = d.w * d.k;
+      const h = d.h * d.k;
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.28)';
       ctx.beginPath();
-      ctx.ellipse(Math.round(air.x), Math.round(air.y + 3), 7, 2.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(Math.round(air.x), Math.round(air.y + 3), Math.max(5, w * 0.36), 2.4, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.drawImage(sheet, f * 16, 0, 16, 32, Math.round(air.x - 8 * k), Math.round(air.y - alt - 24 * k + 8), 16 * k, 32 * k);
+      ctx.drawImage(sheet, f * d.w, 0, d.w, d.h, Math.round(air.x - w / 2), Math.round(air.y - alt - h / 2), w, h);
       if (air.firing && Math.sin(this.t * 60) > -0.2) {
         ctx.fillStyle = '#ffe9a0';
-        ctx.fillRect(Math.round(air.x) - 1, Math.round(air.y - alt + 6), 3, 3);
+        ctx.fillRect(Math.round(air.x) - 1, Math.round(air.y - alt + h / 2 - 1), 3, 3);
       }
       ctx.restore();
       return;
@@ -4359,6 +4364,8 @@ export class Game {
 
   onNetMessage(m) {
     if (m.t === 'peer_join') {
+      // a newcomer cannot have seen the mines and traps already laid: tell them where mine are
+      for (const mn of this.combat?.mines || []) this.mp?.net.send({ t: 'fx', kind: 'mine', lid: mn.id, x: Math.round(mn.x), y: Math.round(mn.y), k: mn.kind });
       this.addRemote(m.player);
     } else if (m.t === 'peer_leave') {
       this.remotes.delete(m.id);
@@ -4565,6 +4572,10 @@ export class Game {
       this.combat.remoteZap(m);
     } else if (m.t === 'fx' && m.kind === 'grapple') {
       this.combat.remoteGrapple(m);
+    } else if (m.t === 'fx' && m.kind === 'mine') {
+      this.combat.remoteMine(m);
+    } else if (m.t === 'fx' && m.kind === 'minegone') {
+      this.combat.remoteMineGone(m);
     } else if (m.t === 'fx' && m.kind === 'bomb') {
       this.combat.remoteBomb(m);
     } else if (m.t === 'fx' && m.kind === 'fan') {

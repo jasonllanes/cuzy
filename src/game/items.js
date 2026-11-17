@@ -135,17 +135,17 @@ export function rollLoot(r1, r2, table = LOOT) {
 // Survival's guns are backpack items too: select one and right click shoots with it. (Defined after the loop below, they are one to a slot.)
 const gunItem = (id, name, sw, sh, desc) => ({ name, desc, icon: { file: `guns/${id}`, sx: 0, sy: 0, sw, sh, sheetW: sw, sheetH: sh, fit: 34 }, stack: 1, wave: true, gun: id });
 
-// A slot holds up to 99 of anything (a sword just the one). Coins are not backpack items at all: they live in your purse.
+// A slot holds up to 99 of anything (barricades up to 999, a sword just the one). Coins are not backpack items at all: they live in your purse.
 for (const [id, def] of Object.entries(ITEMS)) {
   if (id === 'sword') continue;
   if (id === 'coin') {
     delete def.throw; // coins can be dropped, never thrown
     continue;
   }
-  def.stack = 99;
+  def.stack = id === 'barricade' ? 999 : 99; // (barricades pile up a lot: they should not eat the backpack)
 }
 
-ITEMS.gun_pistol = gunItem('pistol', 'Pistol', 55, 41, 'Select it, then right-click to shoot. Steady and accurate. 12 rounds, and it reloads by itself.');
+ITEMS.gun_pistol = gunItem('pistol', 'Pistol', 55, 41, 'Select it, then right-click to shoot. Steady and accurate. 12 rounds, and it reloads when it is empty.');
 ITEMS.gun_shotgun = gunItem('shotgun', 'Shotgun', 117, 32, 'Select it, then right-click to shoot. Five pellets that stack up at point blank. 6 shells.');
 ITEMS.gun_rifle = gunItem('rifle', 'Rifle', 107, 50, 'Select it, then right-click to shoot. A fast, accurate assault rifle. 60 rounds.');
 ITEMS.gun_sidearm = gunItem('sidearm', 'Sidearm', 28, 20, 'Select it, then right-click to shoot. A small, cheap spare. 10 rounds.');

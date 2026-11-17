@@ -156,6 +156,20 @@ export class PetSystem {
     }
     const tg = g.target;
     if (!found && tg && g.t - tg.at < 6 && tg.ref && tg.ref.state !== 'dead') found = { kind: tg.kind === 'skel' ? 'skel' : 'mon', t: tg.ref };
+    if (!found && g.wave && g.wave.monsters) {
+      // Survival: it goes out of the shelter after the nearest enemy close to you, and comes back when there are none
+      let best = null;
+      let bd = 260;
+      for (const m of g.wave.monsters) {
+        if (m.state === 'dead') continue;
+        const d = Math.hypot(m.x - g.player.x, m.y - g.player.y);
+        if (d < bd) {
+          bd = d;
+          best = m;
+        }
+      }
+      if (best) found = { kind: 'mon', t: best };
+    }
     if (found && Math.hypot(found.t.x - g.player.x, found.t.y - g.player.y) > 330) return null; // (too far from you)
     return found;
   }
@@ -242,7 +256,7 @@ export class PetSystem {
       const sp = speed * (!target && dist > 90 ? 1.7 : 1) * dt;
       const nx = P.x + (dx / dist) * sp;
       const ny = P.y + (dy / dist) * sp;
-      const blocked = (x, y) => !def.fly && g.world.isBlocked(x - 4, y - 4, 8, 4);
+      const blocked = (x, y) => !def.fly && g.world.isBlocked(x - 4, y - 4, 8, 4, false, !!g.wave); // (the shelter barricades do not stop a pet: it goes in and out)
       if (!blocked(nx, P.y)) P.x = nx;
       if (!blocked(P.x, ny)) P.y = ny;
       P.moving = true;
