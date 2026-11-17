@@ -69,6 +69,33 @@ Object.assign(MONSTERS, {
   sv_werebear: { name: 'Werebear', tiny: 'werebear', kind: 'walk', hp: 170, speed: 20, dmg: 4, sd: 14, scale: 1.7, kb: 0.05, boss: true, reach: 24, swings: ['atk1', 'atk2', 'atk3'] },
 });
 
+// Survival's creepy crawlies, from the pixelfx critters (drawn live from code, so each is a loop baked into frames: see pfx.js)
+//   pfx: the effect that is the monster   pfxH: how tall it stands in pixels (for the health bar)   pfxOpts: its options (a palette...)
+Object.assign(MONSTERS, {
+  fx_slime: { name: 'Toxic Slime', pfx: 'critters/slime', pfxH: 26, kind: 'walk', hp: 14, speed: 12, dmg: 2, sd: 4, kb: 0.4 },
+  fx_snake: { name: 'Viper', pfx: 'critters/snake', pfxH: 14, kind: 'walk', hp: 6, speed: 50, dmg: 1, sd: 2 },
+  fx_frog: { name: 'Toad', pfx: 'critters/frog', pfxH: 20, kind: 'walk', hp: 9, speed: 30, dmg: 1, sd: 2 },
+  fx_wisp: { name: 'Wisp', pfx: 'critters/wisp', pfxH: 30, kind: 'fly', hp: 5, speed: 54, dmg: 1, sd: 1 },
+  fx_ghost: { name: 'Haunt', pfx: 'critters/ghost', pfxH: 34, kind: 'fly', hp: 12, speed: 24, dmg: 2, sd: 3 },
+  fx_skull: { name: 'Flame Skull', pfx: 'critters/flying-skull', pfxH: 38, kind: 'fly', hp: 8, speed: 46, dmg: 2, sd: 2 },
+  fx_eye: { name: 'Watching Eye', pfx: 'critters/eyeball', pfxH: 30, kind: 'shoot', fly: true, hp: 10, speed: 18, dmg: 1, sd: 2, range: 96, rate: 2.4, bolt: true },
+  fx_jelly: { name: 'Stinger Jelly', pfx: 'critters/jellyfish', pfxH: 36, kind: 'fly', hp: 10, speed: 16, dmg: 1, sd: 2 },
+});
+
+// ...and they join the waves from the second one on
+const FX_WAVES = [
+  [],
+  [['fx_snake', 2]],
+  [['fx_slime', 2], ['fx_wisp', 2]],
+  [['fx_frog', 3], ['fx_ghost', 1], ['fx_snake', 2]],
+  [['fx_skull', 3], ['fx_eye', 1], ['fx_slime', 2]],
+  [['fx_jelly', 2], ['fx_wisp', 3], ['fx_eye', 1], ['fx_frog', 2]],
+  [['fx_slime', 3], ['fx_ghost', 2], ['fx_skull', 3], ['fx_snake', 3]],
+  [['fx_eye', 2], ['fx_jelly', 3], ['fx_wisp', 4], ['fx_frog', 3]],
+  [['fx_ghost', 3], ['fx_skull', 4], ['fx_slime', 4], ['fx_eye', 2]],
+  [['fx_ghost', 3], ['fx_skull', 4], ['fx_jelly', 3], ['fx_eye', 3], ['fx_snake', 4]],
+];
+
 export const MONSTER_IDS = Object.keys(MONSTERS);
 export const MONSTER_SPRITES = MONSTER_IDS.map((id) => MONSTERS[id].sprite).filter(Boolean);
 
@@ -101,6 +128,8 @@ export const WAVES_APOC = [
   [['z_small', 16], ['z_runner', 16], ['z_axe', 12], ['z_armor', 10], ['z_big', 7], ['sv_bat', 10], ['t_skarcher', 5], ['t_archer', 5], ['sv_wizard', 3]],
   [['z_big', 8], ['z_armor', 10], ['z_axe', 14], ['z_runner', 16], ['z_small', 20], ['sv_bat', 12], ['t_skarcher', 6], ['t_archer', 6], ['sv_wizard', 4]], // + the bosses (see bossTypes)
 ];
+
+WAVES_APOC.forEach((row, i) => row.push(...(FX_WAVES[i] || [])));
 
 // Endless Survival: no waves to wait for. Zombies keep coming in batches (a "stage" is only how hard the batch is), and every
 // stage is a little harder than the last, for as long as the shelter stands. A Colossus turns up every 5th stage.

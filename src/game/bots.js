@@ -137,7 +137,7 @@ export class Bots {
     b.inv = 0.35;
     b.hp -= dmg;
     c.splat(b.x, b.y, c.hitColor, b.hp <= 0 ? 2 : 1, fromX, fromY);
-    c.floaters.push({ x: b.x, y: b.y - 30, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
+    c.addFloater({ x: b.x, y: b.y - 30, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
     const ang = Math.atan2(b.y - fromY, b.x - fromX);
     for (let i = 0; i < 5; i++) this.step(b, Math.cos(ang) * 2, Math.sin(ang) * 2);
     if (b.hp <= 0) {

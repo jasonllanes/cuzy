@@ -738,6 +738,7 @@ export class WaveSim {
         sk.t = 0;
         sk.prog = 0;
         m.atk = 0.5;
+        this.emit({ type: 'bspell', spots: sk.spots.map((q) => [q.x, q.y]) }); // (everyone sees the spells burst)
         // (a spell hurts inside the red circle it showed, and nowhere else)
         for (const s of sk.spots) this.bossHit(m, def, players, (p) => ((p.x - s.x) / R) ** 2 + ((p.y - 2 - s.y) / (R * 0.8)) ** 2 <= 1, 1.5);
       }
@@ -876,7 +877,7 @@ export class WaveSim {
       const who = String(by ?? this.g.mp?.you ?? 'me');
       this.kills[who] = (this.kills[who] || 0) + 1;
       const power = ++this.killN === this.powerAt ? (Math.random() < 0.5 ? 'slowmo' : 'blast') : undefined;
-      this.emit({ type: 'mdie', name: def.name, x: m.x, y: m.y, boss: !!def.boss, loot: rollMonsterLoot(def, this.diff, this.theme), power, pid: this.wave, lv: m.lv || 1 });
+      this.emit({ type: 'mdie', name: def.name, fxdie: def.pfx ? 'spawn/poof' : undefined, x: m.x, y: m.y, boss: !!def.boss, loot: rollMonsterLoot(def, this.diff, this.theme), power, pid: this.wave, lv: m.lv || 1 });
       return;
     }
     if (def.boss) return; // a boss shrugs hits off: no knock-back, no stagger, it keeps its pace

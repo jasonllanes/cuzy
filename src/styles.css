@@ -2023,3 +2023,11 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 /* the type filter under the rarity tabs */
 .kind-tabs { margin-top: -4px; }
 .rar-tab.kind { font-size: 0.72rem; }
+
+/* the multiplayer window really is wide (the .home-card limit of 560px was holding it narrow) */
+.menu-card.home-card.multi-card { width: min(1060px, 96vw); max-width: none; }
+.multi-cols { grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr); }
+.multi-side .who-strip { flex-wrap: nowrap; }
+.multi-side .who-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12ch; }
+.room-browser .room-row { flex-wrap: nowrap; }
+.rb-tools select { flex: 0 1 auto; }

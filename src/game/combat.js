@@ -1,6 +1,31 @@
 import { CHUNK_PX, SAND, WATER } from './world';
 import { sfx } from './sfx';
 import { BOSS_WIND, POWER_SLOW_TIME, bossDashHalf } from './waves';
+import { bakedLoop, drawBaked } from './pfx';
+import { PAL } from '../pixelfx/core/index.js';
+
+// the pixelfx look of a staff spell where it lands: [effect, size]
+const SPELL_LOOK = {
+  frost: ['ice/frost-nova', 0.32],
+  fire: ['explosions/small-explosion', 0.26],
+  venom: ['nature/acid-splash', 0.5],
+  storm: ['lightning/lightning-strike', 0.35],
+  arcane: ['arcane/mana-burst', 0.4],
+  shock: ['lightning/zap-hit', 0.6],
+  burn: ['fire/flame-pillar', 0.3],
+};
+
+// which pixelfx loop a dropped item is drawn as, and the colour of the light beam over a rare one
+const DROP_LOOP = {
+  coin: { id: 'pickups/coin-spin' },
+  gem: { id: 'pickups/gem-spin' },
+  heart: { id: 'pickups/heart-pickup' },
+  hppack: { id: 'pickups/heart-pickup' },
+  hp: { id: 'pickups/potion' },
+  stam: { id: 'pickups/potion', o: { palette: PAL.leaf } },
+  key: { id: 'pickups/key-glint' },
+};
+const BEAM_TIER = { rare: PAL.ice, epic: PAL.arcane, legendary: PAL.gold };
 import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
 import { drawHero } from './heroes';
 import { addItem, removeFromSlot } from './inventory';
@@ -797,16 +822,18 @@ export class Combat {
   spellEffect(effect, kind, t, dmg, x, y, strong = false) {
     if (!t) return;
     const [bx, by] = this.bodyOf(kind, t);
+    const look = SPELL_LOOK[effect];
+    if (look) this.g.pfx?.spawn(look[0], bx, by + 6, { scale: look[1] * (strong ? 1.25 : 1), seed: 1 + Math.floor(Math.random() * 50) });
     if (effect === 'frost') {
       // frostbite: frozen solid for a moment (bosses shrug most of it off), then still slow
       if (kind !== 'rem') this.stunTarget(t, (strong ? 2.4 : 1.6) * (t.nightBoss || t.miniBoss ? 0.5 : 1), '#9fe3ff');
       t.slowT = 2.5;
-      this.floaters.push({ x: bx, y: by - 20, text: '❄ FROZEN', color: '#8fd6ff', t: 0 });
+      this.addFloater({ x: bx, y: by - 20, text: '❄ FROZEN', color: '#8fd6ff', t: 0 });
     } else if (effect === 'fire') {
       if (!this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 3, wait: 0.5, dmg: 0.5 + dmg * 0.12 });
     } else if (effect === 'venom') {
       if (!this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 5, wait: 0.6, dmg: 0.45 + dmg * 0.1 });
-      this.floaters.push({ x: bx, y: by - 20, text: '☠', color: '#8fe05a', t: 0 });
+      this.addFloater({ x: bx, y: by - 20, text: '☠', color: '#8fe05a', t: 0 });
     } else if (effect === 'storm') {
       this.chain([{ kind, t, dmg }], x, y);
     }
@@ -855,9 +882,8 @@ export class Combat {
         this.ammo[this.gun] += take;
         this.g.bullets -= take;
       }
-    } else if (this.ammo[this.gun] < this.gunMag(this.gun) && this.g.bullets > 0 && (this.idleT += dt) > 2) {
-      this.reloadT = gun.reload; // not shooting for a while: top the magazine up
     }
+    // (no automatic top-up: the gun only reloads once the magazine is empty)
   }
 
   // R: whichever utility skill you have equipped
@@ -877,7 +903,7 @@ export class Combat {
     this.g.stamina = 1;
     this.g.exhausted = false;
     this.windCd = WIND_CD;
-    this.floaters.push({ x: this.g.player.x, y: this.g.player.y - 40, text: `+${hp100(this.maxHp * 0.5)} ❤`, color: '#5fd16a', t: 0, big: true });
+    this.addFloater({ x: this.g.player.x, y: this.g.player.y - 40, text: `+${hp100(this.maxHp * 0.5)} ❤`, color: '#5fd16a', t: 0, big: true });
     sfx.play('heal');
     this.g.pets?.addFx(this.g.player.x, this.g.player.y - 10, 'heal'); // (the green sparkles, shown to everyone)
     this.g.mp?.net.send({ t: 'fx', kind: 'petfx', x: Math.round(this.g.player.x), y: Math.round(this.g.player.y - 10), k: 'heal' });
@@ -1467,7 +1493,7 @@ export class Combat {
         this.mineFx.push({ x: m.x, y: m.y, t: 0 });
       } else {
         this.explode({ x: m.x, y: m.y - 4, R: m.R, kind: 'stun' });
-        this.floaters.push({ x: m.x, y: m.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
+        this.addFloater({ x: m.x, y: m.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
       }
       this.g.mp?.net.send({ t: 'fx', kind: 'minegone', lid: m.id, k: m.kind, who: who.rem ? String(who.rem.id) : '' });
       return false;
@@ -1477,7 +1503,7 @@ export class Combat {
   // a hero stepped on a landmine or a trap: a big callout over them, and the trap's stun shows on them
   announceStep(r, kind, victimIsMe = false) {
     const name = victimIsMe ? 'You' : r.name || 'Someone';
-    this.floaters.push({ x: r.x, y: r.y - 38, text: kind === 'mine' ? `💥 ${name} stepped on a mine!` : `🪤 ${name} got caught in a trap!`, color: kind === 'mine' ? '#ff8a3c' : '#ffe36b', t: 0, big: true });
+    this.addFloater({ x: r.x, y: r.y - 38, text: kind === 'mine' ? `💥 ${name} stepped on a mine!` : `🪤 ${name} got caught in a trap!`, color: kind === 'mine' ? '#ff8a3c' : '#ffe36b', t: 0, big: true });
     if (kind === 'trap' && !victimIsMe) r.stunT = 2.4; // (their stars show for everyone)
   }
 
@@ -1507,7 +1533,7 @@ export class Combat {
       sfx.play('boom', 0.5);
     } else {
       this.blasts.push({ x: r.x, y: r.y - 4, t: 0, R: 34, tone: 'stun' });
-      this.floaters.push({ x: r.x, y: r.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
+      this.addFloater({ x: r.x, y: r.y - 22, text: 'SNAP!', color: '#ffe36b', t: 0 });
     }
   }
 
@@ -1625,12 +1651,12 @@ export class Combat {
       sfx.play('boom', 0.5);
       for (const m of this.monstersNear(b.x, b.y, b.R)) {
         this.stunTarget(m, m.nightBoss || m.miniBoss ? STUN_TIME * 0.5 : STUN_TIME);
-        this.floaters.push({ x: m.x, y: m.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
+        this.addFloater({ x: m.x, y: m.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
       }
       for (const s of this.skeletons) {
         if (s.state !== 'dead' && Math.hypot(s.x - b.x, s.y - 8 - b.y) <= b.R) {
           this.stunTarget(s, STUN_TIME);
-          this.floaters.push({ x: s.x, y: s.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
+          this.addFloater({ x: s.x, y: s.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
         }
       }
       // rival heroes in the circle are stunned too: they cannot move or fight for a moment (they are told, and their own game does it)
@@ -1638,12 +1664,13 @@ export class Combat {
         for (const r of this.g.remotes.values()) {
           if (r.hidden || r.bot || r.ai || this.g.sameTeam(r) || Math.hypot(r.x - b.x, r.y - 8 - b.y) > b.R) continue;
           this.g.mp?.net.send({ t: 'hit', target: r.id, dmg: 0, stun: STUN_PLAYER });
-          this.floaters.push({ x: r.x, y: r.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
+          this.addFloater({ x: r.x, y: r.y - 30, text: 'STUNNED', color: '#ffe36b', t: 0 });
         }
       }
       return;
     }
-    this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R });
+    const boomFx = this.g.pfx?.spawn('explosions/grenade', b.x, b.y + 2, { scale: Math.max(0.3, (b.R / 46) * 0.36), seed: 1 + Math.floor(Math.random() * 50) });
+    this.blasts.push({ x: b.x, y: b.y, t: 0, R: b.R, noBoom: !!boomFx });
     sfx.play('boom');
     // anything normal inside the circle is blown away; tougher things take a big hit
     // enemies are thrown back away from the blast: the closer, the harder
@@ -1969,9 +1996,9 @@ export class Combat {
     const inSmoke = this.smokes.some((s) => Math.hypot(pl.x - s.x, pl.y - 4 - s.y) < s.R);
     this.inBush = !this.g.inside && !this.g.dead && this.g.world.bushAt(pl.x, pl.y - 2);
     this.hidden = this.g.dead || this.g.boarded ? true : (!!room || this.invisT > 0 || inSmoke || this.inBush) && this.revealT <= 0;
-    if (this.inBush && !this.wasInBush && this.hidden) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the bush', color: '#9fd88a', t: 0 });
+    if (this.inBush && !this.wasInBush && this.hidden) this.addFloater({ x: pl.x, y: pl.y - 34, text: 'hidden in the bush', color: '#9fd88a', t: 0 });
     this.wasInBush = this.inBush;
-    if (inSmoke && !this.wasInSmoke && !this.g.dead) this.floaters.push({ x: pl.x, y: pl.y - 34, text: 'hidden in the smoke', color: '#cfd6e0', t: 0 });
+    if (inSmoke && !this.wasInSmoke && !this.g.dead) this.addFloater({ x: pl.x, y: pl.y - 34, text: 'hidden in the smoke', color: '#cfd6e0', t: 0 });
     this.wasInSmoke = inSmoke;
     if (this.hidden && !wasHidden && !this.g.dead && room && !this.g.inside) this.g.onToast?.('Hiding indoors: skeletons and rivals can’t see you.');
     this.dashCd = Math.max(0, this.dashCd - dt);
@@ -1987,9 +2014,8 @@ export class Combat {
         if (this.reloadT > 0) {
           this.reloadT -= dt;
           if (this.reloadT <= 0) this.ammo[this.gun] = this.gunMag(this.gun);
-        } else if (this.ammo[this.gun] < this.gunMag(this.gun) && (this.idleT += dt) > 2) {
-          this.reloadT = gun.reload; // not shooting for a while: top the magazine up
         }
+        // (no automatic top-up: the gun only reloads once the magazine is empty)
       }
       this.muzzleT = Math.max(0, (this.muzzleT || 0) - dt);
       if (this.tLocked && this.tEnergy >= THROW_UNLOCK) this.tLocked = false;
@@ -2363,7 +2389,7 @@ export class Combat {
     const id = `rc${Math.round(x)},${Math.round(y)}`;
     chunk.objects.push({ kind: 'chest', inter: 'chest', rich: true, boss: true, gear: true, skin: (Math.random() < 0.5 ? 0 : 4) + rank, id, x: Math.round(x), y: Math.round(y) + 6 });
     chunk.rects.push({ x: Math.round(x) - 7, y: Math.round(y) + 1, w: 14, h: 7 });
-    this.floaters.push({ x, y: y - 24, text: '🎁 A chest!', color: '#ffd24a', t: 0 });
+    this.addFloater({ x, y: y - 24, text: '🎁 A chest!', color: '#ffd24a', t: 0 });
     this.g.onToast?.('🎁 A chest appeared where it fell! It holds a weapon.');
     sfx.play('chest');
   }
@@ -2422,7 +2448,7 @@ export class Combat {
     if (w.burning) {
       // it burns away in the daylight. Nothing drops from something that burned to death.
       w.hp -= w.max * 0.08 * dt;
-      if (Math.random() < dt * 6) this.floaters.push({ x: w.x + (Math.random() - 0.5) * 14, y: w.y - 20, text: '🔥', color: '#ff8a3c', t: 0 });
+      if (Math.random() < dt * 6) this.addFloater({ x: w.x + (Math.random() - 0.5) * 14, y: w.y - 20, text: '🔥', color: '#ff8a3c', t: 0 });
       if (w.hp <= 0) {
         w.state = 'dead';
         w.t = 0;
@@ -2681,7 +2707,7 @@ export class Combat {
         for (const m of hurt) {
           m.hp = Math.min(m.max, m.hp + m.max * 0.3);
           this.spells.push({ x: m.x, y: m.y, t: 0, fx: 'priest_heal', frames: TINY.fx.priest_heal, fxOnly: true });
-          this.floaters.push({ x: m.x, y: m.y - 24, text: '+', color: '#8fe28a', t: 0 });
+          this.addFloater({ x: m.x, y: m.y - 24, text: '+', color: '#8fe28a', t: 0 });
         }
       });
       return wake(8);
@@ -2784,7 +2810,7 @@ export class Combat {
     const def = MONSTERS[w.type];
     if (w.swing?.block) {
       dmg *= 0.25;
-      this.floaters.push({ x: w.x, y: w.y - 26, text: 'blocked', color: '#9ec7ff', t: 0 });
+      this.addFloater({ x: w.x, y: w.y - 26, text: 'blocked', color: '#9ec7ff', t: 0 });
       sfx.play('block');
     }
     w.hp -= dmg;
@@ -2982,7 +3008,7 @@ export class Combat {
           s.state = 'idle';
           if (s.hp < 3) {
             s.hp = 3;
-            this.floaters.push({ x: s.x, y: s.y - 26, text: 'refreshed', color: '#7fd48f', t: 0 });
+            this.addFloater({ x: s.x, y: s.y - 26, text: 'refreshed', color: '#7fd48f', t: 0 });
           }
         } else {
           this.moveSkeleton(s, (hx / hd) * 40 * dt, (hy / hd) * 40 * dt);
@@ -3051,7 +3077,7 @@ export class Combat {
     }
     t.hp -= dmg;
     const [x, y] = this.bodyOf(kind, t);
-    this.floaters.push({ x, y: y - 14, text: `${bleed ? '🩸' : ''}-${Math.round(dmg * 10) / 10}`, color: bleed ? '#e0384a' : '#ff9a3c', t: 0 });
+    this.addFloater({ x, y: y - 14, text: `${bleed ? '🩸' : ''}-${Math.round(dmg * 10) / 10}`, color: bleed ? '#e0384a' : '#ff9a3c', t: 0 });
   }
 
   updateDots(dt) {
@@ -3076,13 +3102,13 @@ export class Combat {
     const bash = eff === 'bash' && Math.random() < 0.3; // the Bone Sword now and then bashes
     if (eff === 'crit' && Math.random() < 0.25) {
       dmg *= 2;
-      this.floaters.push({ x: bx, y: by - 22, text: 'CRIT!', color: '#ffc94d', t: 0 });
+      this.addFloater({ x: bx, y: by - 22, text: 'CRIT!', color: '#ffc94d', t: 0 });
     }
     this.applyHit(kind, t, dmg, cx, cy, eff === 'knock' || bash ? 300 : 110);
     struck.push({ kind, t, dmg });
     if (bash) {
       if (kind !== 'rem') this.stunTarget(t, 1.3);
-      this.floaters.push({ x: bx, y: by - 24, text: 'BASH!', color: '#ffe36b', t: 0 });
+      this.addFloater({ x: bx, y: by - 24, text: 'BASH!', color: '#ffe36b', t: 0 });
       sfx.play('thud', 0.8);
     }
     if (eff === 'bleed' && !this.dots.some((d) => d.t === t)) this.dots.push({ kind, t, ticks: 3, wait: 0.5, dmg: 0.6 + (w.dmg || 0) * 0.15, bleed: true });
@@ -3090,7 +3116,7 @@ export class Combat {
     if (eff === 'vamp' && this.hp < this.maxHp) {
       this.hp = Math.min(this.maxHp, this.hp + 0.3);
       const p = this.g.player;
-      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${hp100(0.3)}`, color: '#ff5d7a', t: 0 });
+      this.addFloater({ x: p.x, y: p.y - 34, text: `+${hp100(0.3)}`, color: '#ff5d7a', t: 0 });
     }
   }
 
@@ -3137,7 +3163,7 @@ export class Combat {
       const left = world.hurtTree(o, dmg);
       this.splat(o.x, o.y - 6, '#a8794a', left > 0 ? 1 : 2, cx, cy);
       sfx.play(left > 0 ? 'thud' : 'chest', 0.7);
-      this.floaters.push({ x: o.x, y: o.y - 30, text: left > 0 ? `-${Math.round(dmg * 10) / 10}` : 'timber!', color: '#c9a06a', t: 0 });
+      this.addFloater({ x: o.x, y: o.y - 30, text: left > 0 ? `-${Math.round(dmg * 10) / 10}` : 'timber!', color: '#c9a06a', t: 0 });
       if (left > 0) {
         this.treeBars = this.treeBars.filter((b) => b.key !== o.tkey);
         this.treeBars.push({ key: o.tkey, x: o.x, y: o.y - o.sh * 0.5 - 6, hp: left, max, t: 0 });
@@ -3201,12 +3227,14 @@ export class Combat {
 
   // Hit a Wave Defense monster. The host applies it; guests ask the host to.
   hitMonster(m, dmg, fx, fy, kb = 110) {
+    this.g.comboHit?.();
     const sc = m.scale || MONSTERS[m.type].scale || 1;
+    if (fx !== undefined && dmg < 8) this.g.pfx?.spawn('impacts/hit-spark', m.x, m.y - 6 * sc, { angle: Math.atan2(m.y - fy, m.x - fx), scale: 0.4, seed: 1 + Math.floor(Math.random() * 50) });
     this.g.setTarget(m, 'mon');
     this.splat(m.x, m.y, this.hitColor, m.state !== 'dead' && m.hp - dmg <= 0 ? 2 : 1, fx, fy);
     if (m.wild) this.damageWild(m, dmg, fx, fy, kb);
     else this.g.wave.hitMonster(m.id, dmg, fx, fy, kb);
-    this.floaters.push({ x: m.x, y: m.y - 10 * sc - 6, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
+    this.addFloater({ x: m.x, y: m.y - 10 * sc - 6, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
   }
 
   // the same, for a blade, a spin or a dash: a flying monster (the Night Bat) is out of reach of those, only shots and throws get it
@@ -3216,7 +3244,7 @@ export class Combat {
       if (!MONSTERS[m.type].airborne) out.push(m);
       else if (this.g.t - (this.airNoteT ?? -9) > 1.6) {
         this.airNoteT = this.g.t;
-        this.floaters.push({ x: m.x, y: m.y - 24, text: 'too high! shoot it', color: '#8fd0ff', t: 0 });
+        this.addFloater({ x: m.x, y: m.y - 24, text: 'too high! shoot it', color: '#8fd0ff', t: 0 });
       }
     }
     return out;
@@ -3234,11 +3262,12 @@ export class Combat {
   }
 
   damageSkeleton(s, dmg, fromX, fromY, knockback = 110) {
+    this.g.comboHit?.();
     if (s.state === 'dead') return;
     this.g.setTarget(s, 'skel');
     s.hp -= dmg;
     this.splat(s.x, s.y, this.hitColor, s.hp <= 0 ? 2 : 1, fromX, fromY);
-    this.floaters.push({ x: s.x, y: s.y - 26, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
+    this.addFloater({ x: s.x, y: s.y - 26, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
     sfx.play(s.hp <= 0 ? 'skeletonDie' : 'hit');
     if (s.hp <= 0) {
       s.state = 'dead';
@@ -3277,7 +3306,7 @@ export class Combat {
     if (by) this.lastHitBy = { kind: by.kind, id: by.id, at: this.g.t }; // (your pet goes for whoever it was)
     if (!this.g.wave) n *= 1 - 0.06 * this.up('armor'); // Armor upgrade
     if (this.shieldT > 0) {
-      this.floaters.push({ x: p.x, y: p.y - 34, text: 'blocked!', color: '#5aaee8', t: 0 });
+      this.addFloater({ x: p.x, y: p.y - 34, text: 'blocked!', color: '#5aaee8', t: 0 });
       sfx.play('block');
       this.invuln = 0.25;
       return;
@@ -3295,7 +3324,7 @@ export class Combat {
     this.hp -= n;
     this.invuln = invuln;
     this.splat(p.x, p.y, null, 1, fromX, fromY);
-    this.floaters.push({ x: p.x, y: p.y - 34, text: `-${hp100(n)}`, color: '#ff5d7a', t: 0 });
+    this.addFloater({ x: p.x, y: p.y - 34, text: `-${hp100(n)}`, color: '#ff5d7a', t: 0 });
     const ang = Math.atan2(p.y - fromY, p.x - fromX);
     for (let i = 0; knock && i < 6; i++) {
       const nx = p.x + Math.cos(ang) * 1.5;
@@ -3333,7 +3362,7 @@ export class Combat {
     }
     this.g.mp.net.send({ t: 'hit', target: r.id, dmg });
     this.splat(r.x, r.y, this.hitColor, 1, this.g.player.x, this.g.player.y);
-    this.floaters.push({ x: r.x, y: r.y - 30, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
+    this.addFloater({ x: r.x, y: r.y - 30, text: `-${Math.round(dmg * 10) / 10}`, color: '#ff7a8f', t: 0 });
   }
 
   // A splash on the floor at (x, y) that sprays out away from where the hit came from and fades after about a second.
@@ -3522,14 +3551,14 @@ export class Combat {
     if (p.free) return; // the endless default pebble does not need picking up
     if (this.g.world.type(Math.floor(x / 16), Math.floor(y / 16)) === WATER) {
       // it came down in the water (or the lava)
-      this.floaters.push({ x, y: y - 6, text: 'plop', color: '#5ab0d8', t: 0 });
+      this.addFloater({ x, y: y - 6, text: 'plop', color: '#5ab0d8', t: 0 });
       sfx.play('splat', 0.5);
       return;
     }
     sfx.play(breaksOnImpact(ITEMS[p.id]) ? 'splat' : 'thud', 0.7);
     if (breaksOnImpact(ITEMS[p.id])) {
       this.splat(x, y + 2, splatTone(p.id), 0.8);
-      this.floaters.push({ x, y: y - 6, text: 'splat!', color: '#e0a060', t: 0 });
+      this.addFloater({ x, y: y - 6, text: 'splat!', color: '#e0a060', t: 0 });
       return;
     }
     this.drops.push({ x, y: y + 4, id: p.id, qty: 1, age: 0 });
@@ -3582,7 +3611,7 @@ export class Combat {
       if (this.hp < this.maxHp) this.magnet(d, dx, dy, dist, dt);
       if (this.hp < this.maxHp && dist < 10) {
         this.hp = Math.min(this.maxHp, this.hp + 1);
-        this.floaters.push({ x: p.x, y: p.y - 34, text: `+${hp100(1)}`, color: '#ff5d7a', t: 0 });
+        this.addFloater({ x: p.x, y: p.y - 34, text: `+${hp100(1)}`, color: '#ff5d7a', t: 0 });
         sfx.play('heal');
         return false;
       }
@@ -3614,7 +3643,7 @@ export class Combat {
       this.magnet(d, dx, dy, dist, dt);
       if (dist < 10 && this.g.supplies[key] < SUPPLY_CAP) {
         this.g.supplies[key]++;
-        this.floaters.push({ x: p.x, y: p.y - 34, text: `+1 ${ITEMS[d.id].name}`, color: '#6fae6a', t: 0 });
+        this.addFloater({ x: p.x, y: p.y - 34, text: `+1 ${ITEMS[d.id].name}`, color: '#6fae6a', t: 0 });
         sfx.play('pickup');
         return false;
       }
@@ -3624,20 +3653,20 @@ export class Combat {
     if (d.id === 'coin' && dist < 10) {
       this.g.giveCoins(d.qty);
       if (d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
-      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪙`, color: '#e0a83a', t: 0 });
+      this.addFloater({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪙`, color: '#e0a83a', t: 0 });
       sfx.play('coin');
       return false;
     }
     if (d.id === 'ammo' && dist < 10) {
       this.g.giveBullets(d.qty);
       if (d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net });
-      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🔫`, color: '#d9b25a', t: 0 });
+      this.addFloater({ x: p.x, y: p.y - 34, text: `+${d.qty} 🔫`, color: '#d9b25a', t: 0 });
       sfx.play('pickup');
       return false;
     }
     if (d.id === 'wood' && dist < 10) {
       this.g.giveWood(d.qty);
-      this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪵`, color: '#b98650', t: 0 });
+      this.addFloater({ x: p.x, y: p.y - 34, text: `+${d.qty} 🪵`, color: '#b98650', t: 0 });
       sfx.play('pickup');
       return false;
     }
@@ -3648,7 +3677,7 @@ export class Combat {
       if (left === 0 && d.net) this.g.mp?.net.send({ t: 'fx', kind: 'grab', lid: d.net }); // so the others' copies disappear
       if (left < d.qty) {
         this.g.emitInventory();
-        this.floaters.push({ x: p.x, y: p.y - 34, text: `+${d.qty - left} ${ITEMS[d.id].name}`, color: '#6fae6a', t: 0 });
+        this.addFloater({ x: p.x, y: p.y - 34, text: `+${d.qty - left} ${ITEMS[d.id].name}`, color: '#6fae6a', t: 0 });
         sfx.play(d.id === 'coin' ? 'coin' : 'pickup');
       }
       d.qty = left;
@@ -3803,7 +3832,7 @@ export class Combat {
       ctx.fill();
       // the fireball itself: the explosion animation (11 frames), as big as the blast
       const boom = this.img['fx/boom'];
-      if (boom && bl.tone !== 'stun') {
+      if (boom && bl.tone !== 'stun' && !bl.noBoom) {
         const k = Math.max(1.1, bl.R / 17);
         ctx.drawImage(boom, Math.min(10, Math.floor(p * 11)) * 48, 0, 48, 48, -24 * k, -34 * k, 48 * k, 48 * k);
       }
@@ -3951,6 +3980,25 @@ export class Combat {
     }
   }
 
+  // A floating text. Damage numbers (-3) become the pixelfx damage number, a pickup gets a little burst, and a CRIT! is the crit number;
+  // everything else is drawn as before.
+  addFloater(f) {
+    const pfx = this.g.pfx;
+    if (pfx && typeof f.text === 'string') {
+      const dmg = /^(?:\u{1FA78})?-(\d+(?:\.\d+)?)$/u.exec(f.text);
+      if (dmg && f.color !== '#c9a06a') {
+        const v = parseFloat(dmg[1]);
+        const shown = v >= 10 ? String(Math.round(v)) : String(Math.round(v * 10) / 10);
+        if (pfx.spawn('ui/damage-number', f.x, f.y + 22, { text: `-${shown}`, scale: 0.5, seed: 1 + Math.floor(Math.random() * 50) })) return;
+      } else if (f.text === 'CRIT!') {
+        if (pfx.spawn('ui/crit-number', f.x, f.y + 34, { text: 'CRIT', label: '', scale: 0.5, seed: 1 + Math.floor(Math.random() * 50) })) return;
+      } else if (/^\+\d+ (?!XP)/.test(f.text) && f.y > this.g.player.y - 40 && f.y < this.g.player.y - 28) {
+        pfx.spawn('pickups/collect-burst', f.x, f.y + 34, {});
+      }
+    }
+    this.floaters.push(f);
+  }
+
   drawDrop(ctx, d, t) {
     ctx.fillStyle = 'rgba(60,40,30,0.2)';
     ctx.fillRect(Math.round(d.x - 3), Math.round(d.y), 6, 2);
@@ -3999,6 +4047,20 @@ export class Combat {
       return;
     }
     const ly = d.y - 4 - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 1.2);
+    // coins, gems, health and potions are the pixelfx pickups (a spinning coin, a glinting gem...), and a rare find has a beam of light
+    {
+      const loop = DROP_LOOP[d.id];
+      const tier = !d.wid && ITEMS[d.id] ? rarityOf(d.id) : d.wid ? weaponRarity(weaponById(d.wid)) : 'common';
+      if (BEAM_TIER[tier]) {
+        const beam = bakedLoop('pickups/loot-beam', { palette: BEAM_TIER[tier] }, 12);
+        if (beam) drawBaked(ctx, beam, d.x, d.y + 2, t + d.x * 0.1, false, 0.8);
+      }
+      const b = loop && !d.wid ? bakedLoop(loop.id, loop.o || {}, 15) : null;
+      if (b) {
+        drawBaked(ctx, b, d.x, d.y - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 0.8), t + d.x * 0.07);
+        return;
+      }
+    }
     if (d.wid) {
       // a weapon: its picture, in a glowing box of its rarity
       const wp = weaponById(d.wid);
@@ -4023,7 +4085,7 @@ export class Combat {
     this.drawIcon(ctx, d.id, d.x, ly);
   }
 
-  // a small box around a dropped item, in its rarity's colour (the rarer, the brighter it glows)
+  // a small box around a dropped item, in its rarity colour (the rarer, the brighter it glows)
   drawRarityFrame(ctx, id, x, y) {
     const tier = rarityOf(id);
     const icon = iconOf(id);

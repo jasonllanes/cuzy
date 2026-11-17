@@ -43,6 +43,7 @@ import { drawEntrance, drawExit, drawTorch, makeRuinHouse, riftColor } from './d
 import { HOUSE_SPRITE } from './world';
 import { devLayout, drawHero, heroById } from './heroes';
 import { playTransition } from './fxTransition';
+import { Pfx, bakedLoop, drawBaked } from './pfx';
 
 // how much longer than you a mount can sprint: a chicken lasts 2x, a cow 3x as long
 export const MONSTER_TARGET = 15; // monster kills that win a "monster kills" round
@@ -250,6 +251,11 @@ export class Game {
     this.crowT = 8;
     this.spawned = new Set();
     this.t = 0;
+    this.pfx = new Pfx(); // pixelfx one-shots: damage numbers, bursts, spells
+    this.pfx.preload(['ui/damage-number', 'ui/crit-number', 'ui/combo-counter', 'pickups/collect-burst', 'pickups/xp-orb']);
+    if (world.apoc) this.pfx.preload(['critters/slime', 'critters/snake', 'critters/frog', 'critters/wisp', 'critters/ghost', 'critters/flying-skull', 'critters/eyeball', 'critters/jellyfish', 'spawn/poof']);
+    this.pfx.preload(['ice/frost-nova', 'explosions/small-explosion', 'nature/acid-splash', 'lightning/lightning-strike', 'arcane/mana-burst', 'lightning/zap-hit', 'fire/flame-pillar', 'explosions/grenade', 'impacts/hit-spark', 'shadow/dark-explosion']);
+    this.combo = null;
     this.zoom = 3;
     this.viewW = 0;
     this.viewH = 0;
@@ -902,7 +908,7 @@ export class Game {
       this.myBet = { on: String(on), amt };
     }
     this.mp.net.send({ t: 'bet', on: String(on || ''), amt });
-    this.combat.floaters.push({ x: this.player.x, y: this.player.y - 40, text: amt >= 1 ? `-${amt} 🪙 bet` : 'bet taken back', color: amt >= 1 ? '#ff9a3c' : '#9fd88a', t: 0 });
+    this.combat.addFloater({ x: this.player.x, y: this.player.y - 40, text: amt >= 1 ? `-${amt} 🪙 bet` : 'bet taken back', color: amt >= 1 ? '#ff9a3c' : '#9fd88a', t: 0 });
     sfx.play('coin', 0.4);
     return true;
   }
@@ -1058,7 +1064,7 @@ export class Game {
     const b = this.balls?.list[0];
     this.crowd?.goal(t);
     this.goalConfettiBurst(TEAMS[t].color);
-    if (b) this.combat.floaters.push({ x: b.x, y: b.y - 30, text: 'GOAL!', color: TEAMS[t].color, t: 0, big: true });
+    if (b) this.combat.addFloater({ x: b.x, y: b.y - 30, text: 'GOAL!', color: TEAMS[t].color, t: 0, big: true });
   }
 
   // a goal: confetti shoots up from the bottom corners and rains over the screen (in the scoring team's colours)
@@ -1182,7 +1188,7 @@ export class Game {
   addXp(n, quiet = false) {
     if (!(n > 0) || this.demo || this.level >= MAX_CHAR_LEVEL) return;
     this.xp += n;
-    if (!quiet) this.combat.floaters.push({ x: this.player.x, y: this.player.y - 44, text: `+${Math.round(n)} XP`, color: '#b38cff', t: 0 });
+    if (!quiet) this.combat.addFloater({ x: this.player.x, y: this.player.y - 44, text: `+${Math.round(n)} XP`, color: '#b38cff', t: 0 });
     let up = 0;
     while (this.level < MAX_CHAR_LEVEL && this.xp >= xpNeed(this.level)) {
       this.xp -= xpNeed(this.level);
@@ -1193,7 +1199,7 @@ export class Game {
       this.combat.refreshMaxHp(false, (HP_PER_LEVEL * up) / HP_PER_HEART);
       this.combat.hp = this.combat.maxHp;
       sfx.play('levelup');
-      this.combat.floaters.push({ x: this.player.x, y: this.player.y - 56, text: `LEVEL ${this.level}!`, color: '#ffd24a', t: 0 });
+      this.combat.addFloater({ x: this.player.x, y: this.player.y - 56, text: `LEVEL ${this.level}!`, color: '#ffd24a', t: 0 });
       this.levelUpFx(this.syncSkills(true));
       this.onToast?.(`⭐ Level ${this.level}! Max HP is now ${hp100(this.combat.maxHp)}, and you are fully healed.`);
       this.save();
@@ -1339,13 +1345,18 @@ export class Game {
       sfx.play('pickup', 0.35);
     }
     if (this.xpGain && (this.xpGain.t += dt) > 0.5) {
-      this.combat.floaters.push({ x: p.x, y: p.y - 44, text: `+${Math.round(this.xpGain.n)} XP`, color: '#b38cff', t: 0 });
+      this.combat.addFloater({ x: p.x, y: p.y - 44, text: `+${Math.round(this.xpGain.n)} XP`, color: '#b38cff', t: 0 });
       this.xpGain = null;
     }
   }
 
   drawXpOrbs(ctx) {
+    const orb = bakedLoop('pickups/xp-orb', { palette: ['#0c0418', '#2a0f55', '#4d1fa0', '#7d3de0', '#a96bff', '#caa0ff', '#e8d2ff', '#ffffff'] }, 15);
     for (const o of this.xpOrbs) {
+      if (orb) {
+        drawBaked(ctx, orb, o.x, o.y + 4, this.t + o.x * 0.1);
+        continue;
+      }
       const x = Math.round(o.x);
       const y = Math.round(o.y);
       ctx.fillStyle = 'rgba(179,140,255,0.28)';
@@ -1572,7 +1583,7 @@ export class Game {
     if (!fighter) {
       const note = this.settleBet(m);
       this.onToast?.(`${m.draw ? '⚔️ The duel was a draw.' : `⚔️ ${m.name} won the duel!`}${note}`);
-      if (this.lastNet) this.combat.floaters.push({ x: this.player.x, y: this.player.y - 44, text: `${this.lastNet > 0 ? '+' : ''}${this.lastNet} 🪙`, color: this.lastNet > 0 ? '#e0a83a' : '#ff5d7a', t: 0, big: true });
+      if (this.lastNet) this.combat.addFloater({ x: this.player.x, y: this.player.y - 44, text: `${this.lastNet > 0 ? '+' : ''}${this.lastNet} 🪙`, color: this.lastNet > 0 ? '#e0a83a' : '#ff5d7a', t: 0, big: true });
       this.returnFromDuel();
       return;
     }
@@ -2123,7 +2134,7 @@ export class Game {
     this.exhausted = false;
     this.reviveFxs.push({ x: p.x, y: p.y, t: 0, mine: true });
     this.reviveFlash = 1;
-    c.floaters.push({ x: p.x, y: p.y - 56, text: 'RESURRECTED!', color: '#ffe27a', t: 0 });
+    c.addFloater({ x: p.x, y: p.y - 56, text: 'RESURRECTED!', color: '#ffe27a', t: 0 });
     sfx.play('levelup');
     sfx.play('respawn');
     this.mp?.net.send({ t: 'fx', kind: 'revive', x: Math.round(p.x), y: Math.round(p.y) });
@@ -2337,6 +2348,19 @@ export class Game {
 
   // ---------- Wave Defense ----------
 
+  // Every hit on an enemy counts towards a combo; the pixelfx combo counter flashes up at 3 hits, and then every 5.
+  comboHit() {
+    const now = this.t;
+    if (!this.combo || now - this.combo.t > 2.4) this.combo = { n: 0, t: now, shown: -9 };
+    const c = this.combo;
+    c.n++;
+    c.t = now;
+    if (c.n >= 3 && (c.n === 3 || c.n % 5 === 0) && now - c.shown > 0.5) {
+      c.shown = now;
+      this.pfx.spawn('ui/combo-counter', this.canvas.width / 2, this.canvas.height * 0.2, { screen: true, key: 'combo', count: c.n, label: 'COMBO' });
+    }
+  }
+
   waveTargets() {
     const out = [{ id: this.mp?.you ?? 0, x: this.player.x, y: this.player.y, hidden: this.combat.hidden || !!this.dead }]; // (a ghost cannot be hurt)
     for (const r of this.remotes.values()) out.push({ id: r.id, x: r.x, y: r.y, hidden: !!r.hidden });
@@ -2351,6 +2375,15 @@ export class Game {
 
   onWaveEvent(ev) {
     const c = this.combat;
+    if (ev.type === 'bspell') {
+      // the Warlock spells land: a dark burst and a flash of mana in every red circle
+      for (const [sx, sy] of ev.spots || []) {
+        this.pfx.spawn('shadow/dark-explosion', sx, sy + 4, { scale: 0.22, seed: 1 + Math.floor(Math.random() * 50) });
+        this.pfx.spawn('arcane/mana-burst', sx, sy + 2, { scale: 0.3, seed: 1 + Math.floor(Math.random() * 50) });
+      }
+      sfx.play('boom', 0.5);
+      return;
+    }
     if (ev.type === 'travel') {
       // the Traveling Map: the wave is won, and the team sets off for a new place
       this.travelling = { ...ev, t: 0, dur: 7 };
@@ -2372,7 +2405,7 @@ export class Game {
     } else if (ev.type === 'summon') {
       // the Zombie Wizard raises the dead
       c.spells.push({ x: ev.x, y: ev.y, t: 0, fx: 'necro_summon', frames: TINY.fx.necro_summon, fxOnly: true });
-      c.floaters.push({ x: ev.x, y: ev.y - 30, text: 'rise!', color: '#c58bff', t: 0 });
+      c.addFloater({ x: ev.x, y: ev.y - 30, text: 'rise!', color: '#c58bff', t: 0 });
       sfx.play('wave', 0.4);
     } else if (ev.type === 'surge') {
       sfx.play('wave');
@@ -2385,6 +2418,7 @@ export class Game {
       this.stamina = 1;
     } else if (ev.type === 'mdie') {
       c.kills++;
+      if (ev.fxdie && ev.x != null) this.pfx.spawn(ev.fxdie, ev.x, ev.y, {}); // (a creepy crawler goes out in a puff)
       this.monsterKill(ev.name || 'Monster', Math.round(XP.wave * lvXp(ev.lv || 1)) + (ev.boss ? 80 : 0), !!ev.boss, ev.x != null ? { x: ev.x, y: ev.y } : null);
       sfx.play('monsterDie', 0.6);
       if (ev.power) c.drops.push({ x: ev.x, y: ev.y, id: 'power', pw: ev.power, age: 0, net: `pw${ev.pid}` });
@@ -2403,11 +2437,11 @@ export class Game {
     } else if (ev.type === 'bhit') {
       this.startHouseHit(ev);
     } else if (ev.type === 'bbreak') {
-      c.floaters.push({ x: ev.x, y: ev.y - 20, text: 'crack!', color: '#e0a060', t: 0 });
+      c.addFloater({ x: ev.x, y: ev.y - 20, text: 'crack!', color: '#e0a060', t: 0 });
     } else if (ev.type === 'recruit') {
       sfx.play('buy');
       this.onToast?.(`A ${ALLIES[ev.kind].name} joined the defense!`);
-      c.floaters.push({ x: ev.x, y: ev.y - 24, text: '+1 helper', color: '#7cc5f2', t: 0 });
+      c.addFloater({ x: ev.x, y: ev.y - 24, text: '+1 helper', color: '#7cc5f2', t: 0 });
     } else if (ev.type === 'upgrade') {
       sfx.play('levelup');
       this.onToast?.(`🏠 The base was reinforced! (level ${ev.level})`);
@@ -2691,11 +2725,11 @@ export class Game {
     if (kind === 'hp') {
       const healed = Math.min(c.maxHp - c.hp, item.heal * c.maxHp);
       c.hp += healed;
-      c.floaters.push({ x: this.player.x, y: this.player.y - 34, text: `+${hp100(healed)}`, color: '#ff5d7a', t: 0 });
+      c.addFloater({ x: this.player.x, y: this.player.y - 34, text: `+${hp100(healed)}`, color: '#ff5d7a', t: 0 });
     } else {
       this.stamina = Math.min(1, this.stamina + item.energy);
       if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
-      c.floaters.push({ x: this.player.x, y: this.player.y - 34, text: '+stamina', color: '#5fc58a', t: 0 });
+      c.addFloater({ x: this.player.x, y: this.player.y - 34, text: '+stamina', color: '#5fc58a', t: 0 });
     }
     this.save();
   }
@@ -3599,6 +3633,41 @@ export class Game {
   }
 
   // The Tiny RPG monsters: a full animation set, chosen by what it is doing right now
+  // A monster that is a pixelfx critter: its baked loop, mirrored to face the way it goes, with a health bar and level like the others
+  drawPfxMonster(ctx, m, def) {
+    const b = bakedLoop(def.pfx, def.pfxOpts || {}, 15);
+    const x = Math.round(m.x);
+    const y = Math.round(m.y);
+    const dead = m.state === 'dead';
+    const flyer = def.kind === 'fly' || def.fly;
+    const K = def.pfxK ?? 0.5; // (the critters are drawn bigger than our sprites: half size fits)
+    const H = (def.pfxH || 28) * K;
+    ctx.fillStyle = 'rgba(30,20,30,0.28)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, 7 * K * 1.6, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (b) {
+      const bob = flyer ? Math.sin(m.anim * 4 + m.id) * 1.5 : 0;
+      const alpha = dead ? Math.max(0, 1.2 - m.t * 2.4) : 1;
+      const at = m.anim + m.id * 0.37;
+      drawBaked(ctx, b, x, y - bob, at, m.face < 0, alpha, K);
+      if (m.state === 'hurt' && !dead) {
+        ctx.globalCompositeOperation = 'lighter';
+        drawBaked(ctx, b, x, y - bob, at, m.face < 0, 0.45, K);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
+    if (!dead && m.hp < m.max) {
+      const w = 12;
+      const by = y - H - 4;
+      ctx.fillStyle = 'rgba(40,20,30,0.8)';
+      ctx.fillRect(x - w / 2 - 1, by - 1, w + 2, 4);
+      ctx.fillStyle = '#e8506a';
+      ctx.fillRect(x - w / 2, by, Math.max(1, Math.round(w * (m.hp / m.max))), 2);
+    }
+    if (!dead && m.lv) this.drawLevelTag(ctx, m, x, y, y - H - (m.hp < m.max ? 8 : 4));
+  }
+
   drawTiny(ctx, m, def) {
     const info = TINY.chars[def.tiny];
     const sheet = this.img[`tiny/${def.tiny}`];
@@ -3725,6 +3794,10 @@ export class Game {
     }
     if (def.crab) {
       this.drawCrab(ctx, m);
+      return;
+    }
+    if (def.pfx) {
+      this.drawPfxMonster(ctx, m, def);
       return;
     }
     if (def.tiny) {
@@ -4335,7 +4408,7 @@ export class Game {
         const b = this.balls?.list[0];
         this.crowd?.goal(m.team);
         this.goalConfettiBurst(TEAMS[m.team].color);
-        if (b) this.combat.floaters.push({ x: b.x, y: b.y - 30, text: 'GOAL!', color: m.team === 0 ? '#ff5d7a' : '#5aaee8', t: 0, big: true });
+        if (b) this.combat.addFloater({ x: b.x, y: b.y - 30, text: 'GOAL!', color: m.team === 0 ? '#ff5d7a' : '#5aaee8', t: 0, big: true });
       } else if (m.sudden) this.onToast?.('⏱ Time! It is level: the next goal wins!');
     } else if (m.t === 'match' && this.soccer) {
       this.soccer.left = Number.isFinite(m.left) ? m.left : null;
@@ -4709,6 +4782,7 @@ export class Game {
       this.mouseHeld[0] = false;
       this.mouseHeld[2] = false;
     }
+    this.pfx.update(dt);
     this.updateFade(dt);
     this.updateWeather(dt);
     this.updateLightning(dt);
@@ -4746,7 +4820,7 @@ export class Game {
         if (this.lavaT <= 0) {
           this.lavaT = 0.5;
           this.combat.hurtPlayer(0.4, p.x, p.y + 6, { invuln: 0.25, knock: false, by: { kind: 'lava', name: 'the lava' } });
-          this.combat.floaters.push({ x: p.x, y: p.y - 26, text: '🔥', color: '#ff7a2e', t: 0 });
+          this.combat.addFloater({ x: p.x, y: p.y - 26, text: '🔥', color: '#ff7a2e', t: 0 });
           if (this.t - (this.lavaToastAt ?? -9) > 4) {
             this.lavaToastAt = this.t;
             this.onToast?.('🔥 The lava is burning you! Get out!');
@@ -5138,7 +5212,7 @@ export class Game {
       const sp = 26 + Math.random() * 30;
       this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: 110 + Math.random() * 60, fly: true, burst: true, id: pc.id, qty: pc.qty, age: 0, ins: !!this.inside });
     });
-    this.combat.floaters.push({ x: o.x, y: o.y - 22, text: o.lootKind ? 'Clack!' : 'Pop!', color: '#ffb347', t: 0 });
+    this.combat.addFloater({ x: o.x, y: o.y - 22, text: o.lootKind ? 'Clack!' : 'Pop!', color: '#ffb347', t: 0 });
     this.onToast?.(this.world.apoc ? 'The fridge swings open and supplies spill out! Walk over them to pick them up.' : o.lootKind ? V2_OPEN_TEXT[o.lootKind] || 'You rummage through it and the loot spills out!' : 'The chest bursts open! Walk over the loot to pick it up.');
     this.save();
   }
@@ -5154,7 +5228,7 @@ export class Game {
     }
     // the weapon pops out of the chest like the rest of the loot: walk over it to take it
     this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: 0, vy: 10, vz: 140, fly: true, burst: true, id: 'weapon', wid, qty: 1, age: 0, ins: !!this.inside, nopick: 0.6 });
-    this.combat.floaters.push({ x: o.x, y: o.y - 34, text: '⚔️ A weapon!', color: '#ffe27a', t: 0 });
+    this.combat.addFloater({ x: o.x, y: o.y - 34, text: '⚔️ A weapon!', color: '#ffe27a', t: 0 });
   }
 
   // a weapon you do not own yet: a better chest or a bigger monster gives a better one (rank 0-3). null when you own them all.
@@ -5174,7 +5248,7 @@ export class Game {
     const equip = w.cost >= (cur?.cost || 0);
     if (equip) this.weapons.equipped = wid;
     sfx.play('levelup');
-    this.combat.floaters.push({ x: this.player.x, y: this.player.y - 40, text: `⚔️ ${w.name}!`, color: '#ffe27a', t: 0 });
+    this.combat.addFloater({ x: this.player.x, y: this.player.y - 40, text: `⚔️ ${w.name}!`, color: '#ffe27a', t: 0 });
     this.onGet?.({ kind: 'weapon', name: w.name, file: weaponIconFile(w), rarity: RARITIES[weaponRarity(w)].name, color: RARITIES[weaponRarity(w)].color, desc: `${w.blurb} ${EFFECTS[w.effect]?.name || ''}`.trim(), equipped: equip });
     this.save();
   }
@@ -6241,7 +6315,7 @@ export class Game {
     m.hp = Math.min(max, m.hp + (def.heal || 0) * 6);
     m.stamina = Math.min(1, m.stamina + (def.energy || 0));
     if (m.exhausted && m.stamina >= 0.3) m.exhausted = false;
-    if (heal > 0) this.combat.floaters.push({ x: this.player.x, y: this.player.y - 26, text: `+${Math.round(heal * 10) / 10} ♥`, color: '#ff5d7a', t: 0 });
+    if (heal > 0) this.combat.addFloater({ x: this.player.x, y: this.player.y - 26, text: `+${Math.round(heal * 10) / 10} ♥`, color: '#ff5d7a', t: 0 });
     this.onToast?.(`Your ${name} munches the ${def.name}${heal > 0 ? ` (+${Math.round(heal * 10) / 10} HP)` : ''}${boost > 0 ? ' and perks up' : ''}.`);
     sfx.play('eat');
     this.emitInventory();
@@ -6254,7 +6328,7 @@ export class Game {
     if (!m) return;
     const max = MOUNT_HP[m.type];
     m.hp = (m.hp ?? max) - n;
-    this.combat.floaters.push({ x: this.player.x, y: this.player.y - 26, text: `-${n} ♥`, color: '#ff5d7a', t: 0 });
+    this.combat.addFloater({ x: this.player.x, y: this.player.y - 26, text: `-${n} ♥`, color: '#ff5d7a', t: 0 });
     sfx.play('hurt');
     if (m.hp > 0) return;
     this.animals = this.animals.filter((a) => a !== m);
@@ -6803,6 +6877,7 @@ export class Game {
     if (this.xpOrbs.length) this.drawXpOrbs(ctx);
     if (this.reviveFxs.length) this.drawReviveFxs(ctx);
     if (this.wave) this.drawWaveExtras(ctx);
+    this.pfx.drawWorld(ctx, { x0: camX, y0: camY, x1: camX + this.viewW, y1: camY + this.viewH });
     this.drawCloudShadows(camX, camY);
 
     // screen-space overlay
@@ -6819,6 +6894,7 @@ export class Game {
       this.drawPeers(camX, camY);
       this.drawBossArrows(camX, camY);
       this.drawZombieArrows(camX, camY);
+      this.pfx.drawScreen(ctx, Math.max(1, Math.round(this.zoom * 0.7)));
       this.drawKillerHighlight(camX, camY);
       this.crowd?.drawBubbles(camX, camY);
       this.drawGoalConfetti();
