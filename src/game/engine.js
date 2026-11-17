@@ -124,8 +124,11 @@ function readSave(seed) {
 }
 
 export class Game {
-  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', waves = 10, bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp, onGet }) {
+  constructor({ canvas, world, assets, hero, name = '', training = false, demo = false, minimap = null, net = null, session = null, mode = 'free', difficulty = 'medium', waves = 10, bots = 0, winBy = 'duel', onRoundWon, onAnnounce, onHud, onToast, onInventory, onStorage, onOpenStorage, onHotbarScroll, onSelectSlot, onLevelUp, onGet, carry = null, shelter = null, onTravel = null }) {
     this.canvas = canvas;
+    this.shelterCarry = shelter; // the Traveling Map: what the shelter brings along to the next place
+    this.onTravel = onTravel; // called when the trip is over: the screen starts the next leg
+    this.travelling = null; // { vehicle, destName, seed, t, dur, ... } while the team is on the road
     this.onStorage = onStorage;
     this.onOpenStorage = onOpenStorage;
     this.onLevelUp = onLevelUp;
@@ -171,7 +174,7 @@ export class Game {
     this.boarded = false; // you are on the chopper
     this.chopper = null; // the chopper once it has landed: { x, y, t }
     this.compassOpen = false;
-    this.soccer = world.pitch && this.mp ? { goals: [...(session.room.soccerGoals || [0, 0, 0])], rumble: !!world.rumble, out: [...(session.room.soccerOut || [])], tied: [...(session.room.soccerTied || [])], left: session.room.soccerLeft ?? null, sudden: !!session.room.soccerSudden, target: session.room.target || 5, mins: session.room.matchMins || 0 } : null;
+    this.soccer = world.pitch && this.mp ? { goals: [...(session.room.soccerGoals || [0, 0, 0, 0])], rumble: !!world.rumble, out: [...(session.room.soccerOut || [])], tied: [...(session.room.soccerTied || [])], left: session.room.soccerLeft ?? null, sudden: !!session.room.soccerSudden, target: session.room.target || 5, mins: session.room.matchMins || 0 } : null;
     this.remotes = new Map();
     this.myBubble = null;
     this.dead = null; // set while you are downed: { t, dur, by, last }
@@ -264,7 +267,7 @@ export class Game {
       x: hash2(i, 1, 9), y: hash2(i, 2, 9), s: 0.5 + hash2(i, 3, 9), p: hash2(i, 4, 9) * 6,
     }));
 
-    const saved = demo || this.wave || training ? null : readSave(world.seedStr);
+    const saved = demo || training ? null : this.wave ? carry : readSave(world.seedStr); // (a Traveling Map leg starts from what you carried over)
     const tp = new URLSearchParams(window.location.search).get('tp');
     // every hero has a home house; in rooms each player's slot picks a different one
     this.home = demo ? { x: 8, y: 12 } : this.chooseHome(saved, session);
@@ -331,6 +334,12 @@ export class Game {
     }
     this.collected = new Set(saved?.collected || []);
     this.combat = demo ? null : new Combat(this, assets.img, saved?.kills || 0);
+    if (saved?.guns && this.combat) {
+      // the guns you own, their upgrades and the one in your hands
+      this.combat.owned = { pistol: true, ...saved.guns.owned };
+      this.combat.gunUp = saved.guns.up || {};
+      if (this.combat.owned[saved.guns.gun]) this.combat.gun = saved.guns.gun;
+    }
     this.crowd = null; // the Beach Ball crowd
     this.goalConfetti = []; // the paper that flies when a goal is scored
     this.balls = null; // (beach balls, on the maps with a sea: made once the game has its home and world)
@@ -599,9 +608,16 @@ export class Game {
   save() {
     if (this.wave || this.training) return; // wave runs are one-off, and the training ground never touches your saved games
     try {
-      store.set(
-        saveKey(this.world.seedStr),
-        JSON.stringify({
+      store.set(saveKey(this.world.seedStr), JSON.stringify(this.saveData()));
+    } catch {
+      /* storage may be unavailable */
+    }
+  }
+
+  // everything about you that is kept: your place, level, backpack, coins, shop upgrades, weapons, guns, pets...
+  saveData() {
+    return (
+      {
           x: this.inside ? this.inside.out.x : this.dungeon ? this.dungeon.out.x : this.player.x,
           y: this.inside ? this.inside.out.y : this.dungeon ? this.dungeon.out.y : this.player.y,
           inside: !!this.inside && !this.inside.b,
@@ -627,11 +643,9 @@ export class Game {
           consumables: this.consumables,
           skills: this.skills,
           home: this.home,
-        }),
-      );
-    } catch {
-      /* storage may be unavailable */
-    }
+          guns: this.combat ? { owned: this.combat.owned, up: this.combat.gunUp, gun: this.combat.gun } : null,
+        }
+    );
   }
 
   chooseHome(saved, session) {
@@ -1038,7 +1052,7 @@ export class Game {
     }
     const t = m.scorer;
     if (!TEAMS[t]) return;
-    this.onAnnounce?.({ title: '⚽ GOAL!', sub: `${TEAMS[t].icon} ${TEAMS[t].name} scores in the ${['left', 'right', 'top'][m.conceded]} goal! (${s.goals[t]}/${s.target})`, tier: 2, mine: me === t });
+    this.onAnnounce?.({ title: '⚽ GOAL!', sub: `${TEAMS[t].icon} ${TEAMS[t].name} scores in the ${['left', 'right', 'top', 'bottom'][m.conceded]} goal! (${s.goals[t]}/${s.target})`, tier: 2, mine: me === t });
     sfx.play(me === t ? 'win' : 'wave');
     const b = this.balls?.list[0];
     this.crowd?.goal(t);
@@ -1795,6 +1809,28 @@ export class Game {
     return { x: o.x - 24 + SEATS.x[side < 0 ? 0 : 1], y: o.by - 32 + cy + 3 };
   }
 
+  // a portal door: you step in and come out of the next one on the ring
+  usePortal(o) {
+    if (this.dead || this.fade || this.inside || this.dungeon || this.boat || this.boatPass || this.seat) return;
+    const list = this.world.portalList();
+    const i = list.findIndex((s) => s.id === o.id);
+    if (list.length < 2 || i < 0) {
+      this.onToast?.('The portal flickers, but nothing answers from the other side.');
+      return;
+    }
+    const d = list[(i + 1) % list.length];
+    sfx.play('respawn');
+    this.transition(() => {
+      this.dismount();
+      this.player.x = d.x;
+      this.player.y = d.y + 14;
+      this.player.dir = 'down';
+      this.cam.x = d.x;
+      this.cam.y = d.y;
+      this.onToast?.('🌀 You stepped out of another portal.');
+    });
+  }
+
   sitSeesaw(o) {
     if (this.seat || this.boat || this.dead || this.inside) return;
     if (this.mount) this.dismount();
@@ -1946,6 +1982,16 @@ export class Game {
     return { open: true, spin: false, ang: Math.atan2(dx, -dy), dist: Math.round(Math.hypot(dx, dy) / 16) };
   }
 
+  // The helicopter with its rotor turning (the Modern Exteriors animation, 42 frames: spin up 0-21, full speed 22-25, spin down 26-41).
+  // (x, y) is the middle of the body; `right` is the way its nose points; `spin` 0..1 spins the rotor up (left out: at full speed)
+  drawHeli(ctx, x, y, right, t, k = 0.5, spin = null) {
+    const sheet = this.img['fx/heli'];
+    if (!sheet) return false;
+    const f = spin === null ? 22 + (Math.floor(t * 16) % 4) : spin >= 1 ? 22 + (Math.floor(t * 16) % 4) : Math.min(21, Math.floor(Math.max(0, spin) * 22));
+    ctx.drawImage(sheet, f * 152, right ? 0 : 144, 152, 144, Math.round(x - 76 * k), Math.round(y - 80 * k), 152 * k, 144 * k);
+    return true;
+  }
+
   drawChopper(ctx) {
     const c = this.chopper;
     if (!c) return;
@@ -1971,7 +2017,7 @@ export class Game {
     ctx.fill();
     ctx.save();
     ctx.globalAlpha = Math.max(0, 1 - c.lift / 5);
-    ctx.drawImage(im, sp.x, sp.y, sp.w, sp.h, Math.round(x - w / 2), Math.round(y - h - alt + 6), w, h);
+    if (!this.drawHeli(ctx, x, y - alt - 28, true, this.t, 0.9)) ctx.drawImage(im, sp.x, sp.y, sp.w, sp.h, Math.round(x - w / 2), Math.round(y - h - alt + 6), w, h);
     ctx.restore();
     // the rotor wash: dust kicked up round the landing
     if (c.t < 6 || c.lift > 0) {
@@ -2213,6 +2259,24 @@ export class Game {
     if (this.dead.t >= this.dead.dur) this.faint('Back on your feet!');
   }
 
+  // the friendly ghost you drift about as while you are downed (see through, bobbing)
+  drawGhost(ctx, x, y, dir) {
+    const sheet = this.img['fx/ghost'];
+    if (!sheet) return;
+    const bob = Math.sin(this.t * 4) * 2;
+    const f = Math.floor(this.t * 6) % 4;
+    ctx.save();
+    ctx.fillStyle = 'rgba(30,30,50,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(Math.round(x), Math.round(y), 7, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.72;
+    ctx.translate(Math.round(x), Math.round(y - 14 + bob));
+    if (dir === 'left') ctx.scale(-1, 1);
+    ctx.drawImage(sheet, f * 32, 0, 32, 32, -16, -16, 32, 32);
+    ctx.restore();
+  }
+
   drawGrave(ctx, x, y) {
     x = Math.round(x);
     y = Math.round(y);
@@ -2264,7 +2328,7 @@ export class Game {
   // ---------- Wave Defense ----------
 
   waveTargets() {
-    const out = [{ id: this.mp?.you ?? 0, x: this.player.x, y: this.player.y, hidden: this.combat.hidden }];
+    const out = [{ id: this.mp?.you ?? 0, x: this.player.x, y: this.player.y, hidden: this.combat.hidden || !!this.dead }]; // (a ghost cannot be hurt)
     for (const r of this.remotes.values()) out.push({ id: r.id, x: r.x, y: r.y, hidden: !!r.hidden });
     return out;
   }
@@ -2277,6 +2341,13 @@ export class Game {
 
   onWaveEvent(ev) {
     const c = this.combat;
+    if (ev.type === 'travel') {
+      // the Traveling Map: the wave is won, and the team sets off for a new place
+      this.travelling = { ...ev, t: 0, dur: 7 };
+      sfx.play('wave');
+      this.onToast?.(`${{ boat: '⛵', helicopter: '🚁', rv: '🚐', car: '🚙' }[ev.vehicle] || '🧭'} Off to ${ev.destName}!`);
+      return;
+    }
     if (ev.type === 'start' && ev.endless) {
       // Endless: there are no waves to announce, only the Colossus that turns up now and then
       if (ev.bosses > 0) this.onToast?.(`${bossText(ev)} ${ev.bosses > 1 ? 'are' : 'is'} coming at the end of this batch!`);
@@ -2315,7 +2386,7 @@ export class Game {
       this.onToast?.(ev.what === 'heal' ? '🔧 The shelter was repaired!' : `🔧 Self-repair is now level ${ev.level}.`);
     } else if (ev.type === 'air') {
       sfx.play('wave');
-      this.onToast?.(ev.kind === 'carpet' ? '💣 Carpet bombing is on its way!' : '🚁 The gunship is here for a minute!');
+      this.onToast?.(ev.kind === 'carpet' ? '💣 Carpet bombing is on its way!' : ev.kind === 'drone' ? '🛸 A scout drone is watching over the shelter!' : ev.kind === 'helix' ? '🚁 A Helix drone is on patrol!' : '🚁 The gunship is here for a minute!');
     } else if (ev.type === 'boom') {
       c.blasts.push({ x: ev.x, y: ev.y, t: 0, R: ev.R || 30 }); // a grenadier's grenade
       sfx.play('boom', 0.6);
@@ -2350,7 +2421,7 @@ export class Game {
       this.onToast?.('The base is already as strong as it gets.');
     } else if ((d.op === 'mendUp' || d.op === 'mendHeal' || d.op === 'air') && !d.ok) {
       this.giveCoins(this.paidFor?.[d.op] || 0); // it did not happen: the coins come back
-      this.onToast?.(d.op === 'air' ? 'No air support right now: at most 3 aircraft in the sky, and 3 calls per wave.' : 'The shelter is already in perfect shape.');
+      this.onToast?.(d.op === 'air' ? 'No air support right now: you can call at most 3 carpet bombings and 3 gunships per wave.' : 'The shelter is already in perfect shape.');
     }
   }
 
@@ -2723,6 +2794,58 @@ export class Game {
   }
 
   // a red arrow at the edge of the screen pointing to each boss that is out of sight
+  // Orange arrows at the edge of the screen pointing to zombies that are out of sight, so a few stuck ones are easy to find.
+  // Shown while few are left (or none is on screen): one arrow for the nearest few, never two for the same spot.
+  drawZombieArrows(camX, camY) {
+    const w = this.wave;
+    if (!w || !this.world.apoc || w.phase !== 'fight' || this.dead || this.celeb) return;
+    const alive = w.monsters.filter((m) => m.state !== 'dead' && !MONSTERS[m.type]?.boss);
+    if (!alive.length) return;
+    const { ctx, canvas } = this;
+    const u = Math.max(8, this.zoom * 2.8);
+    const m = u * 2.6;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const seen = (z) => {
+      const [sx, sy] = this.toScreen(z.x, z.y, camX, camY);
+      return sx > m && sy > m && sx < canvas.width - m && sy < canvas.height - m;
+    };
+    const out = alive.filter((z) => !seen(z));
+    const anySeen = out.length < alive.length;
+    if (!out.length || (anySeen && alive.length > 8)) return;
+    const p = this.player;
+    out.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
+    const picked = [];
+    for (const z of out) {
+      if (picked.length >= 4) break;
+      if (picked.some((q) => Math.hypot(q.x - z.x, q.y - z.y) < 60)) continue; // (a bunch of them gets one arrow)
+      picked.push(z);
+    }
+    const pulse = 0.7 + 0.3 * Math.sin(this.t * 5);
+    for (const z of picked) {
+      const [sx, sy] = this.toScreen(z.x, z.y, camX, camY);
+      const dx = sx - cx;
+      const dy = sy - cy;
+      const k = Math.min((cx - m) / Math.abs(dx || 1), (cy - m) / Math.abs(dy || 1));
+      const ang = Math.atan2(dy, dx);
+      ctx.save();
+      ctx.translate(cx + dx * k, cy + dy * k);
+      ctx.rotate(ang);
+      ctx.fillStyle = `rgba(255,150,40,${pulse})`;
+      ctx.strokeStyle = 'rgba(40,20,0,0.9)';
+      ctx.lineWidth = Math.max(1.2, u * 0.16);
+      ctx.beginPath();
+      ctx.moveTo(u * 1.1, 0);
+      ctx.lineTo(-u * 0.6, -u * 0.75);
+      ctx.lineTo(-u * 0.2, 0);
+      ctx.lineTo(-u * 0.6, u * 0.75);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   drawBossArrows(camX, camY) {
     const { ctx, canvas } = this;
     const bosses = this.bossTargets();
@@ -3113,7 +3236,7 @@ export class Game {
     if (this.wave.repairShelter(REPAIR_HEAL) === false) this.giveCoins(cost);
   }
 
-  buyAir(kind) {
+  buyAir(kind, route = null) {
     const info = AIR_SUPPORT[kind];
     if (!this.wave || !this.world.apoc || !info) return;
     if (!this.spendCoins(info.cost)) {
@@ -3121,9 +3244,9 @@ export class Game {
       return;
     }
     (this.paidFor ||= {}).air = info.cost;
-    if (this.wave.callAir(kind) === false) {
+    if (this.wave.callAir(kind, String(this.mp?.you ?? 'me'), route) === false) {
       this.giveCoins(info.cost);
-      this.onToast?.('No air support right now: at most 3 aircraft in the sky, and 3 calls per wave.');
+      this.onToast?.('No air support right now: you can call at most 3 carpet bombings and 3 gunships per wave.');
     }
   }
 
@@ -3276,7 +3399,7 @@ export class Game {
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(30,20,30,0.9)';
       ctx.fillStyle = '#ff4d4d';
-      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : m.guardian ? '🌀 GUARDIAN 🌀' : m.miniBoss ? '⚔ MINI BOSS ⚔' : '☠ BOSS ☠';
+      const label = m.nightBoss ? (m.burning ? '🔥 NIGHT BOSS 🔥' : '☠ NIGHT BOSS ☠') : m.guardian ? '🌀 GUARDIAN 🌀' : m.miniBoss || MONSTERS[m.type]?.mini ? '⚔ MINI BOSS ⚔' : '☠ BOSS ☠';
       ctx.strokeText(label, x, top);
       ctx.fillText(label, x, top);
       ctx.restore();
@@ -3311,6 +3434,40 @@ export class Game {
     const x = m.x;
     const y = m.y - 2;
     ctx.save();
+    if (sk.kind === 'spell') {
+      // a spell: a red circle on the ground at each place it will land; it fills up, flashes, then bursts
+      for (const s of sk.spots || []) {
+        const R = sk.R || 26;
+        ctx.save();
+        ctx.translate(s.x, s.y);
+        if (sk.phase === 0) {
+          const flash = sk.prog > 0.7 && Math.sin(this.t * 40) > 0 ? 0.25 : 0;
+          ctx.fillStyle = `rgba(255,30,30,${0.12 + flash})`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, R, R * 0.8, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255,40,40,${0.3 + 0.3 * sk.prog})`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, R * sk.prog, R * 0.8 * sk.prog, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,70,70,0.95)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, R, R * 0.8, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = `rgba(200,110,255,${0.55 * (1 - sk.prog)})`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, R * (1 + 0.3 * sk.prog), R * 0.8 * (1 + 0.3 * sk.prog), 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255,240,255,${0.8 * (1 - sk.prog)})`;
+          ctx.fillRect(-2, -R * 1.3 * (1 - sk.prog), 4, R * 1.3 * (1 - sk.prog));
+        }
+        ctx.restore();
+      }
+      ctx.restore();
+      return;
+    }
     ctx.translate(x, y);
     if (sk.kind === 'dash') {
       const len = 100;
@@ -3402,7 +3559,7 @@ export class Game {
     if (boss || m.skill) this.drawBossSkill(ctx, m, def); // a charge or a spin shows its red warning first
     this.drawMonsterBody(ctx, m);
     if (m.stunT > 0 && m.state !== 'dead') this.combat.drawStun(ctx, m.x, m.y - 24 * (m.scale || def.scale || 1), m.stunColor);
-    if (boss) this.drawBossSlash(ctx, m, def);
+    if (boss && !def.caster) this.drawBossSlash(ctx, m, def); // (a wizard casts instead of slashing)
   }
 
   // a beach crab: the crab sheet (red or blue, 32x16 frames), scuttling sideways, and a small health bar once it is hurt
@@ -3756,7 +3913,47 @@ export class Game {
 
   // the aircraft: a shadow on the ground and the helicopter high above it (the bomber's sweep, or the gunship's circle)
   drawAir(ctx, air) {
+    if (air.kind === 'drone' || air.kind === 'helix') {
+      // the small drones: 16x32 frames, the rotor loop (drone: frames 12-14, Helix: 21-23)
+      const heli = air.kind === 'helix';
+      const sheet = this.img[heli ? 'fx/helix' : 'fx/drone1'];
+      if (!sheet) return;
+      const f = (heli ? 20 : 11) + (Math.floor(this.t * 14) % 3);
+      const k = heli ? 2 : 1.8;
+      const alt = 40 + Math.sin(this.t * 3 + air.x) * 2;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath();
+      ctx.ellipse(Math.round(air.x), Math.round(air.y + 3), 7, 2.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(sheet, f * 16, 0, 16, 32, Math.round(air.x - 8 * k), Math.round(air.y - alt - 24 * k + 8), 16 * k, 32 * k);
+      if (air.firing && Math.sin(this.t * 60) > -0.2) {
+        ctx.fillStyle = '#ffe9a0';
+        ctx.fillRect(Math.round(air.x) - 1, Math.round(air.y - alt + 6), 3, 3);
+      }
+      ctx.restore();
+      return;
+    }
     const [theme, name, k] = air.kind === 'gunship' ? ['military', 'Helicopter', 0.55] : ['vehicles', 'Helicopter_2', 0.95];
+    {
+      // the gunship and the bomber are the helicopter with the rotor turning
+      const right = (air.kind === 'gunship' ? -Math.sin(air.ang) : Math.cos(air.ang)) >= 0;
+      const alt0 = 64 + Math.sin(this.t * 3) * 1.5;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(Math.round(air.x), Math.round(air.y + 4), air.kind === 'gunship' ? 24 : 30, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (this.drawHeli(ctx, air.x, air.y - alt0, right, this.t + air.x * 0.01, air.kind === 'gunship' ? 0.55 : 0.7)) {
+        if (air.firing && Math.sin(this.t * 60) > -0.2) {
+          ctx.fillStyle = '#ffe9a0';
+          ctx.fillRect(Math.round(air.x + (right ? 30 : -33)), Math.round(air.y - alt0 + 18), 4, 3);
+        }
+        ctx.restore();
+        return;
+      }
+      ctx.restore();
+    }
     const sp = loadedThemes.get(theme)?.byName.get(name);
     const im = this.img[`v2/${theme}`];
     if (!sp || !im) return;
@@ -3903,15 +4100,36 @@ export class Game {
   }
 
   // enemy shots, the house's health, and a ghost of the barricade you are about to place
+  // the shelter burns when it is badly hurt: more flames the lower its health, along the roof
+  drawShelterFire(ctx) {
+    const w = this.wave;
+    if (!w || !this.world.apoc || !w.sprite || !(w.baseMax > 0) || w.baseHp <= 0) return;
+    const frac = w.baseHp / w.baseMax;
+    if (frac > 0.4) return;
+    const n = Math.min(6, 1 + Math.floor((0.4 - frac) / 0.07));
+    const sp = w.sprite;
+    const sizes = { 1: [16, 16], 2: [16, 16], 3: [32, 16], 4: [32, 16], 5: [32, 32], 6: [48, 32] };
+    for (let i = 0; i < n; i++) {
+      const which = [5, 1, 3, 2, 4, 6][i];
+      const f = this.img[`fx/flame${which}`];
+      if (!f) continue;
+      const [fw, fh] = sizes[which];
+      const x = sp.x + ((i + 0.5) / n) * sp.w;
+      const y = sp.y + sp.h * 0.45 + (i % 2) * 6;
+      ctx.drawImage(f, (Math.floor(this.t * 10 + i * 2) % 5) * fw, 0, fw, fh, Math.round(x - fw / 2), Math.round(y - fh), fw, fh);
+    }
+  }
+
   drawWaveExtras(ctx) {
     const w = this.wave;
     this.ghostWhy = null;
+    this.drawShelterFire(ctx);
     for (const s of w.shots) {
       if (s.arrow && this.img[`tiny/arrow${s.arrow}`]) {
         // an archer's arrow, with a pale streak behind it so it can be seen
         ctx.save();
         ctx.translate(Math.round(s.x), Math.round(s.y));
-        ctx.rotate(s.ang || 0);
+        ctx.rotate(s.vx !== undefined ? Math.atan2(s.vy, s.vx) : s.ang || 0);
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.fillRect(-30, -0.5, 24, 1.5);
         ctx.shadowColor = 'rgba(20,10,0,0.95)';
@@ -4096,7 +4314,7 @@ export class Game {
       this.duelTp = null;
       this.endDuelEvent(m);
     } else if (m.t === 'goalscore' && this.soccer) {
-      this.soccer.goals = [0, 1, 2].map((i) => Number(m.goals?.[i]) || 0);
+      this.soccer.goals = [0, 1, 2, 3].map((i) => Number(m.goals?.[i]) || 0);
       this.soccer.sudden = !!m.sudden;
       if (m.rumble) this.rumbleGoal(m);
       else if (m.nothing) this.onToast?.(m.nothing === 'own' ? '🙈 Own goal: it does not count!' : 'No goal: nobody touched the ball last.');
@@ -4284,7 +4502,7 @@ export class Game {
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
       const at = this.inside ? this.inside.out : p; // indoors you are not in the world: friends just stop seeing you
-      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating, mt: this.mount?.type || (this.boat ? 'boat' : this.boatPass ? 'boatp' : ''), pet: this.pets.netState() });
+      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating || !!this.dead, mt: this.mount?.type || (this.boat ? 'boat' : this.boatPass ? 'boatp' : ''), pet: this.pets.netState() });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -4435,7 +4653,21 @@ export class Game {
   // `who` is 'bot' for a computer rival, who never goes indoors; you may only enter your own house
   blocked(x, y, who) {
     // heroes can wade through water, so only trees, walls and the like stop them
-    if (this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true)) return true;
+    if (this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true, !who && !!this.wave)) return true;
+    if (!who && this.wave && this.wave.center && this.world.extraRects.length) {
+      // the shelter's barricades: you walk in through them freely, but going out they stop you (the gate is the way out)
+      const l = x - FOOT_W / 2;
+      const t = y - FOOT_H;
+      for (const r of this.world.extraRects) {
+        if (l < r.x + r.w && l + FOOT_W > r.x && t < r.y + r.h && t + FOOT_H > r.y) {
+          const c = this.wave.center;
+          const now = Math.hypot(this.player.x - c.x, this.player.y - c.y);
+          const next = Math.hypot(x - c.x, y - c.y);
+          if (next >= now - 1e-6) return true; // not towards the shelter: blocked
+          break;
+        }
+      }
+    }
     if (this.boat) {
       const tx = Math.floor(x / T);
       const ty = Math.floor((y - 2) / T);
@@ -4459,6 +4691,19 @@ export class Game {
 
   update(dt) {
     const p = this.player;
+    if (this.travelling) {
+      // on the road: the controls rest, and when the trip is over the next place begins
+      this.keys.clear();
+      this.mouseHeld = { 0: false, 2: false };
+      this.combat?.cancelHold();
+      this.travelling.t += dt;
+      if (this.travelling.t >= this.travelling.dur && !this.travelDone) {
+        this.travelDone = true;
+        const d = this.saveData();
+        Object.assign(d, { x: undefined, y: undefined, home: undefined, inside: false, hour: undefined, day: undefined, felled: [], collected: [], houseDrops: [], treasures: 0, foraged: 0 });
+        this.onTravel?.({ seed: this.travelling.seed, carry: JSON.parse(JSON.stringify(d)), shelter: this.travelling.shelter });
+      }
+    }
     if (this.cutscene) this.driveCutscene(dt);
     if (this.stunnedT > 0) {
       this.stunnedT -= dt;
@@ -4486,7 +4731,7 @@ export class Game {
         else this.seatUpdate(dt);
       }
       if (this.boatPass) this.passengerUpdate(dt);
-      const still = this.dead || this.celeb || this.fade || !!this.seat || !!this.boatPass;
+      const still = (this.dead && this.duelActive()) || this.celeb || this.fade || !!this.seat || !!this.boatPass; // (downed: you drift about as a ghost until you are back on your feet, except in a duel)
       let dx = still ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
       let dy = still ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
       const dashing = !!this.combat.dash; // the dash moves the hero itself
@@ -4583,7 +4828,7 @@ export class Game {
       // while downed, the camera drifts over to whoever did it
       // and when a round is won, over to the winner
       const watching = this.duelActive() && (this.spectating || this.dead || this.camWatch) && !this.celeb; // in a duel the ones who watch (or are out) follow the fight
-      const focus = this.boarded && this.chopper ? { x: this.chopper.x, y: this.chopper.y } : watching ? this.duelPoint(this.camWatch?.id) : this.dead ? this.killerPoint() || { x: p.x, y: p.y } : this.celeb ? this.celebPoint() || p : p;
+      const focus = this.boarded && this.chopper ? { x: this.chopper.x, y: this.chopper.y } : watching ? this.duelPoint(this.camWatch?.id) : this.dead && this.duelActive() ? this.killerPoint() || { x: p.x, y: p.y } : this.celeb ? this.celebPoint() || p : p;
       const k = 1 - Math.exp(-dt * (this.dead || this.celeb || watching ? 3.5 : 9));
       this.cam.x += (focus.x - this.cam.x) * k;
       this.cam.y += (focus.y - 10 - this.cam.y) * k;
@@ -4732,6 +4977,7 @@ export class Game {
       nextDuel: this.nextDuelHud(),
       marks: this.duelMarks(),
       wave: this.wave?.hudState() || null,
+      travel: this.travelling ? { vehicle: this.travelling.vehicle, destName: this.travelling.destName, left: Math.max(0, this.travelling.dur - this.travelling.t), dur: this.travelling.dur, wave: this.travelling.wave } : null,
       fight: this.bots?.scoreboard() || null,
       duel: this.duelHud(),
       upg: this.upgrades,
@@ -4829,6 +5075,8 @@ export class Game {
       this.boardBoat(best.boat);
     } else if (this.interactPressed && best?.inter === 'seesaw') {
       this.sitSeesaw(best);
+    } else if (this.interactPressed && best?.inter === 'portal') {
+      this.usePortal(best);
     } else if (this.interactPressed && best?.inter === 'chest') {
       this.burstChest(best);
     } else if (this.interactPressed && best) {
@@ -6301,7 +6549,7 @@ export class Game {
         }
         case 'goalnet': {
           // a goal: posts at the mouth, a back and sides of net, in the colour of the team that guards it
-          const col = o.team === 0 ? '232,80,106' : o.team === 2 ? '79,191,106' : '74,155,232';
+          const col = o.team === 0 ? '232,80,106' : o.team === 2 ? '79,191,106' : o.team === 3 ? '232,192,64' : '74,155,232';
           ctx.save();
           ctx.fillStyle = `rgba(${col},0.16)`;
           ctx.fillRect(o.gx, o.gy, o.w, o.h);
@@ -6317,9 +6565,9 @@ export class Game {
             ctx.lineTo(o.gx + o.w, o.gy + k);
           }
           ctx.stroke();
-          if (o.top) {
-            // (the top goal opens downwards: the posts stand at its left and right ends)
-            const mouthY = o.gy + o.h;
+          if (o.top || o.bottom) {
+            // (the top goal opens downwards, the bottom one upwards: the posts stand at its left and right ends)
+            const mouthY = o.top ? o.gy + o.h : o.gy;
             ctx.fillStyle = '#fff';
             ctx.fillRect(o.gx - 4, mouthY - 2, 9, 4);
             ctx.fillRect(o.gx + o.w - 4, mouthY - 2, 9, 4);
@@ -6410,6 +6658,12 @@ export class Game {
         case 'bush':
           if (img[o.sheet]) ctx.drawImage(img[o.sheet], Math.round(o.x - o.sw / 2), Math.round(o.y - 3 - o.sh));
           break;
+        case 'portal': {
+          // the haunted door with its green swirl (23 frames of 64x64)
+          const sheet = img['fx/portal'];
+          if (sheet) ctx.drawImage(sheet, (Math.floor(this.t * 8) % 23) * 64, 0, 64, 64, Math.round(o.x - 32), Math.round(o.y - 58), 64, 64);
+          break;
+        }
         case 'seesaw': {
           const sheet = img[`critters/seesaw${o.v}`];
           if (sheet) ctx.drawImage(sheet, (Math.floor(this.seesawPhase(o)) % 8) * 48, 0, 48, 32, Math.round(o.x - 24), Math.round(o.by - 32), 48, 32);
@@ -6479,6 +6733,7 @@ export class Game {
           // blink while recovering from a hit
           if (this.dead) {
             this.drawGrave(ctx, this.dead.x, this.dead.y);
+            this.drawGhost(ctx, this.player.x, this.player.y, this.player.dir);
             break;
           }
           if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
@@ -6566,6 +6821,7 @@ export class Game {
       this.drawRideHint(camX, camY);
       this.drawPeers(camX, camY);
       this.drawBossArrows(camX, camY);
+      this.drawZombieArrows(camX, camY);
       this.drawKillerHighlight(camX, camY);
       this.crowd?.drawBubbles(camX, camY);
       this.drawGoalConfetti();

@@ -10,12 +10,14 @@ import ItemIcon from './ItemIcon';
 import SellPanel from './SellPanel';
 import PetShop from './PetShop';
 import RarityTabs from './RarityTabs';
+import AirRoutePicker from './AirRoutePicker';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
 export default function UpgradePanel({ hud, game, onClose, inventory = [], survival = false }) {
   const team = hud.wave?.allies || 0;
   const cap = hud.wave?.teamCap ?? teamCap(hud.wave?.baseLevel || 0);
   const [tab, setTab] = useState('shelter');
+  const [route, setRoute] = useState(false); // planning a carpet bombing run
   const tabs = survival
     ? [['shelter', '🏚️ Shelter & Stats'], ['defense', '🧱 Barricades & Grenades'], ['melee', '⚔️ Weapons'], ['guns', '🔫 Guns'], ['people', '🧑‍🤝‍🧑 Backup'], ['air', '✈️ Air support'], ['pets', '🐾 Pets'], ['sell', '💰 Sell']]
     : [['shelter', '📊 Upgrades'], ['defense', '🧱 Barricades & Grenades'], ['people', '🪙 Helpers'], ['sell', '💰 Sell']];
@@ -107,18 +109,20 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
 
         {tab === 'air' && survival && (
           <div className="recruit-note">
-            <b>✈️ Air support</b> (3 aircraft in the sky at once, and 3 calls per wave for the whole team)
-            <p className="sell-empty">Called this wave: {hud.wave?.airUsed ?? 0} / {hud.wave?.airMax ?? 3}{hud.wave?.air > 0 ? ` · ${hud.wave.air} in the sky right now` : ''}</p>
+            <b>✈️ Air support</b> (every player can call 3 of each kind per wave: they are counted for you, not for the whole team)
+            <p className="sell-empty">You called this wave: 💣 {hud.wave?.airMine?.carpet ?? 0} · 🚁 {hud.wave?.airMine?.gunship ?? 0} · 🛸 {hud.wave?.airMine?.drone ?? 0} · 🚁 Helix {hud.wave?.airMine?.helix ?? 0} (of {hud.wave?.airMax ?? 3} each){hud.wave?.air > 0 ? ` · ${hud.wave.air} in the sky right now` : ''}</p>
             <div className="recruit-list">
               {Object.entries(AIR_SUPPORT).map(([kind, a]) => (
                 <div key={kind} className="recruit-chip hire rar rar-epic">
                   <span><b>{a.icon} {a.name}</b><small>{a.blurb}</small></span>
-                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airUsed ?? 0) >= (hud.wave?.airMax ?? 3) || (hud.wave?.air ?? 0) >= 3} onClick={() => game.buyAir(kind)}>🪙 {a.cost}</button>
+                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airMine?.[kind] ?? 0) >= (hud.wave?.airMax ?? 3)} onClick={() => (kind === 'carpet' ? setRoute(true) : game.buyAir(kind))}>{kind === 'carpet' ? '🧭 Plan the run · ' : ''}🪙 {a.cost}</button>
                 </div>
               ))}
             </div>
           </div>
         )}
+
+        {route && <AirRoutePicker cost={AIR_SUPPORT.carpet.cost} onCancel={() => setRoute(false)} onConfirm={(r) => { setRoute(false); game.buyAir('carpet', r); }} />}
 
         {tab === 'defense' && <div className="recruit-note">
           <b>🧱 Barricades</b> (a barricade you set down stays put until zombies destroy it)
@@ -148,29 +152,24 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
 
         {tab === 'melee' && survival && hud.weapons && (
           <div className="recruit-note">
-            <b>⚔️ Weapons</b> (swords have their own tricks; you start with the baseball bat)
+            <b>⚔️ Weapons</b> (swords have their own tricks; you start with the baseball bat, in the Common list)
             <div className="recruit-list">
-              <div className="recruit-chip hire">
-                <span><b>⚾ Baseball bat</b><small>Your trusty starter.</small></span>
-                <button className="btn go small-btn" disabled={hud.weapons.equipped === 'trusty'} onClick={() => game.buyMelee('bat')}>
-                  {hud.weapons.equipped === 'trusty' ? 'Equipped' : 'Equip'}
-                </button>
-              </div>
-              <RarityTabs items={WEAPONS.filter((w) => w.id !== 'trusty')} rarity={weaponRarity}>{(list) => (<>
+              <RarityTabs items={WEAPONS} rarity={weaponRarity} owned={(w) => w.id !== 'trusty' && !!hud.weapons.owned?.[w.id]}>{(list) => (<>
               {list.map((w) => {
-                const have = !!hud.weapons.owned?.[w.id];
+                const starter = w.id === 'trusty'; // (the baseball bat: always yours, and it is in the Common list like the rest)
+                const have = starter || !!hud.weapons.owned?.[w.id];
                 const on = hud.weapons.equipped === w.id;
                 return (
                   <div key={w.id} className={`recruit-chip hire rar rar-${weaponRarity(w)}`}>
                     <span>
-                      <b><i className="wicon small" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(w)}.png)` }} /> {w.name}</b>
-                      <small>{EFFECTS[w.effect].name}: {EFFECTS[w.effect].desc} · 💥 {(2 + w.dmg + (hud.upg?.melee || 0)).toFixed(1)} · ⏱ {swingTime(w, 0).toFixed(2)}s</small>
+                      <b>{starter ? '⚾ Baseball bat' : <><i className="wicon small" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(w)}.png)` }} /> {w.name}</>}</b>
+                      <small>{starter ? 'Your trusty starter.' : `${EFFECTS[w.effect].name}: ${EFFECTS[w.effect].desc}`} · 💥 {(2 + w.dmg + (hud.upg?.melee || 0)).toFixed(1)} · ⏱ {swingTime(w, 0).toFixed(2)}s</small>
                     </span>
                     <span className="row-btns">
-                      <button className="btn go small-btn" disabled={on || (!have && hud.coins < w.cost)} onClick={() => game.buyMelee(w.id)}>
+                      <button className="btn go small-btn" disabled={on || (!have && hud.coins < w.cost)} onClick={() => game.buyMelee(starter ? 'bat' : w.id)}>
                         {on ? 'Equipped' : have ? 'Equip' : `Buy 🪙 ${w.cost}`}
                       </button>
-                      {have && <button className="btn small-btn" onClick={() => game.sell('weapon', w.id)}>Sell 🪙 {sellPrice(w.cost)}</button>}
+                      {have && !starter && <button className="btn small-btn" onClick={() => game.sell('weapon', w.id)}>Sell 🪙 {sellPrice(w.cost)}</button>}
                     </span>
                   </div>
                 );
@@ -184,7 +183,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
           <div className="recruit-note">
             <b>🔫 Guns</b> (the pistol is free; switch with R or the slot beside the hotbar). Every gun you own can be upgraded: a bigger magazine and more firepower.
             <div className="recruit-list">
-              <RarityTabs items={GUN_ORDER} rarity={(id) => gunRarity(GUNS[id].price)}>{(list) => (<>
+              <RarityTabs items={GUN_ORDER} rarity={(id) => gunRarity(GUNS[id].price)} owned={(id) => id !== 'pistol' && !!hud.gunsOwned[id]}>{(list) => (<>
               {list.map((id) => {
                 const g = GUNS[id];
                 const have = !!hud.gunsOwned[id];

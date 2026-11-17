@@ -30,7 +30,7 @@ export class Crowd {
       for (let row = 0; row < 2; row++) {
         for (let x = -W + 12 + row * 11; x < W - 6; x += 23) {
           const j = (hash2(Math.round(x), row * 3 + (sy + 2), seed + 9101) - 0.5) * 6;
-          add(x + j, sy * (H + 34 + row * 17), dir, rumble && sy < 0 && Math.abs(x) < 120 ? 2 : x < 0 ? 0 : 1);
+          add(x + j, sy * (H + 34 + row * 17), dir, rumble && Math.abs(x) < 120 ? (sy < 0 ? 2 : 3) : x < 0 ? 0 : 1);
         }
       }
     }
@@ -41,9 +41,12 @@ export class Crowd {
       }
     }
     if (rumble) {
-      // behind the top goal, too (the third team's fans)
+      // behind the top goal, too (the third team fans), and the bottom one (the fourth team fans)
       for (let col = 0; col < 2; col++) {
-        for (let x = -44; x <= 44; x += 22) add(x + col * 9, -(H + (GOAL_D + 2) * T + col * 17), 'down', 2);
+        for (let x = -44; x <= 44; x += 22) {
+          add(x + col * 9, -(H + (GOAL_D + 2) * T + col * 17), 'down', 2);
+          add(x + col * 9, H + (GOAL_D + 2) * T + col * 17, 'up', 3);
+        }
       }
     }
     // (nobody stands on the field or in a goal)

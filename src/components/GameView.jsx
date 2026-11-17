@@ -8,6 +8,9 @@ import MonsterIcon from './MonsterIcon';
 import Bestiary from './Bestiary';
 import { TEAMS } from '../game/teams';
 import IntroScene from './IntroScene';
+import OpeningScene from './OpeningScene';
+import EvacScene from './EvacScene';
+import GameOverScene from './GameOverScene';
 import OnlinePlayers from './OnlinePlayers';
 import { sfx } from '../game/sfx';
 import { INVIS_CD, WIND_CD } from '../game/combat';
@@ -22,6 +25,8 @@ import UnlockCards from './UnlockCards';
 import QtyPicker from './QtyPicker';
 import RoomSettings, { Switch, WAVE_START } from './RoomSettings';
 import BetPanel from './BetPanel';
+import { RunBoard } from './Leaderboard';
+import { endlessKey, submitScore, survKey } from '../game/leaderboard';
 import CompassPanel from './CompassPanel';
 import { WAVE_COUNTS } from '../game/monsters';
 import TouchControls from './TouchControls';
@@ -231,7 +236,7 @@ function Meter({ icon, label, value, tone, text }) {
   );
 }
 
-export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom, training = false, preview = false, trainingMap, onTrainingMap, onTrainingHero }) {
+export default function GameView({ assets, profile, net, session, onExit, onRoundWon, onJoinRoom, training = false, preview = false, trainingMap, onTrainingMap, onTrainingHero, travel = null, onTravel }) {
   const canvasRef = useRef(null);
   const miniRef = useRef(null);
   const gameRef = useRef(null);
@@ -248,14 +253,33 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [toast, setToast] = useState(null);
   const [paused, setPaused] = useState(false);
   // the opening scene: 'play' (watching), 'wait' (finished or skipped; in a room, waiting for the others), 'out' (fading away), 'done'
-  const [intro, setIntro] = useState(() => (training || new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
+  const [intro, setIntro] = useState(() => (training || travel || new URLSearchParams(window.location.search).has('nointro') ? 'done' : 'play'));
   const introRef = useRef(intro);
+  // a new Survival game opens with a short film (the beach concert, or the hospital) before the story at the shelter
+  const [opening, setOpening] = useState(() => survival && !training && !preview && !travel && !session?.keepSave && !session?.autoStart && !new URLSearchParams(window.location.search).has('nointro'));
+  const openingRef = useRef(opening);
   // background music: the opening scene, the end of a round or the game over screen, otherwise the tune of the map
   const endKind = hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') ? hud.wave.phase : hud.celeb ? 'round' : null;
   const tune = endKind === 'defeat' ? 'gameover' : endKind ? 'ending' : intro === 'play' || intro === 'wait' ? 'intro' : themeForSeed(profile.seed);
   useEffect(() => {
     music.play(tune);
   }, [tune]);
+  useEffect(() => {
+    const w = hud.wave;
+    if (!survival || preview || training || !w || lbSent.current) return;
+    const win = w.phase === 'victory' && !w.endless;
+    const lose = w.phase === 'defeat' && w.endless;
+    if (!win && !lose) return;
+    lbSent.current = true;
+    const category = win ? survKey(w.total, difficulty) : endlessKey(difficulty);
+    if (!(w.elapsed > 0)) return;
+    submitScore({ category, name: profile.name, score: w.elapsed, detail: { players: 1 + peers.length, wave: w.wave } }).then((res) => setLbRes({ category, ...res }), () => {});
+  }, [hud.wave?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Survival leaderboards: a finished run is sent to the board by itself; "Continue" then shows where it landed (if it made the top ten)
+  const [evacDone, setEvacDone] = useState(false); // the helicopter film after a won Survival run, then the summary
+  const lbSent = useRef(false);
+  const [lbRes, setLbRes] = useState(null);
+  const [lbShow, setLbShow] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [roomPause, setRoomPause] = useState(null); // set while the host has the room paused: { by }
   const [hostId, setHostId] = useState(session?.host ?? null);
@@ -265,6 +289,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [roomSetOpen, setRoomSetOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false); // phones: the stats panel slides in from the left
   const [hudOff, setHudOff] = useState(() => { try { return window.localStorage.getItem('cuzy-hud-off') === '1'; } catch { return false; } }); // phones: hide all the info panels
+  const [minBar, setMinBar] = useState(false); // the duel bar and the get-ready card can be shrunk to a small button
+  const [minReady, setMinReady] = useState(false);
   const [topFold, setTopFold] = useState(false); // phones: fold the scoreboard, duel and bet panels away
   const toggleHud = () => setHudOff((o) => { const n = !o; try { window.localStorage.setItem('cuzy-hud-off', n ? '1' : '0'); } catch { /* private window */ } return n; });
   const [hudMenuOpen, setHudMenuOpen] = useState(false); // phones: the buttons down the right edge fold away
@@ -423,6 +449,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           return (s + dir + 9) % 9;
         }),
       onToast: pushToast,
+      carry: travel?.carry || null,
+      shelter: travel?.shelter || null,
+      onTravel: (t) => onTravel?.(t),
     });
     gameRef.current = game;
     game.touchMode = getControls() === 'mobile';
@@ -433,10 +462,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     if (training) {
       game.cheats = true; // (God mode starts off, so lava, monsters and grenades can actually hurt you; switch it on in the training panel)
     }
-    game.frozen = introRef.current === 'wait';
+    game.frozen = introRef.current === 'wait' || openingRef.current; // (the world waits while the opening film plays)
     game.start();
     // the story plays out on the real map: the hero walks to the door by itself (a resumed game has no story: straight in)
-    if (introRef.current === 'play' && !game.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0);
+    if (introRef.current === 'play' && !openingRef.current && !game.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0);
     };
     // a V2 world draws sprites from the Modern Exteriors atlases: they are loaded before the game begins
     if (isV2Seed(profile.seed) || isEscapeSeed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) || isEscapeSeed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
@@ -528,6 +557,15 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   pauseRef.current = togglePause;
 
   const finishIntroRef = useRef(null);
+  const finishOpening = () => {
+    openingRef.current = false;
+    setOpening(false);
+    const g = gameRef.current;
+    if (g) {
+      g.frozen = introRef.current === 'wait';
+      if (introRef.current === 'play' && !g.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0); // (then the story at the shelter, as before)
+    }
+  };
   const finishIntro = () => {
     if (session) {
       net.send({ t: 'ready' });
@@ -944,7 +982,37 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {waves && hud.wave && <ShelterBar w={hud.wave} survival={survival} withRoom={!!session} />}
       {waves && hud.wave && <WaveHud w={hud.wave} difficulty={live?.difficulty || difficulty} withRoom={!!session} survival={survival} isHost={session ? isHost : true} onStart={() => gameRef.current?.pressStartWave()} />}
-      {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && (
+      {survival && hud.wave?.phase === 'defeat' && (
+        <GameOverScene
+          assets={assets}
+          hero={profile.hero}
+          name={profile.name}
+          stats={[
+            hud.wave.endless
+              ? { icon: '⏱️', label: 'Survived', value: hud.wave.elapsed, text: formatSurvived }
+              : { icon: '🌊', label: 'Wave reached', value: hud.wave.wave, text: (n) => `${n} / ${hud.wave.total}` },
+            { icon: '💀', label: 'Monsters defeated', value: hud.kills || 0 },
+            { icon: '⭐', label: 'Your level', value: hud.level || 1 },
+            { icon: '🪙', label: 'Coins left', value: hud.coins || 0 },
+            { icon: '☀️', label: 'Days survived', value: hud.day || 1 },
+          ]}
+          board={Object.entries(hud.wave.kills || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([id, n]) => {
+              const me = id === String(session?.you ?? 'me');
+              return { name: id === 'ally' ? '🤝 Helpers' : me ? profile.name : peers.find((p) => String(p.id) === id)?.name || 'Survivor', n, me };
+            })}
+          boardTitle="💀 Most monsters defeated"
+          continueLabel={session ? 'Back to the room' : 'Back to the menu'}
+          onContinue={() => {
+            const go = () => (session ? net.send({ t: 'tolobby' }) : onExit());
+            if (lbRes?.myId) setLbShow({ go }); // (a new spot on the board: it is shown for a few seconds first)
+            else go();
+          }}
+        />
+      )}
+      {survival && hud.wave?.phase === 'victory' && !evacDone && <EvacScene assets={assets} heroes={[profile.hero, ...peers.map((p) => p.hero).filter(Boolean)]} onDone={() => setEvacDone(true)} />}
+      {waves && hud.wave && (hud.wave.phase === 'victory' || hud.wave.phase === 'defeat') && !(survival && (hud.wave.phase === 'defeat' || !evacDone)) && (
         <EndingScene
           kind={hud.wave.phase}
           survival={survival}
@@ -968,9 +1036,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             })}
           boardTitle="💀 Most monsters defeated"
           continueLabel={session ? 'Back to the room' : 'Back to the menu'}
-          onContinue={() => (session ? net.send({ t: 'tolobby' }) : onExit())}
+          onContinue={() => {
+            const go = () => (session ? net.send({ t: 'tolobby' }) : onExit());
+            if (lbRes?.myId) setLbShow({ go }); // (a new spot on the board: it is shown for a few seconds first)
+            else go();
+          }}
         />
       )}
+      {lbShow && lbRes && <RunBoard category={lbRes.category} rows={lbRes.rows} mineId={lbRes.myId} onDone={lbShow.go} />}
       {hud.dead && (
         <div className="death-overlay">
           <div className="death-card panel">
@@ -996,11 +1069,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       {mobile && <button type="button" className="top-fold" onClick={() => setTopFold((f) => !f)}>{topFold ? '▸ Show the match panels' : '▾ Hide the match panels'}</button>}
       {hud.soccer?.rumble && (
         <div className="soccer-bar rumble panel small">
-          {[0, 1, 2].map((t) => (
-            <span key={t} className={`sb-team ${hud.soccer.out.includes(t) ? 'out' : ''} ${hud.soccer.team === t ? 'me' : ''}`} style={{ color: ['#e8506a', '#4a9be8', '#4fbf6a'][t] }}>{['🔴', '🔵', '🟢'][t]} {hud.soccer.goals[t]}<small>/{hud.soccer.target}</small></span>
+          {[0, 1, 2, 3].map((t) => (
+            <span key={t} className={`sb-team ${hud.soccer.out.includes(t) ? 'out' : ''} ${hud.soccer.team === t ? 'me' : ''}`} style={{ color: ['#e8506a', '#4a9be8', '#4fbf6a', '#e8c040'][t] }}>{['🔴', '🔵', '🟢', '🟡'][t]} {hud.soccer.goals[t]}<small>/{hud.soccer.target}</small></span>
           ))}
           <span className="sb-mid"><b>{hud.soccer.left !== null ? `${Math.floor(hud.soccer.left / 60)}:${String(Math.floor(hud.soccer.left % 60)).padStart(2, '0')}` : '⚽'}</b><small>{hud.soccer.sudden ? 'next goal wins!' : 'most goals wins'}</small></span>
-          <small className="sb-you">You are {['🔴 red · defend the left goal', '🔵 blue · defend the right goal', '🟢 green · defend the top goal'][hud.soccer.team] || ''} · score in the others</small>
+          <small className="sb-you">You are {['🔴 red · defend the left goal', '🔵 blue · defend the right goal', '🟢 green · defend the top goal', '🟡 yellow · defend the bottom goal'][hud.soccer.team] || ''} · score in the others</small>
         </div>
       )}
       {hud.soccer && !hud.soccer.rumble && (
@@ -1011,8 +1084,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <small className="sb-you">You are {hud.soccer.team === 0 ? '🔴 red · attack right ➜' : '🔵 blue · ⬅ attack left'}</small>
         </div>
       )}
-      {hud.duel && (
+      {hud.duel && minBar && <button type="button" className="btn small-btn dm-open" onClick={() => setMinBar(false)}>⚔️ {hud.duel.left === null ? (hud.duel.call !== null ? `Fight in ${hud.duel.call}s` : 'Duel') : `${Math.floor(hud.duel.left / 60)}:${String(Math.floor(hud.duel.left % 60)).padStart(2, '0')}`} ▾</button>}
+      {hud.duel && !minBar && (
         <div className="duel-bar panel small">
+          <button type="button" className="btn small-btn dm-min" onClick={() => setMinBar(true)} aria-label="Minimize" title="Minimize">—</button>
           <div className="duel-mid">
             <b className={hud.duel.left !== null && hud.duel.left <= 10 ? 'low' : ''}>{hud.duel.left === null ? (hud.duel.call !== null ? `⚔️ Fight in ${hud.duel.call}s` : '⏱ …') : `⏱ ${Math.floor(hud.duel.left / 60)}:${String(Math.floor(hud.duel.left % 60)).padStart(2, '0')}`}</b>
             <small>{hud.duel.fighting ? (hud.duel.out ? '☠ You are out: watching' : '⚔️ You are fighting') : hud.duel.watching ? '👁 You are watching' : '🌾 Farming'}{hud.duel.bets > 0 ? ` · 🎲 ${hud.duel.bets} bet${hud.duel.bets === 1 ? '' : 's'}` : ''}</small>
@@ -1034,8 +1109,10 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {hud.duel?.prep && (
+      {hud.duel?.prep && minReady && <button type="button" className="btn go small-btn dm-open dm-ready" disabled={hud.duel.prep.mine} onClick={() => (hud.duel.prep.mine ? setMinReady(false) : gameRef.current?.duelReady())}>{hud.duel.prep.mine ? '⏳ Waiting…' : '✅ Ready'}</button>}
+      {hud.duel?.prep && !minReady && (
         <div className="duel-ready panel small">
+          <button type="button" className="btn small-btn dm-min" onClick={() => setMinReady(true)} aria-label="Minimize" title="Minimize">—</button>
           <b>⚔️ Get ready: the duel starts in {hud.duel.call}s</b>
           <small>Buy anything you want in the shop (B), then press Ready. It starts at once when every fighter is ready.</small>
           <div className="dr-who">{hud.duel.prep.who.map((w) => <span key={w.id} className={w.ready ? 'on' : ''}>{w.ready ? '✅' : '⏳'} {w.name}</span>)}</div>
@@ -1199,7 +1276,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {mapOpen && <MapPanel game={gameRef.current} onClose={() => setMapOpen(false)} />}
       {toast && <div className="toast panel small">✨ {toast}</div>}
-      {intro === 'play' && <IntroScene kind={survival ? 'survival' : mode === 'waves' ? 'waves' : 'free'} name={profile.name} hero={profile.hero} assets={assets} fight={pvp || Number(profile.bots) > 0} onDone={finishIntro} />}
+      {opening && <OpeningScene assets={assets} hero={profile.hero} onDone={finishOpening} />}
+      {intro === 'play' && !opening && <IntroScene kind={survival ? 'survival' : mode === 'waves' ? 'waves' : 'free'} name={profile.name} hero={profile.hero} assets={assets} fight={pvp || Number(profile.bots) > 0} onDone={finishIntro} />}
       {intro === 'wait' && (
         <div className="intro-wait" role="status">
           <div><span className="splash-dot" /> Gathering acorns…</div>
@@ -1278,6 +1356,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               {(session ? isHost : true) && <button className="btn" onClick={() => { setPaused(false); setRoomSetOpen(true); }}>⚙️ {session ? 'Room settings' : 'Game rules'}</button>}
               {session && <button className="btn" onClick={() => { setPaused(false); pauseRef.current(); }} title="The host pauses the game for everyone">⏸ Pause <kbd>P</kbd></button>}
               {isHost && !roomPause && <button className="btn" onClick={() => { net.send({ t: 'pause', on: true }); setPaused(false); }}>⏸ Pause for everyone</button>}
+              <button className="btn" onClick={() => {
+                let shot = null;
+                try { shot = canvasRef.current?.toDataURL('image/png'); } catch { /* no picture */ }
+                window.dispatchEvent(new CustomEvent('cuzy-feedback', { detail: { shot, context: { seed: profile.seed, mode: profile.mode, room: session?.room?.code || null, difficulty: profile.difficulty } } }));
+              }} title="Report a bug, ask for a feature or make a suggestion (a picture of the game is added)">💬 Feedback</button>
             </div>
             <div className="pause-b">
               <h3 className="settings-h">⚙ Settings</h3>
@@ -1290,6 +1373,18 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
               <button className="btn" onClick={() => setConfirm('quit')}>🚪 Quit</button>
               <button className="btn ghost" onClick={() => setConfirm('reset')}>↺ Reset this world</button>
             </div>
+          </div>
+        </div>
+      )}
+      {hud.travel && (
+        <div className="travel-overlay" role="status">
+          <div className="travel-card">
+            <h2>🧭 Wave {hud.travel.wave} cleared!</h2>
+            <p>{{ boat: '⛵ The team sails', helicopter: '🚁 The team flies', rv: '🚐 The team drives the RV', car: '🚙 The team drives' }[hud.travel.vehicle] || 'The team travels'} to <b>{hud.travel.destName}</b>…</p>
+            <div className={`travel-road ${hud.travel.vehicle}`}>
+              <span className="travel-ride" style={{ left: `${Math.min(100, (1 - hud.travel.left / hud.travel.dur) * 100)}%` }}>{{ boat: '⛵', helicopter: '🚁', rv: '🚐', car: '🚙' }[hud.travel.vehicle] || '🧭'}</span>
+            </div>
+            <small>Your coins, weapons, guns, upgrades and helpers come along.</small>
           </div>
         </div>
       )}

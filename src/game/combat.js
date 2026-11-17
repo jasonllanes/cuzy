@@ -1645,7 +1645,11 @@ export class Combat {
     // enemies are thrown back away from the blast: the closer, the harder
     for (const m of this.monstersNear(b.x, b.y, b.R)) {
       const d = Math.hypot(m.x - b.x, bodyY(m) - b.y);
-      this.hitMonster(m, this.isNormalFoe(m) ? Math.max(13, m.hp) : 13, b.x, b.y, 300 + 380 * Math.max(0, 1 - d / b.R));
+      // a boss is not wiped out, but a grenade takes a big bite of its health (a third of it in the middle, a fifth at the edge of the blast)
+      const near = Math.max(0, 1 - d / b.R);
+      const boss = MONSTERS[m.type]?.boss || m.nightBoss || m.miniBoss;
+      const dmg = this.isNormalFoe(m) ? Math.max(13, m.hp) : boss ? Math.max(13, (m.max || m.hp) * (0.2 + 0.15 * near)) : 13;
+      this.hitMonster(m, dmg, b.x, b.y, boss ? 120 : 300 + 380 * near);
     }
     for (const s of this.skeletons) {
       const d = Math.hypot(s.x - b.x, s.y - 8 - b.y);
@@ -3488,6 +3492,7 @@ export class Combat {
       if (world.isBlocked(p.x - 1, p.y - 1, 2, 2, true, true, true)) {
         // (water and lava do not stop a shot: it flies right over them)
         if (p.spell || p.stone) this.chopTrees(p.x, p.y, 7, Math.max(1, p.dmg * 0.9)); // bolts and stones cut at the trees they hit
+        else if (p.id === 'bullet' && p.free) this.chopTrees(p.x, p.y, 7, Math.max(0.8, p.dmg * 0.8)); // bullets chip at them too, and enough of them bring a tree down
         this.land(p, px, py);
         return false;
       }
@@ -3792,6 +3797,12 @@ export class Combat {
       ctx.beginPath();
       ctx.ellipse(0, 0, bl.R * 0.4 * (1 - p * 0.4), bl.R * 0.32 * (1 - p * 0.4), 0, 0, Math.PI * 2);
       ctx.fill();
+      // the fireball itself: the explosion animation (11 frames), as big as the blast
+      const boom = this.img['fx/boom'];
+      if (boom && bl.tone !== 'stun') {
+        const k = Math.max(1.1, bl.R / 17);
+        ctx.drawImage(boom, Math.min(10, Math.floor(p * 11)) * 48, 0, 48, 48, -24 * k, -34 * k, 48 * k, 48 * k);
+      }
       ctx.restore();
     } else if (o.kind === 'projectile' && o.p.id === 'smoke') {
       // a cloud of soft grey puffs that thickens, drifts and thins out at the end

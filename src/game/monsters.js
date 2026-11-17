@@ -62,6 +62,10 @@ Object.assign(MONSTERS, {
 Object.assign(MONSTERS, {
   sv_bat: { name: 'Night Bat', tiny: 'bat', kind: 'fly', hp: 4, speed: 58, dmg: 1, sd: 1, reach: 12, swings: ['atk1', 'atk2'], airborne: true },
   sv_wizard: { name: 'Zombie Wizard', tiny: 'wizard', kind: 'shoot', hp: 16, speed: 18, dmg: 2, sd: 3, range: 112, rate: 2.6, bolt: true, summon: 'z_small', swings: ['atk1', 'atk2'] },
+  // the final boss of a ten-wave run: one Alpha Werebear, much tougher and quicker than the ordinary Werebear
+  sv_werebear_alpha: { name: 'Alpha Werebear', tiny: 'werebear', kind: 'walk', hp: 380, speed: 36, dmg: 5, sd: 16, scale: 2, kb: 0.05, boss: true, agile: true, reach: 28, swings: ['atk1', 'atk2', 'atk3'] },
+  // a wizard that is a mini boss: it raises zombies, throws bolts and casts a spell on the ground (a red circle shows where, first)
+  sv_warlock: { name: 'Zombie Warlock', tiny: 'wizard', kind: 'shoot', hp: 130, speed: 20, dmg: 3, sd: 4, range: 120, rate: 2.2, bolt: true, summon: 'z_small', scale: 1.5, boss: true, caster: true, mini: true, swings: ['atk1', 'atk2'] },
   sv_werebear: { name: 'Werebear', tiny: 'werebear', kind: 'walk', hp: 170, speed: 20, dmg: 4, sd: 14, scale: 1.7, kb: 0.05, boss: true, reach: 24, swings: ['atk1', 'atk2', 'atk3'] },
 });
 
@@ -108,12 +112,43 @@ export function endlessList(stage, diff, players = 1) {
     const count = Math.max(1, Math.round(n * diff.count * 0.55 * grow));
     for (let i = 0; i < count; i++) list.push(type);
   }
-  for (const b of endlessBossTypes(stage, diff, players)) list.push(b);
+  const own = endlessBossTypes(stage, diff, players);
+  for (const b of own.length ? own : surpriseBosses(stage, diff, players)) list.push(b);
+  if (stage % 10 !== 0) for (const b of warlockBosses(stage, diff)) list.push(b);
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [list[i], list[j]] = [list[j], list[i]];
   }
   return list;
+}
+
+// Surprise bosses: from about wave 5 on, a wave that has no boss of its own may bring one anyway (a Colossus, and later a Werebear),
+// and the chance grows with the wave and with the difficulty. On Hard a late wave can bring two. `p` is how far into the run it is (0-10+).
+const SURPRISE = { easy: { base: 0.12, grow: 0.03, cap: 0.5 }, medium: { base: 0.25, grow: 0.04, cap: 0.7 }, hard: { base: 0.45, grow: 0.05, cap: 0.92 } };
+export function surpriseBosses(p, diff, players = 1) {
+  if (p < 5) return [];
+  const id = Object.keys(DIFFICULTY).find((k) => DIFFICULTY[k] === diff) || 'medium';
+  const c = SURPRISE[id];
+  const chance = Math.min(c.cap, c.base + c.grow * (p - 5));
+  const out = [];
+  const tries = id === 'hard' && p >= 8 ? 2 : 1;
+  for (let i = 0; i < tries; i++) {
+    if (Math.random() >= (i ? chance * 0.6 : chance)) continue;
+    out.push(p >= 7 && Math.random() < 0.3 + 0.03 * (p - 7) ? 'sv_werebear' : 'z_boss');
+  }
+  return players > 3 && out.length && Math.random() < 0.4 ? [...out, 'z_boss'] : out;
+}
+
+// A Zombie Warlock (a wizard mini boss) may also come, on Medium and Hard, from about wave 5: never on the final wave of a ten-wave run
+const WARLOCK = { medium: { base: 0.12, grow: 0.025, cap: 0.35 }, hard: { base: 0.22, grow: 0.035, cap: 0.55 } };
+export function warlockBosses(p, diff) {
+  const c = WARLOCK[diffId(diff)];
+  if (!c || p < 5) return [];
+  const chance = Math.min(c.cap, c.base + c.grow * (p - 5));
+  const out = [];
+  if (Math.random() < chance) out.push('sv_warlock');
+  if (diffId(diff) === 'hard' && p >= 8 && Math.random() < chance * 0.4) out.push('sv_warlock');
+  return out;
 }
 
 export const endlessBosses = (stage, diff, players = 1) => (stage % 5 === 0 ? Math.max(1, Math.round(((stage % 10 === 0 ? diff.boss10 : diff.boss5) + Math.floor(stage / 20)) * bossScale(players))) : 0);
@@ -130,12 +165,20 @@ export const bossesFor = (wave, diff, players = 1, total = 10) => {
 };
 
 // Which bosses a wave brings: the Colossus halfway, and at the end (and on the 3/4 mark of a long run) the Werebear, with a Colossus beside it
-export function bossTypes(wave, diff, players = 1, total = 10) {
+// A ten-wave run ends with ONE Alpha Werebear (Medium and Hard); on Easy it keeps the Colossus and Werebear it always had. In a longer run the
+// Alpha only turns up by chance at the end (and on the 3/4 mark), more often the harder it is. `roll` is a random 0-1 (left out: no chance event).
+const diffId = (diff) => Object.keys(DIFFICULTY).find((k) => DIFFICULTY[k] === diff) || 'medium';
+const ALPHA_CHANCE = { easy: 0.2, medium: 0.5, hard: 0.75 };
+export function bossTypes(wave, diff, players = 1, total = 10, roll = undefined) {
   const n = bossesFor(wave, diff, players, total);
   if (!n) return [];
   const last = wave === total || (total >= 20 && wave === Math.round(total * 0.75));
+  const id = diffId(diff);
+  if (wave === total && total === 10 && id !== 'easy') return ['sv_werebear_alpha'];
   const bears = last ? Math.max(1, Math.ceil(n / 2)) : 0;
-  return [...Array(n - bears).fill('z_boss'), ...Array(bears).fill('sv_werebear')];
+  const list = [...Array(n - bears).fill('z_boss'), ...Array(bears).fill('sv_werebear')];
+  if (last && total > 10 && roll !== undefined && roll < ALPHA_CHANCE[id]) list[list.length - 1] = 'sv_werebear_alpha';
+  return list;
 }
 export function endlessBossTypes(stage, diff, players = 1) {
   const n = endlessBosses(stage, diff, players);
@@ -178,7 +221,11 @@ export function waveList(wave, diff, theme = 'cozy', players = 1, total = 10) {
     const count = Math.max(1, Math.round(n * diff.count * growthOf(wave, total))); // never fewer than one, so bosses always show up
     for (let i = 0; i < count; i++) list.push(type);
   }
-  if (theme === 'apoc') for (const b of bossTypes(wave, diff, players, total)) list.push(b);
+  if (theme === 'apoc') {
+    const own = bossTypes(wave, diff, players, total, Math.random());
+    for (const b of own.length ? own : surpriseBosses(progressOf(wave, total), diff, players)) list.push(b);
+    if (wave !== total || total !== 10) for (const b of warlockBosses(progressOf(wave, total), diff)) list.push(b);
+  }
   // shuffle so the strong ones are mixed in with the weak
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));

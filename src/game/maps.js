@@ -22,6 +22,8 @@ export const SURVIVAL_MAPS = [
   { id: 'mountain', icon: '⛰️', name: 'Mountain Paths', blurb: 'Sunny meadows crossed by old rock roads, until a Colossus shows up: then the sky goes black and thunder rolls.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mountain', bossStorm: true },
   { id: 'wood', icon: '🏯', name: 'Wooden Halls', blurb: 'Survive on an endless wooden floor of pale and dark boards.', ground: 'bg', trees: null, climate: 'mild', tileset: 'wood' },
   { id: 'mixed', icon: '🌍', name: 'Open World', blurb: 'Every biome in one endless world: islands, lakes, marsh, lava, beach, roads and mountains, each with its own monsters.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed' },
+  // the Traveling Map: a run that moves on. Every 5 waves the survivors leave by boat, helicopter, RV or car for a new place
+  { id: 'travel', icon: '🧭', name: 'Traveling Map', blurb: 'The shelter never stays put: after every 5 waves you all travel (boat, helicopter, RV or car) to a brand new place, and the fight goes on there.', ground: 'bg', trees: null, climate: 'mild', tileset: 'mixed', travel: true },
   // Halloween: graveyards, pumpkin patches and dead trees from the Graveyard pack, under a purple dusk
   { id: 'haunted', icon: '🎃', name: 'Halloween Graveyard', blurb: 'Graveyards, pumpkin patches and dead groves under a purple dusk. Happy Halloween!', ground: 'bg_dark', trees: 'dark', climate: 'wet', halloween: true },
 ];
@@ -83,6 +85,20 @@ export const stripRumble = (s) => String(s).replace(/~rumble$/, '');
 export const ESCAPE_SEED = 'asphalt-358~esc';
 export const isEscapeSeed = (s) => /~esc$/.test(String(s));
 export const stripEscape = (s) => String(s).replace(/~esc$/, '');
+
+// The Traveling Map: after the first leg, a seed ends in ~travel (the look of the place is the map before it)
+export const TRAVEL_TAG = '~travel';
+export const isTravelSeed = (s) => /~travel$/.test(String(s));
+export const stripTravel = (s) => String(s).replace(/~travel$/, '');
+// where the next leg can be: any outdoor map
+export const TRAVEL_DESTS = SURVIVAL_MAPS.filter((m) => !m.indoor && !m.travel && m.id !== 'wood').map((m) => m.id);
+// the seed of the next place: a fresh layout of a map that is not the one you are on
+export function travelSeed(fromSeed) {
+  const here = splitSeed(stripTravel(fromSeed)).map;
+  const options = TRAVEL_DESTS.filter((id) => id !== here);
+  const dest = options[Math.floor(Math.random() * options.length)];
+  return { dest, seed: `${SURVIVAL_BASE}@${Math.random().toString(36).slice(2, 6)}~${dest}${TRAVEL_TAG}` };
+}
 
 // Endless Survival (no waves) is a flag at the end of the seed: the same map, played differently
 export const ENDLESS_TAG = '~endless';

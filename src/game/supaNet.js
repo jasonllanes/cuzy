@@ -108,7 +108,7 @@ export class SupaNet {
     this.lobbyReady = false;
     this.timers = { lobby: 0, heartbeat: 0, state: 0, intro: 0, back: 0, hostWatch: 0, aiSync: 0, duel: 0, duelEvent: 0, duelPrep: 0, match: 0, escape: 0 };
     this.esc = null; // the Escape round: { phase: 'wait' | 'extract', left, out: Set of the ones who boarded the chopper }
-    this.goals = [0, 0, 0]; // goals of the Beach Ball match (left team, right team); in a Rumble: goals each team has conceded
+    this.goals = [0, 0, 0, 0]; // goals of the Beach Ball match (left team, right team); in a Rumble: goals each team has conceded
     this.outTeams = new Set(); // Rumble: the teams that have conceded too many
     this.suddenSet = new Set(); // Rumble: the teams that are level at the whistle
     this.sudden = false; // time is up and it is level: the next goal wins
@@ -159,7 +159,7 @@ export class SupaNet {
     if (this.timers) clearInterval(this.timers.match);
     if (this.timers) clearInterval(this.timers.escape);
     this.esc = null;
-    this.goals = [0, 0, 0];
+    this.goals = [0, 0, 0, 0];
     this.outTeams = new Set();
     this.suddenSet = new Set();
     this.sudden = false;
@@ -1129,7 +1129,7 @@ export class SupaNet {
         this.esc = { phase: msg.phase, left: msg.left, out: new Set((msg.out || []).map(String)) };
         break;
       case 'goalscore':
-        this.goals = [0, 1, 2].map((i) => Number(msg.goals?.[i]) || 0);
+        this.goals = [0, 1, 2, 3].map((i) => Number(msg.goals?.[i]) || 0);
         this.sudden = !!msg.sudden;
         break;
       case 'match':
@@ -1369,9 +1369,9 @@ export class SupaNet {
       // a Beach Ball match needs someone on each team
       for (const id of this.members.keys()) if (this.teamMap[id] === undefined) this.assignTeam(id);
       const on = (t) => this.humans().some((h) => this.teamMap[h.id] === t);
-      if (this.cfg.rumble ? [0, 1, 2].filter(on).length < 2 : !on(0) || !on(1)) return;
+      if (this.cfg.rumble ? [0, 1, 2, 3].filter(on).length < 2 : !on(0) || !on(1)) return;
     }
-    this.goals = [0, 0, 0];
+    this.goals = [0, 0, 0, 0];
     this.outTeams = new Set();
     this.suddenSet = new Set();
     this.sudden = false;
@@ -1455,8 +1455,8 @@ export class SupaNet {
         this.setSoccer(m.soccer);
       }
       if (cfg.soccer && typeof m.rumble === 'boolean' && m.rumble !== !!cfg.rumble && !this.started) {
-        // Beach Ball <-> Beach Rumble: another pitch, three teams (or two) and the matching target
-        Object.assign(cfg, { rumble: m.rumble, seed: m.rumble ? RUMBLE_SEED : PITCH_SEED, teams: m.rumble ? 3 : 2, target: 5 });
+        // Beach Ball <-> Beach Rumble: another pitch, four teams (or two) and the matching target
+        Object.assign(cfg, { rumble: m.rumble, seed: m.rumble ? RUMBLE_SEED : PITCH_SEED, teams: m.rumble ? 4 : 2, target: 5 });
         this.reassignAll();
       }
       if (cfg.soccer) {
@@ -1601,7 +1601,7 @@ export class SupaNet {
     const cfg = this.cfg;
     if (on) {
       this.preSoccer = { seed: cfg.seed, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams, duelEvery: cfg.duelEvery };
-      Object.assign(cfg, { soccer: true, rumble, seed: rumble ? RUMBLE_SEED : PITCH_SEED, pvp: false, teams: rumble ? 3 : 2, target: 5, duelEvery: 0 });
+      Object.assign(cfg, { soccer: true, rumble, seed: rumble ? RUMBLE_SEED : PITCH_SEED, pvp: false, teams: rumble ? 4 : 2, target: 5, duelEvery: 0 });
       this.reassignAll();
     } else {
       cfg.rumble = false;
@@ -1629,13 +1629,13 @@ export class SupaNet {
 
   // Rumble: the teams that have somebody in them
   teamsInPlay() {
-    return new Set([...this.members.keys()].map((id) => this.teamMap[id]).filter((t) => t !== undefined && t >= 0 && t < 3));
+    return new Set([...this.members.keys()].map((id) => this.teamMap[id]).filter((t) => t !== undefined && t >= 0 && t < 4));
   }
 
   // Rumble: the ball went into goal `d`. Only the team of the player who touched it last can score, and only in somebody else's goal.
   // First to the target wins; at the whistle the most goals wins, and when the best are level the next goal by one of them decides it.
   hRumbleGoal(d, toucher) {
-    if (!(d >= 0 && d <= 2)) return;
+    if (!(d >= 0 && d <= 3)) return;
     const say = (extra = {}) => this.out({ t: 'goalscore', rumble: true, goals: [...this.goals], conceded: d, scorer: -1, out: [], tied: [...this.suddenSet], sudden: this.sudden, ...extra });
     if (toucher === undefined || toucher === d) {
       say({ nothing: toucher === undefined ? 'none' : 'own' });
@@ -2030,7 +2030,7 @@ export class SupaNet {
     clearInterval(this.timers.match);
     clearInterval(this.timers.escape);
     this.esc = null;
-    this.goals = [0, 0, 0];
+    this.goals = [0, 0, 0, 0];
     this.outTeams = new Set();
     this.suddenSet = new Set();
     this.sudden = false;

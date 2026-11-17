@@ -3,10 +3,12 @@ import { RARITIES } from '../game/items';
 
 // A shop list split into tabs by rarity (Common, Uncommon, Rare, Epic, Legendary, and All), so it is not one endless list.
 // `items`: the things to show; `rarity(item)`: which rarity each one is; `children(list)`: how to draw a list of them.
-export default function RarityTabs({ items, rarity, children }) {
+// `owned(item)` (optional): when the shop opens on this list it starts on the highest rarity you already own, so upgrading is one click away.
+export default function RarityTabs({ items, rarity, owned, children }) {
   const kinds = Object.keys(RARITIES).filter((k) => items.some((it) => rarity(it) === k));
   const [pick, setPick] = useState(null);
-  const now = pick && (pick === 'all' || kinds.includes(pick)) ? pick : kinds[0] || 'all';
+  const top = owned ? [...kinds].reverse().find((k) => items.some((it) => rarity(it) === k && owned(it))) : null; // (kinds run from common up to legendary)
+  const now = pick && (pick === 'all' || kinds.includes(pick)) ? pick : top || kinds[0] || 'all';
   const list = now === 'all' ? items : items.filter((it) => rarity(it) === now);
   return (
     <div className="rar-tabs-wrap">

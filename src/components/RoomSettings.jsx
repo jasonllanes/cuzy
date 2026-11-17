@@ -40,6 +40,18 @@ function Section({ icon, title, note, open = true, children }) {
 }
 
 // The host's room rules. Everyone can see them; only the host can change them. Most apply at once, even in the middle of a round.
+// the game modes a host can switch between in the room: each one is a patch the room applies in one go (it sets the map, teams and rules for it)
+const GAME_KINDS = [['free', '🌻 Free Roam'], ['survival', '🧟 Survival'], ['beach', '🏖️ Beach Ball'], ['rumble', '🌴 Beach Rumble'], ['escape', '🚁 Escape'], ['duel', '🏛️ Duel']];
+const OFF = { escape: false, duel: false, soccer: false };
+const MODE_PATCH = {
+  free: { mode: 'free', ...OFF },
+  survival: { mode: 'survival' },
+  beach: { mode: 'free', ...OFF, soccer: true, rumble: false },
+  rumble: { mode: 'free', ...OFF, soccer: true, rumble: true },
+  escape: { mode: 'free', ...OFF, escape: true },
+  duel: { mode: 'free', ...OFF, duel: true },
+};
+
 export default function RoomSettings({ room, count, editable, onChange, players = [] }) {
   const free = room.mode === 'free';
   const locked = !editable || room.started; // the mode, the map, the Colosseum round and the startup money are fixed once the round starts
@@ -55,6 +67,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
   const pair = fighters.length === 2 ? fighters : humans.slice(0, 2).map((p) => p.id);
   const pick = room.duelPick || 'pick';
   const duelLocked = !editable || (duel ? room.started : !!room.duelLive); // (a duel round is set up before it starts; the timed duels can be changed between duels)
+  const kind = duel ? 'duel' : soccer ? (room.rumble ? 'rumble' : 'beach') : escape ? 'escape' : free ? 'free' : 'survival';
   const oneVsOne = duels === 'timed' || (duel && !room.teams);
   const fightNote = [room.teams ? `${room.teams} teams` : 'free for all', room.pvp || duel ? 'player damage' : 'no damage'].join(' · ');
   const duelNote = duels === 'round' ? `Colosseum round${bet ? ' · 🎲 bets' : ''}` : duels === 'timed' ? `every ${every} min${bet ? ' · 🎲 bets' : ''}` : 'off';
@@ -66,18 +79,17 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       <Section icon="🌍" title="World" note={`${count} in the room · max ${room.max}`}>
         {room.mode !== 'waves' && (
           <div className="set-row">
-            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : free ? 'Free Roam: a cozy world to explore, fight or win in' : 'Survival: co-op against zombies. The map changes to match.'}</small></div>
-            <div className="seg">
-              <button type="button" className={free ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'free' })}>🌻 Free Roam</button>
-              <button type="button" className={room.mode === 'survival' ? 'on' : ''} disabled={locked} onClick={() => onChange({ mode: 'survival' })}>🧟 Survival</button>
-            </div>
+            <div className="set-label"><b>Game mode</b><small>{room.started ? 'Fixed once the round has started' : 'Pick any mode: the rest of the settings (map, teams, targets, fighting) change to match it.'}</small></div>
+            <select value={kind} disabled={locked} onChange={(e) => onChange(MODE_PATCH[e.target.value])}>
+              {GAME_KINDS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
           </div>
         )}
         <div className="set-row">
           <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Everyone in the room gets the new world.'}</small></div>
           <select value={duel ? 'colosseum' : soccer ? 'pitch' : escape ? 'escape' : mapIdOf(room.seed, room.mode)} disabled={locked || duel || soccer || escape} onChange={(e) => onChange({ map: e.target.value })}>
             {duel && <option value="colosseum">🏛️ Colosseum</option>}
-            {soccer && <option value="pitch">{room.rumble ? '🏖️ Beach Rumble Pitch (3 goals)' : '🏖️ Beach Pitch'}</option>}
+            {soccer && <option value="pitch">{room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch'}</option>}
             {escape && <option value="escape">🚁 Escape Zone</option>}
             {(free ? FREE_MAPS : SURVIVAL_MAPS).map((m) => <option key={m.id} value={m.id}>{m.icon} {m.name}</option>)}
           </select>
@@ -164,7 +176,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
           <Switch label="Beach Ball match" hint={soccer ? 'Two teams, one beach ball and a goal at each end: kick it by walking into it (run or dash for a hard kick) and roll it into the other team’s goal. With only two players it is a 1v1.' : 'A cozy ball game on a beach pitch: two teams, one ball, a goal at each end. No fighting, no monsters.'} on={soccer} disabled={locked} onChange={(v) => onChange({ soccer: v })} />
           {soccer && (
             <>
-              <Switch label="Rumble: free for all" hint="Three teams and a pitch with three goals (left, right and top). Defend your own goal and score in the others: a goal counts for the team of the player who touched the ball last (an own goal counts for nobody)." on={!!room.rumble} disabled={locked || room.started} onChange={(v) => onChange({ rumble: v })} />
+              <Switch label="Rumble: free for all" hint="Four teams and a pitch with four goals (left, right, top and bottom). Defend your own goal and score in the others: a goal counts for the team of the player who touched the ball last (an own goal counts for nobody)." on={!!room.rumble} disabled={locked || room.started} onChange={(v) => onChange({ rumble: v })} />
               <div className="set-row">
                 <div className="set-label"><b>Goals to win</b><small>The first team to score this many wins the match.</small></div>
                 <select value={room.target || 5} disabled={locked} onChange={(e) => onChange({ target: Number(e.target.value) })}>

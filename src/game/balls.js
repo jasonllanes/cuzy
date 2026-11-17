@@ -11,7 +11,8 @@ const COUNT = 2;
 const R = 6; // radius of the ball, for bumping into things
 const FRICTION = 0.9; // per second, on the ground: it rolls a good while
 const GRAVITY = 260;
-const SYNC_EVERY = 0.35; // seconds between updates from whoever is moving a ball
+const SYNC_EVERY = 0.2;
+const LAG = 0.07; // seconds a ball update takes to arrive, about // seconds between updates from whoever is moving a ball
 
 export const hasBalls = (world) => !world.apoc && !world.waveMode && (!world.arena || world.pitch); // (every Free Roam map, and the Beach Ball pitch)
 
@@ -64,18 +65,29 @@ export class Balls {
   adopt(m) {
     const b = this.list.find((x) => x.i === m.i);
     if (!b) return;
-    b.by = m.by !== undefined && m.by !== null ? String(m.by) : m.id !== undefined ? String(m.id) : b.by;
-    if (this.kickAge < 0.3 && this.kickBall === b.i) {
-      // two players kicked it at the same moment (the ball between them): both games settle on the same middle ground, instead of
-      // each one snapping to the other's kick and back again (that was the lag and the jitter)
-      const avg = (a, c) => (a + c) / 2;
-      Object.assign(b, { x: avg(b.x, m.x), y: avg(b.y, m.y), vx: avg(b.vx, m.vx), vy: avg(b.vy, m.vy), z: Math.max(b.z, m.z), vz: Math.max(b.vz, m.vz) });
-      this.mine.delete(b.i);
-      this.touchT = 0.3; // (and neither pushes it again for a moment)
-      return;
+    // a "lying still" report from the host must not undo a ball that is moving here or was just kicked (it was sent before the kick arrived)
+    const still = Math.hypot(m.vx, m.vy) < 4 && !m.z;
+    const kickoff = this.g.world.pitch && m.x === 8 && m.y === 8; // (the reset to the middle after a goal always counts)
+    if (still && !kickoff && (Math.hypot(b.vx, b.vy) > 4 || b.z > 0 || (this.g.t || 0) - (b.adoptT ?? -9) < 1.2 || this.mine.has(b.i))) return;
+    const ox = b.x, oy = b.y;
+    if (this.kickAge < 0.5 && this.kickBall === b.i) {
+      // two players kicked it at nearly the same moment: the same rule on both games decides whose kick stands (the lower id), so the ball
+      // does not ping-pong between the two views (that was the ball jumping over to the other team)
+      if (this.myId() < String(m.id ?? '')) return; // mine stands; they will adopt it from my next update
     }
+    b.by = m.by !== undefined && m.by !== null ? String(m.by) : m.id !== undefined ? String(m.id) : b.by;
+    b.adoptT = this.g.t || 0;
     Object.assign(b, { x: m.x, y: m.y, vx: m.vx, vy: m.vy, z: m.z, vz: m.vz });
     this.mine.delete(b.i);
+    this.touchT = Math.max(this.touchT, 0.15);
+    // the update took a moment to arrive: carry the ball on a little way, as it has moved since
+    const lag = LAG;
+    const lx = b.x + b.vx * lag, ly = b.y + b.vy * lag;
+    if (!this.g.world.isBlocked(lx - R, ly - R, R * 2, R * 2, true, true)) { b.x = lx; b.y = ly; }
+    b.z = Math.max(0, b.z + b.vz * lag);
+    // instead of jumping to the new place, the picture glides there (a big jump, like a kickoff, still snaps)
+    const ex = ox - b.x, ey = oy - b.y;
+    if (Math.hypot(ex, ey) < 40) { b.ox = (b.ox || 0) + ex; b.oy = (b.oy || 0) + ey; } else { b.ox = 0; b.oy = 0; }
   }
 
   // something other than a footstep hits a ball (a sword, a thrown item): it flies off the way the hit was going
@@ -106,7 +118,9 @@ export class Balls {
     this.touchT = Math.max(0, this.touchT - dt);
     this.kickAge += dt;
     this.syncT -= dt;
+    const glide = Math.exp(-dt * 12);
     for (const b of this.list) {
+      if (b.ox || b.oy) { b.ox *= glide; b.oy *= glide; if (Math.abs(b.ox) < 0.05 && Math.abs(b.oy) < 0.05) b.ox = b.oy = 0; }
       // in water or lava the ball floats: it loses its hop at once and rolls on ever more slowly until it stops
       const wet = g.world.type(Math.floor(b.x / T), Math.floor(b.y / T)) === WATER;
       if (wet) {
@@ -225,8 +239,8 @@ export class Balls {
 
   draw(ctx, img, b) {
     const sheet = img['props/beach_ball'];
-    const x = Math.round(b.x);
-    const y = Math.round(b.y);
+    const x = Math.round(b.x + (b.ox || 0));
+    const y = Math.round(b.y + (b.oy || 0));
     // its shadow stays on the ground and shrinks as the ball goes up
     const s = Math.max(0.5, 1 - b.z / 40);
     ctx.fillStyle = 'rgba(40,40,30,0.25)';

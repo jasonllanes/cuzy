@@ -66,7 +66,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   // game modes of their own (Free Roam rounds with a fixed world and fixed rules): they are set up in the room, and can still be tuned there
   const SPECIAL = {
     beach: { icon: '🏖️', name: 'Beach Ball', seed: PITCH_SEED, together: true, blurb: 'A cozy ball game: two teams, one beach ball, a goal at each end. Kick it by walking into it. 1v1 with two players.' },
-    rumble: { icon: '🌴', name: 'Beach Rumble', seed: RUMBLE_SEED, together: true, blurb: 'The free for all version of Beach Ball: up to three teams on a pitch with three goals (left, right and top). Defend yours and score in the others: a goal counts for the team of whoever touched the ball last.' },
+    rumble: { icon: '🌴', name: 'Beach Rumble', seed: RUMBLE_SEED, together: true, blurb: 'The free for all version of Beach Ball: up to four teams on a pitch with four goals (left, right, top and bottom). Defend yours and score in the others: a goal counts for the team of whoever touched the ball last.' },
     escape: { icon: '🚁', name: 'Escape', seed: ESCAPE_SEED, together: false, blurb: 'Open world survival: loot buildings and cars for guns, grenades and a compass, fight the zombies, and reach the chopper that lands far away before it leaves. No shop.' },
     duel: { icon: '🏛️', name: 'Duel', seed: ARENA_SEED, together: true, blurb: 'A 1v1 in the Colosseum against the clock (everyone else watches, and can bet). Pick the fighters in the room.' },
   };
@@ -98,7 +98,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const freePick = freeMap === 'random' ? FREE_MAPS[Math.floor(dice * FREE_MAPS.length)] : FREE_MAPS.find((m) => m.id === freeMap) || FREE_MAPS[0];
   const seed = gameMode === 'survival' ? joinSeed(SURVIVAL_BASE, survPick) : freePick.seed;
   // a fresh roll of the dice every time the menu opens, so the same map is not the same world twice
-  const [fresh, setFresh] = useState(false); // off: the map exactly as it is. On: the same map with the objects, trees and obstacles generated afresh
+  const [fresh, setFresh] = useState(true); // on (the default): every new game is a freshly generated layout of the chosen map. Off: the same map with the objects, trees and obstacles generated afresh
   const [roll, setRoll] = useState(() => Math.random().toString(36).slice(2, 6));
   const newRoll = () => Math.random().toString(36).slice(2, 6);
   const [pv, setPv] = useState(null); // the map preview: { roll } while it is open (roll null: the map exactly as it is)

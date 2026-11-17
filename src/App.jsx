@@ -18,6 +18,7 @@ import { isUnlocked } from './game/access';
 import WaitingRoom from './components/WaitingRoom';
 import InviteToasts from './components/InviteToasts';
 import MazeGame from './maze/MazeGame';
+import FeedbackHost from './components/FeedbackForm';
 
 const PROFILE_KEY = 'cuzi-profile';
 const REJOIN_KEY = 'cuzy-rejoin';
@@ -125,6 +126,7 @@ export default function App() {
   const [, setAccessTick] = useState(0); // re-render once the access code has been accepted
   const [trainingMap, setTrainingMap] = useState(FREE_MAPS[0].id); // the training ground's map and hero survive a map swap
   const [trainingHero, setTrainingHero] = useState('retro:1');
+  const [travel, setTravel] = useState(null); // the Traveling Map: what the team carries to the next place ({ carry, shelter, n })
   const [pendingInvite, setPendingInvite] = useState(''); // an accepted invitation: the name and character page for that room
   const [notice, setNotice] = useState(''); // something to tell the player on the main menu
   // a room we were in before the page was reloaded: we try to go back to it once everything has loaded
@@ -219,6 +221,7 @@ export default function App() {
 
   const begin = (p) => {
     wipeSave(remember(p).seed);
+    setTravel(null);
     setSession(null);
     setPlaying(true);
   };
@@ -227,6 +230,7 @@ export default function App() {
   // `back` is set when we are returning to a room after a reload: whatever was saved for the map is kept
   const enterRoom = (p, joined, back = null) => {
     const next = remember(p);
+    setTravel(null);
     if (!back) wipeSave(joined.room.seed);
     setProfile({ ...next, seed: joined.room.seed });
     setSession({ ...joined, clockAt: performance.now(), keepSave: !!back?.keepSave, autoStart: !!back?.autoStart });
@@ -301,6 +305,13 @@ export default function App() {
     }
   };
 
+  // the Traveling Map: the trip is over, so the next place starts (a new world, with what you carried over and the wave count going on)
+  const onTravel = ({ seed, carry, shelter }) => {
+    setProfile((p) => ({ ...p, seed }));
+    setSession((s) => (s ? { ...s, room: { ...s.room, seed }, keepSave: false, autoStart: false } : s));
+    setTravel((t) => ({ carry, shelter, n: (t?.n || 0) + 1 }));
+  };
+
   const dismissInvite = (key) => setInvites((list) => list.filter((i) => i.key !== key));
 
   // "Join" on an invitation: leave whatever we are doing and go to that room
@@ -317,6 +328,7 @@ export default function App() {
 
   const exit = () => {
     rejoinClear(); // leaving on purpose: no going back after a reload
+    setTravel(null);
     if (session) net.leave();
     setSession(null);
     setLobby(false);
@@ -367,7 +379,7 @@ export default function App() {
   if (playing && session && lobby) {
     screen = <WaitingRoom assets={assets} net={net} session={session} profile={profile} onStart={startRound} onLeave={exit} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else if (playing) {
-    screen = <GameView assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
+    screen = <GameView key={`game-${travel?.n || 0}`} travel={travel} onTravel={onTravel} assets={assets} profile={profile} net={net} session={session} onExit={exit} onRoundWon={roundWon} onJoinRoom={(code) => joinInvite({ key: Math.random(), code })} />;
   } else {
     screen = <MainMenu onMaze={() => setMaze(true)} onTraining={() => setTraining(true)} onTrainingV2={() => setTrainingV2(true)} onV2={() => setV2Mode(true)} onExitV2={() => setV2Mode(false)} v2={v2Mode} onSaveName={saveName} notice={notice} key={pendingInvite || (v2Mode ? 'v2menu' : 'menu')} inviteCode={pendingInvite} assets={assets} initial={profile} net={net} onBegin={begin} onEnterRoom={enterRoom} />;
   }
@@ -376,6 +388,7 @@ export default function App() {
       {screen}
       <InviteToasts invites={invites} assets={assets} onJoin={joinInvite} onDismiss={dismissInvite} />
       <ControlToggle playing={playing && !(session && lobby)} />
+      <FeedbackHost playing={playing && !(session && lobby)} />
     </>
   );
 }

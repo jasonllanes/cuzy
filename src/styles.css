@@ -1722,6 +1722,7 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .bet-panel { pointer-events: auto; display: grid; gap: 6px; padding: 8px 12px; background: var(--paper); min-width: 300px; max-width: min(520px, calc(100vw - 24px)); }
 .bet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .bet-head b { font: 700 0.95rem var(--pixel); }
+.bet-head .bet-close { order: 3; padding: 0 8px; line-height: 1.4; margin-left: auto; }
 .bet-head small, .bet-odds, .bet-mine { font-size: 0.72rem; color: var(--ink-soft); }
 .bet-mine { color: var(--ink); font-weight: 700; }
 .bet-sides { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -1912,3 +1913,73 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .sb-team small { font-size: 0.7rem; opacity: 0.75; }
 .sb-team.me { text-decoration: underline; text-underline-offset: 4px; }
 .sb-team.out { opacity: 0.35; text-decoration: line-through; }
+.bet-reopen { align-self: flex-start; }
+/* the get-ready card sits in the top stack (clicks off): it must take clicks; both duel cards can be minimized */
+.duel-ready, .duel-bar .dm-min, .duel-ready .dm-min, .dm-open { pointer-events: auto; }
+.dm-min { position: absolute; top: 4px; right: 6px; padding: 0 8px; min-height: 0; line-height: 1.3; }
+.dm-open { align-self: center; font-size: 0.78rem; padding: 3px 12px; min-height: 0; }
+.dm-ready { position: fixed; z-index: 36; left: 50%; bottom: 150px; transform: translateX(-50%); }
+
+/* feedback window and its button */
+.fb-fab { position: fixed; right: 12px; bottom: 12px; z-index: 40; }
+.fb-back { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: rgba(20, 14, 6, 0.55); padding: 12px; }
+.fb-card { position: relative; display: grid; gap: 10px; width: min(480px, 100%); max-height: calc(100vh - 24px); overflow: auto; padding: 16px; background: var(--paper); }
+.fb-card h2 { margin: 0; font: 800 1.1rem var(--pixel); color: var(--ink); }
+.fb-x { position: absolute; top: 8px; right: 8px; padding: 0 8px; min-height: 0; }
+.fb-kinds { display: flex; gap: 6px; }
+.fb-kind { flex: 1; display: grid; gap: 0; padding: 6px 4px; border: 3px solid var(--wood); border-radius: 10px; background: #fff; color: var(--ink); font: inherit; cursor: pointer; text-align: center; }
+.fb-kind.on { background: #ffe9a8; box-shadow: 0 0 0 2px #e0a526; }
+.fb-kind small { font-size: 0.68rem; color: var(--ink-soft); }
+.fb-card textarea { width: 100%; resize: vertical; font: inherit; padding: 8px; border: 3px solid var(--wood); border-radius: 10px; box-sizing: border-box; }
+.fb-shot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fb-shot img { max-width: 140px; max-height: 90px; border: 2px solid var(--wood); border-radius: 6px; }
+.fb-row { display: flex; gap: 8px; justify-content: flex-end; }
+/* the rarity tabs and their cards span the whole width of the list (they used to share a narrow column) */
+.recruit-list > .rar-tabs-wrap { grid-column: 1 / -1; display: grid; gap: 6px; min-width: 0; }
+.recruit-list > .rar-tabs-wrap > .recruit-chip { width: 100%; box-sizing: border-box; }
+.surv .recruit-list:has(.rar-tabs-wrap) { grid-template-columns: 1fr; }
+
+/* planning a carpet bombing run */
+.air-route { z-index: 120; }
+.air-route-card { display: grid; gap: 8px; justify-items: center; padding: 12px 16px; background: var(--paper); max-width: min(94vw, 360px); }
+.air-route-map { max-width: 100%; height: auto; }
+.air-route-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+
+/* the Traveling Map: the trip to the next place */
+.travel-overlay { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(10, 14, 24, 0.72); animation: card-pop 0.4s ease both; }
+.travel-card { display: grid; gap: 10px; justify-items: center; text-align: center; padding: 18px 26px; width: min(92vw, 460px); background: var(--paper); border: 4px solid var(--wood); border-radius: 16px; color: var(--ink); }
+.travel-card h2 { margin: 0; font: 800 1.2rem var(--pixel); }
+.travel-card p { margin: 0; }
+.travel-road { position: relative; width: 100%; height: 44px; border-radius: 10px; background: linear-gradient(#cfe8a8 0 60%, #a4906a 60%); overflow: hidden; }
+.travel-road.boat, .travel-road.helicopter { background: linear-gradient(#bfe6f5 0 60%, #5aa9d6 60%); }
+.travel-ride { position: absolute; top: 4px; font-size: 28px; transform: translateX(-50%); }
+
+/* leaderboards */
+.lb-page { display: grid; gap: 8px; }
+.lb-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lb-title { margin: 4px 0 0; font: 800 1rem var(--pixel); }
+.lb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lb-row { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 8px; padding: 5px 10px; background: #fff; border: 2px solid var(--wood); border-radius: 10px; }
+.lb-row.top1 { background: #fff3c4; }
+.lb-row.mine { background: #d8f5c8; border-color: #3fae5c; box-shadow: 0 0 0 3px rgba(63, 174, 92, 0.45); animation: lb-glow 1s ease-in-out infinite alternate; }
+.lb-rank { font: 800 0.9rem var(--pixel); }
+.lb-score { font: 700 0.9rem var(--pixel); color: var(--ink-soft); }
+@keyframes lb-glow { from { transform: scale(1); } to { transform: scale(1.025); } }
+.lb-overlay { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; background: rgba(10, 14, 24, 0.7); padding: 12px; }
+.lb-card { display: grid; gap: 8px; width: min(94vw, 420px); max-height: calc(100vh - 24px); overflow: auto; padding: 14px 18px; background: var(--paper); }
+.lb-card h2 { margin: 0; font: 800 1.1rem var(--pixel); }
+.lb-foot { display: flex; align-items: center; justify-content: space-between; }
+
+/* the opening film of a new Survival game */
+.opening-scene { position: fixed; inset: 0; z-index: 250; background: #000; }
+.opening-canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.opening-cap { position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%); max-width: min(90vw, 640px); padding: 8px 18px; background: rgba(0, 0, 0, 0.7); color: #fff; border-radius: 10px; font: 700 1rem var(--pixel); text-align: center; }
+.opening-skip { position: absolute; top: 14px; right: 14px; }
+
+/* game over */
+.go-panel { position: absolute; left: 50%; bottom: 5%; transform: translateX(-50%); display: grid; gap: 8px; justify-items: center; width: min(92vw, 520px); padding: 12px 18px; background: rgba(10, 2, 6, 0.82); border: 3px solid #7a1022; border-radius: 12px; color: #ffd9de; text-align: center; animation: card-pop 0.4s ease both; }
+.go-sub { margin: 0; font: 800 0.95rem var(--pixel); }
+.go-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; font-size: 0.82rem; }
+.go-board { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center; font-size: 0.78rem; }
+.go-board small { width: 100%; opacity: 0.8; }
+.go-board .me { color: #7dff9a; }

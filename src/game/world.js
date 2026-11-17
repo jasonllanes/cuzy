@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { isArenaSeed, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble } from './maps';
+import { isArenaSeed, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, isTravelSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble, stripTravel } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -70,8 +70,9 @@ const FLOWER_COLORS = ['#ff9ec7', '#ffffff', '#c9a7ff', '#ffd94a', '#ffb38a', '#
 export class World {
   constructor(seedStr, { waves = false, theme = 'cozy' } = {}) {
     this.sv2 = theme === 'apoc'; // Survival is dressed with the Modern Exteriors props too
-    this.endless = theme === 'apoc' && isEndlessSeed(seedStr); // Survival without waves
-    this.rumble = theme !== 'apoc' && !waves && isRumbleSeed(seedStr); // the Beach Rumble pitch: three goals (left, right, top) for up to three teams
+    this.endless = theme === 'apoc' && isEndlessSeed(stripTravel(seedStr)); // Survival without waves
+    this.travel = theme === 'apoc' && !this.endless && (isTravelSeed(seedStr) || !!mapInfo(splitSeed(stripTravel(seedStr)).map).travel); // the Traveling Map: after every 5 waves the shelter moves on
+    this.rumble = theme !== 'apoc' && !waves && isRumbleSeed(seedStr); // the Beach Rumble pitch: four goals (left, right, top, bottom) for up to four teams
     this.pitch = theme !== 'apoc' && !waves && (isPitchSeed(seedStr) || this.rumble); // the Beach Ball pitch (a whole world of it)
     this.pw = this.rumble ? RUMBLE_W : PITCH_W; // half the field's width and height, in tiles
     this.ph = this.rumble ? RUMBLE_H : PITCH_H;
@@ -79,7 +80,7 @@ export class World {
     this.hasArena = theme !== 'apoc' && !waves; // (Free Roam worlds have the Colosseum far off too, where the duels of a running round are fought)
     this.ac = this.arena ? { x: 0, y: 0 } : { x: ARENA_ZONE, y: ARENA_ZONE }; // its middle, in tiles
     this.escape = theme !== 'apoc' && !waves && isEscapeSeed(seedStr); // the Escape zone: loot, zombies and a chopper
-    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(seedStr)))))));
+    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(stripTravel(seedStr))))))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
     this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape); // Free Roam V2: the same world with the Modern Exteriors props on top
@@ -326,20 +327,37 @@ export class World {
     return true;
   }
 
-  // Wave Defense: the one house, as close to the centre of the world as the meadows allow
+  // no sea, lake or lava within `d` tiles of this spot (the shelter stands on land with ground all round it, not on a shore)
+  landAround(cx, cy, d) {
+    for (const k of [d * 0.45, d * 0.75, d]) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        if (this.type(Math.round(cx + Math.cos(a) * k), Math.round(cy + Math.sin(a) * k)) === WATER) return false;
+      }
+    }
+    return this.type(cx, cy) !== WATER;
+  }
+
+  // Wave Defense and Survival: the one house, as close to the centre of the world as the meadows allow, and well away from the water
+  // (if the whole world is a shore it settles for the nearest clear meadow, as it always did)
   waveBase() {
     if (!this.base) {
       this.base = { x: -2, y: 3 };
-      search: for (let r = 0; r < 120; r++) {
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) {
-            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-            if (this.siteIsClear(dx - 2, dy + 3)) {
-              this.base = { x: dx - 2, y: dy + 3 };
-              break search;
+      for (const margin of [16, 10, 0]) {
+        let found = false;
+        search: for (let r = 0; r < 120; r++) {
+          for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+              if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+              if (this.siteIsClear(dx - 2, dy + 3) && (!margin || this.landAround(dx + 2, dy, margin))) {
+                this.base = { x: dx - 2, y: dy + 3 };
+                found = true;
+                break search;
+              }
             }
           }
         }
+        if (found) break;
       }
     }
     return this.base;
@@ -654,6 +672,7 @@ export class World {
       if (!this.escape) this.addVault(chunk, cx, cy);
     }
     this.addSeesaw(chunk, cx, cy); // (every map has them, Survival too)
+    this.addPortal(chunk, cx, cy);
 
     // Cottage + its stepping-stone path
     const rx = Math.floor(cx * CHUNK / REGION);
@@ -729,13 +748,14 @@ export class World {
     const W = this.pw;
     const H = this.ph;
     if (lx >= -W && lx < W && ly >= -H && ly < H) return true;
-    // (the Rumble pitch has a third goal in the top fence)
-    if (this.rumble && lx >= -GOAL_H && lx < GOAL_H && ly >= -H - GOAL_D && ly < -H) return true;
+    // (the Rumble pitch has a third goal in the top fence, and a fourth in the bottom one)
+    if (this.rumble && lx >= -GOAL_H && lx < GOAL_H && ((ly >= -H - GOAL_D && ly < -H) || (ly >= H && ly < H + GOAL_D))) return true;
     return ly >= -GOAL_H && ly < GOAL_H && ((lx >= -W - GOAL_D && lx < -W) || (lx >= W && lx < W + GOAL_D));
   }
 
   // where the middle of a goal mouth is, in pixels (0: left, 1: right, 2: top, on the Rumble pitch)
   goalCenter(i) {
+    if (i === 3) return { x: 0, y: this.ph * T };
     return i === 2 ? { x: 0, y: -this.ph * T } : { x: (i === 0 ? -1 : 1) * this.pw * T, y: 0 };
   }
 
@@ -745,6 +765,7 @@ export class World {
     const lx = px / T;
     const ly = py / T;
     if (this.rumble && lx >= -GOAL_H && lx < GOAL_H && ly < -this.ph && ly >= -this.ph - GOAL_D) return 2;
+    if (this.rumble && lx >= -GOAL_H && lx < GOAL_H && ly >= this.ph && ly < this.ph + GOAL_D) return 3;
     if (ly < -GOAL_H || ly >= GOAL_H) return -1;
     if (lx < -this.pw && lx >= -this.pw - GOAL_D) return 0;
     if (lx >= this.pw && lx < this.pw + GOAL_D) return 1;
@@ -753,14 +774,14 @@ export class World {
 
   // where a player of `team` (0: left side, 1: right side) starts: spread out on their own half (k of n on the team)
   pitchSpawn(team = 0, k = 0, n = 1) {
-    if (this.rumble && team % 3 === 2) {
-      // the top team stands in a line across the top half
+    if (this.rumble && team % 4 >= 2) {
+      // the top team (and the bottom one) stands in a line across its half
       const col = (k - (n - 1) / 2) * Math.min(46, (this.pw * 2 * T - 40) / Math.max(1, n));
-      return { x: col + 8, y: -this.ph * T * 0.55 };
+      return { x: col + 8, y: (team % 4 === 2 ? -1 : 1) * this.ph * T * 0.55 };
     }
     const side = team % 2 === 0 ? -1 : 1;
     const row = (k - (n - 1) / 2) * Math.min(46, (this.ph * 2 * T - 40) / Math.max(1, n));
-    return { x: side * this.pw * T * (this.rumble ? 0.6 : 0.5) + 8, y: row + (this.rumble ? 60 : 12) };
+    return { x: side * this.pw * T * (this.rumble ? 0.6 : 0.5) + 8, y: row + (this.rumble ? 0 : 12) };
   }
 
   // the little rectangles of the pitch markings (white lines on the sand), made once
@@ -779,7 +800,10 @@ export class World {
       line(-W, -H, -G, -H);
       line(G, -H, W, -H);
     } else line(-W, -H, W, -H);
-    line(-W, H, W, H);
+    if (this.rumble) {
+      line(-W, H, -G, H);
+      line(G, H, W, H);
+    } else line(-W, H, W, H);
     line(-W, -H, -W, -G);
     line(-W, G, -W, H);
     line(W, -H, W, -G);
@@ -797,6 +821,10 @@ export class World {
       line(-G - 32, -H, -G - 32, -H + 80);
       line(-G - 32, -H + 80, G + 32, -H + 80);
       line(G + 32, -H + 80, G + 32, -H);
+      // ...and in front of the bottom goal
+      line(-G - 32, H, -G - 32, H - 80);
+      line(-G - 32, H - 80, G + 32, H - 80);
+      line(G + 32, H - 80, G + 32, H);
     }
     this.prects = out;
     return out;
@@ -811,7 +839,8 @@ export class World {
     const bx1 = this.pw + GOAL_D;
     const by0 = -this.ph - 1 - (this.rumble ? GOAL_D : 0);
     // the fence: every tile that is not walkable but touches the field or a goal
-    for (let ty = by0; ty <= this.ph; ty++) {
+    const by1 = this.ph + (this.rumble ? GOAL_D : 0);
+    for (let ty = by0; ty <= by1; ty++) {
       for (let tx = bx0; tx <= bx1; tx++) {
         if (this.pitchWalk(tx, ty) || !inChunk(tx, ty)) continue;
         let edge = false;
@@ -822,7 +851,13 @@ export class World {
       }
     }
     // the goals: a net in each pocket, in the colour of the team that defends it (left: red, right: blue)
-    for (const side of this.rumble ? [0, 1, 2] : [0, 1]) {
+    for (const side of this.rumble ? [0, 1, 2, 3] : [0, 1]) {
+      if (side === 3) {
+        // the bottom goal: the net runs down from the field
+        if (!inChunk(-GOAL_H, this.ph)) continue;
+        chunk.objects.push({ kind: 'goalnet', team: 3, bottom: true, x: 0, y: this.ph * T, gx: -GOAL_H * T, gy: this.ph * T, w: GOAL_H * 2 * T, h: GOAL_D * T });
+        continue;
+      }
       if (side === 2) {
         // the top goal: the net runs up from the field, so it is wider than it is deep
         if (!inChunk(-GOAL_H, -this.ph - GOAL_D)) continue;
@@ -841,7 +876,7 @@ export class World {
       for (let tx = cx * CHUNK; tx < (cx + 1) * CHUNK; tx += 2) {
         if (this.type(tx, ty) !== SAND) continue;
         const outX = Math.max(bx0 - tx, tx - bx1, 0);
-        const outY = Math.max(by0 - ty, ty - this.ph, 0);
+        const outY = Math.max(by0 - ty, ty - by1, 0);
         if (outX === 0 && outY === 0) continue; // (inside the fence)
         if (Math.max(outX, outY) < 2) continue; // (keep the fence itself clear)
         if (hash2(tx, ty, s + 6900) > 0.16) continue;
@@ -861,7 +896,7 @@ export class World {
     if (!this.hasArena) return undefined;
     if (this.pitch) {
       const ex = Math.max(-this.pw - GOAL_D - 1 - PITCH_BEACH - x, x - (this.pw + GOAL_D + PITCH_BEACH), 0);
-      const ey = Math.max(-this.ph - 1 - (this.rumble ? GOAL_D : 0) - PITCH_BEACH - y, y - (this.ph + PITCH_BEACH), 0);
+      const ey = Math.max(-this.ph - 1 - (this.rumble ? GOAL_D : 0) - PITCH_BEACH - y, y - (this.ph + (this.rumble ? GOAL_D : 0) + PITCH_BEACH), 0);
       return ex > 0 || ey > 0 ? WATER : SAND; // (the sea all round the beach)
     }
     const lx = x - this.ac.x;
@@ -1207,6 +1242,49 @@ export class World {
   }
 
   // A seesaw, now and then in an open meadow: two people can sit on it (one on each end) and it rocks up and down by itself.
+  // Portal doors (Free Roam): a haunted swirling door stands in a few places, and each one leads to the next one round the ring.
+  // The site of the portal in a chunk, or null (the same for everybody: it only depends on the seed)
+  portalSite(cx, cy) {
+    if (this.apoc || this.waveMode || this.arena || this.escape || this.pitch) return null;
+    this.portalCache ||= new Map();
+    const key = `${cx},${cy}`;
+    if (this.portalCache.has(key)) return this.portalCache.get(key);
+    let site = null;
+    const near = Math.abs(cx) <= 3 && Math.abs(cy) <= 3;
+    if (hash2(cx, cy, this.seed + 7400) < (near ? 0.2 : 0.07)) {
+      for (let a = 0; a < 12 && !site; a++) {
+        const tx = cx * CHUNK + 4 + Math.floor(hash2(cx + a * 5, cy, this.seed + 7401) * (CHUNK - 8));
+        const ty = cy * CHUNK + 5 + Math.floor(hash2(cx, cy + a * 5, this.seed + 7402) * (CHUNK - 8));
+        if (Math.hypot(tx, ty) < 12 || this.nearArena(tx, ty, 8)) continue;
+        let ok = true;
+        for (let dy = -3; dy <= 2 && ok; dy++) for (let dx = -2; dx <= 2 && ok; dx++) if (this.type(tx + dx, ty + dy) !== GRASS || this.treeAt((tx + dx) >> 1, (ty + dy) >> 1) || this.isCleared(tx + dx, ty + dy)) ok = false;
+        if (ok) site = { id: `pt${cx},${cy}`, x: tx * T + 8, y: ty * T + 8 };
+      }
+    }
+    this.portalCache.set(key, site);
+    return site;
+  }
+
+  // every portal near the middle of the world, in a fixed order (a portal leads to the next in the list)
+  portalList() {
+    if (!this.portalAll) {
+      const list = [];
+      for (let cy = -7; cy <= 7; cy++) for (let cx = -7; cx <= 7; cx++) {
+        const s = this.portalSite(cx, cy);
+        if (s) list.push(s);
+      }
+      this.portalAll = list;
+    }
+    return this.portalAll;
+  }
+
+  addPortal(chunk, cx, cy) {
+    const s = this.portalSite(cx, cy);
+    if (!s) return;
+    chunk.objects.push({ kind: 'portal', inter: 'portal', id: s.id, label: 'F · step through the portal', x: s.x, y: s.y, iy: s.y - 6, pad: 12 });
+    chunk.rects.push({ x: s.x - 14, y: s.y - 8, w: 28, h: 9 }); // (the door's own wall: you step into it with F)
+  }
+
   addSeesaw(chunk, cx, cy) {
     const s = this.seed;
     const near = Math.abs(cx) <= 2 && Math.abs(cy) <= 2; // (there is always one to be found close to where you start)

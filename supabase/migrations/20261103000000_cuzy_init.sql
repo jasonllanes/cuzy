@@ -71,3 +71,70 @@ alter table public.rooms enable row level security;
 -- game; tighten it (for example with sign-in) before running anything more serious.
 drop policy if exists "rooms: open to the game" on public.rooms;
 create policy "rooms: open to the game" on public.rooms for all to anon, authenticated using (true) with check (true);
+
+-- ---------- player feedback (bugs, features, suggestions) ----------
+-- Anyone can SEND feedback; nobody can read it with the public key. The developer reads it through the functions below,
+-- which need a secret read key: run   insert into public.feedback_admin (k) values ('your-secret-key');   once, and keep the key private.
+
+create table if not exists public.feedback (
+  id          bigint generated always as identity primary key,
+  created_at  timestamptz not null default now(),
+  kind        text        not null check (kind in ('feature', 'bug', 'suggestion')),
+  details     text        not null check (char_length(details) between 1 and 2000),
+  player      text,
+  context     jsonb,
+  screenshot  text        check (screenshot is null or char_length(screenshot) < 400000), -- a small compressed JPEG (data URL)
+  status      text        not null default 'open'                                          -- open | done
+);
+
+alter table public.feedback enable row level security;
+drop policy if exists "feedback: anyone can send" on public.feedback;
+create policy "feedback: anyone can send" on public.feedback for insert to anon, authenticated with check (status = 'open');
+
+create table if not exists public.feedback_admin (k text primary key);
+alter table public.feedback_admin enable row level security; -- (no policies: only the functions below can look inside)
+
+create or replace function public.feedback_list(p_key text, p_status text default 'open')
+returns table (id bigint, created_at timestamptz, kind text, details text, player text, context jsonb, has_shot boolean, status text)
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from feedback_admin a where a.k = p_key) then raise exception 'wrong key'; end if;
+  return query select f.id, f.created_at, f.kind, f.details, f.player, f.context, f.screenshot is not null, f.status
+    from feedback f where p_status = 'all' or f.status = p_status order by f.created_at;
+end $$;
+
+create or replace function public.feedback_shot(p_key text, p_id bigint)
+returns text language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from feedback_admin a where a.k = p_key) then raise exception 'wrong key'; end if;
+  return (select f.screenshot from feedback f where f.id = p_id);
+end $$;
+
+create or replace function public.feedback_mark(p_key text, p_id bigint, p_status text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from feedback_admin a where a.k = p_key) then raise exception 'wrong key'; end if;
+  update feedback set status = p_status where id = p_id;
+end $$;
+
+grant execute on function public.feedback_list(text, text), public.feedback_shot(text, bigint), public.feedback_mark(text, bigint, text) to anon, authenticated;
+
+-- ---------- leaderboards ----------
+-- One row per finished run. category looks like 'surv:10:hard' (a Survival run of 10 waves on Hard: the time to clear it, lowest wins)
+-- or 'endless:hard' (Endless Survival on Hard: the seconds survived, highest wins). Anyone may read the boards and add a score.
+
+create table if not exists public.leaderboard (
+  id          bigint generated always as identity primary key,
+  created_at  timestamptz not null default now(),
+  category    text        not null check (char_length(category) between 3 and 40),
+  name        text        not null check (char_length(name) between 1 and 24),
+  score       integer     not null check (score >= 0 and score < 10000000),
+  detail      jsonb
+);
+create index if not exists leaderboard_category_score on public.leaderboard (category, score);
+
+alter table public.leaderboard enable row level security;
+drop policy if exists "leaderboard: anyone can read" on public.leaderboard;
+drop policy if exists "leaderboard: anyone can add" on public.leaderboard;
+create policy "leaderboard: anyone can read" on public.leaderboard for select to anon, authenticated using (true);
+create policy "leaderboard: anyone can add" on public.leaderboard for insert to anon, authenticated with check (true);

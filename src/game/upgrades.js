@@ -23,6 +23,8 @@ export const upgradeCost = (id, level) => {
 export const mendCost = (level) => Math.round(14 * 1.3 ** level);
 export const AIR_SUPPORT = {
   carpet: { name: 'Carpet bombing', icon: '💣', cost: 70, blurb: 'A helicopter sweeps right across the map and drops bombs all along its path. Red circles show where they land: they wipe out the zombies inside, and nothing of yours is hurt.' },
+  drone: { name: 'Scout drone', icon: '🛸', cost: 30, blurb: 'A cheap little drone buzzes round the shelter for 45 seconds and picks off the zombies that get close.' },
+  helix: { name: 'Helix drone', icon: '🚁', cost: 55, blurb: 'A faster rotor drone that sweeps wider and shoots quicker than the scout, for a minute.' },
   gunship: { name: 'Gunship', icon: '🚁', cost: 140, blurb: 'A gunship circles the shelter for a whole minute, firing its machine gun at every zombie that comes near.' },
 };
 export const REPAIR_HEAL = 0.3; // the share of the shelter's health a repair kit restores

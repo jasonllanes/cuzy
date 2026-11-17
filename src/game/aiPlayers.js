@@ -119,11 +119,11 @@ export class AiPlayers extends Bots {
     b.kickCd = Math.max(0, (b.kickCd || 0) - dt);
     if (!ball) return;
     const team = g.teamMap[b.id] ?? 0;
-    // the goal it drives at: the other team's (the left team attacks the right goal); in a Rumble it picks one of the two others, switching now and then
+    // the goal it drives at: the other team's (the left team attacks the right goal); in a Rumble it picks one of the three others, switching now and then
     const w = g.world;
-    const target = w.rumble ? (team + 1 + (Math.floor(g.t / 25) + b.slot) % 2) % 3 : team === 0 ? 1 : 0;
+    const target = w.rumble ? (team + 1 + (Math.floor(g.t / 25) + b.slot) % 3) % 4 : team === 0 ? 1 : 0;
     const goal = w.goalCenter(target);
-    const own = w.goalCenter(w.rumble ? team % 3 : team === 0 ? 0 : 1);
+    const own = w.goalCenter(w.rumble ? team % 4 : team === 0 ? 0 : 1);
     const goalX = goal.x;
     const gdx = goalX - ball.x;
     const gdy = goal.y - ball.y;

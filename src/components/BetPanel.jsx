@@ -6,6 +6,7 @@ export default function BetPanel({ duel, game, advance = false }) {
   const { units, pool = {}, myBet, coins = 0, canBet, call } = duel;
   const [side, setSide] = useState(null);
   const [amt, setAmt] = useState('');
+  const [hidden, setHidden] = useState(false);
   const room = coins + (myBet?.amt || 0); // what you could put on the table right now
   useEffect(() => {
     if (!side && units.length) setSide(myBet?.on || units[0].key);
@@ -23,10 +24,15 @@ export default function BetPanel({ duel, game, advance = false }) {
     return Math.floor((n * 0.8 * rest) / (mine + (myBet && myBet.on === key ? 0 : n) || 1));
   };
   if (!canBet && !myBet && !total) return null;
+  if (hidden) {
+    // closed with the X: a small button brings it back (while bets are still open, before the duel)
+    return <button type="button" className="btn small-btn bet-reopen" onClick={() => setHidden(false)}>🎲 Bets{canBet ? ` · ${advance ? 'open' : `${call}s`}` : ''}</button>;
+  }
   return (
     <div className="bet-panel panel small">
       <div className="bet-head">
         <b>🎲 Bets</b>
+        <button type="button" className="btn small-btn bet-close" onClick={() => setHidden(true)} aria-label="Close bets" title="Close">✕</button>
         <small>{canBet ? (advance ? 'bets open · bet now' : `${call}s to bet`) : 'closed'}{total > 0 ? ` · 🪙 ${total} on the table` : ''}</small>
       </div>
       {canBet && units.length > 0 && <small className="bet-ask">Who will win? Pick a fighter, then how much:</small>}

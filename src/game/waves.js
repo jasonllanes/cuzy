@@ -3,14 +3,23 @@ import { DIFFICULTY, MONSTERS, MONSTER_IDS, TOTAL_WAVES, endlessList, progressOf
 import { ALLIES, ALLY_KINDS, teamCap } from './allies';
 import { MAX_LEVEL } from './upgrades';
 import { apocSize } from './apoc';
+import { mapInfo, travelSeed } from './maps';
 
 const PREP_FIRST = 20; // seconds to get ready before wave 1
 const PREP_BETWEEN = 14;
 const PREP_BETWEEN_APOC = 10; // Survival gives you less time to rebuild
 const ENRAGE_AFTER = 95; // seconds into a Survival wave before the stragglers get restless
 const MAX_ALIVE = 60;
-export const MAX_AIR = 3; // aircraft in the sky at once
-export const MAX_AIR_PER_WAVE = 3; // and how many a wave (or a batch, in Endless) may call in all
+export const MAX_AIR = 30; // aircraft in the sky at once (the real limit is per player: see MAX_AIR_PER_WAVE)
+// how each circling aircraft flies and shoots: the size of its orbit, its speed, its fire rate, damage and reach, and how long it stays
+const AIRP = {
+  gunship: { rx: 130, ry: 80, spd: 0.55, fire: 0.09, dmg: 1.3, range: 240, dur: 60 },
+  // (the drones do not circle: they fly out to the nearest zombie within `chase` of the shelter at speed `fly`, hover at a good shooting distance, and come home when none are left)
+  drone: { fire: 0.22, dmg: 0.8, range: 150, dur: 45, chase: 290, fly: 95 },
+  helix: { fire: 0.13, dmg: 1.0, range: 195, dur: 60, chase: 370, fly: 130 },
+};
+export const AIR_CODES = ['', 'carpet', 'gunship', 'drone', 'helix']; // (how an aircraft's kind travels in the room's snapshots)
+export const MAX_AIR_PER_WAVE = 3; // how many carpet bombings, and how many gunships, EACH player may call in a wave (or a batch, in Endless)
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
 export const BARRICADE_COST = 4; // a Barricade Box from the shop
 export const REPAIR_COST = 2; // per destroyed barricade planted back
@@ -100,6 +109,7 @@ export class WaveSim {
     this.mendLevel = 0; // the shelter's self-repair (Survival): it heals this much more every second, for the whole team
     this.airs = []; // the air strikes in the sky (3 at most at a time, and 3 calls a wave)
     this.airUsed = 0; // aircraft called in during this wave
+    this.airBy = {}; // who called what this wave: { playerId: { carpet, gunship } }
     this.airBombs = []; // bombs on their way down
     this.total = game.waveCount > 0 ? game.waveCount : TOTAL_WAVES; // how many waves the run lasts (the host picks it); 0 is endless
     this.endless = !!game.world.endless || game.waveCount === 0; // Endless Survival: no waves, the zombies just keep coming
@@ -118,6 +128,18 @@ export class WaveSim {
     this.enraged = false;
     this.baseMax = this.diff.baseHp;
     this.baseHp = this.baseMax;
+    // arriving somewhere new on the Traveling Map: the run, and the shelter's upgrades, carry on from the last place
+    const sh = game.shelterCarry;
+    if (sh) {
+      this.wave = sh.wave || 0;
+      this.baseLevel = sh.baseLevel || 0;
+      this.lightLevel = sh.lightLevel || 0;
+      this.mendLevel = sh.mendLevel || 0;
+      this.baseMax = Math.round(this.diff.baseHp * (1 + 0.3 * this.baseLevel));
+      this.baseHp = this.baseMax;
+      this.carryAllies = sh.allies || [];
+      this.timer = 25;
+    }
     this.snapT = 0;
     this.buildRing();
     this.syncRects();
@@ -171,6 +193,7 @@ export class WaveSim {
       air: this.airs.length,
       airUsed: this.airUsed || 0,
       airMax: MAX_AIR_PER_WAVE,
+      airMine: { carpet: 0, gunship: 0, ...this.airBy[String(this.g.mp?.you ?? 'me')] },
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       allies: this.allies.length,
@@ -230,6 +253,10 @@ export class WaveSim {
 
   update(dt) {
     if (this.slowT > 0) this.slowT -= dt;
+    if (this.carryAllies) {
+      for (const k of this.carryAllies) this.recruit(k); // (the helpers who came along)
+      this.carryAllies = null;
+    }
     if (this.phase !== 'victory' && this.phase !== 'defeat') {
       this.elapsed += dt;
       if (this.mendLevel > 0 && this.baseHp > 0 && this.baseHp < this.baseMax) this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.0025 * this.mendLevel * dt); // the shelter mends itself
@@ -254,6 +281,7 @@ export class WaveSim {
   }
 
   updateFlow(dt) {
+    if (this.phase === 'travel') return; // (everybody is on the road)
     if (this.phase === 'prep') {
       const mode = this.endless ? 'timer' : this.startMode;
       if (mode === 'vote') {
@@ -330,7 +358,10 @@ export class WaveSim {
 
   startWave() {
     this.wave++;
-    if (this.endless) this.airUsed = 0; // (a new batch)
+    if (this.endless) {
+      this.airUsed = 0; // (a new batch)
+      this.airBy = {};
+    }
     const players = this.g.waveTargets().length; // (the Colossus bosses are scaled to the size of the team)
     const list = this.endless ? endlessList(this.wave, this.diff, players) : waveList(this.wave, this.diff, this.theme, players, this.total);
     // the bosses go last: the queue is spawned from its end
@@ -362,10 +393,15 @@ export class WaveSim {
   }
 
   finishWave() {
-    this.airUsed = 0; // the next wave may call three more
+    this.airUsed = 0; // the next wave may call three more of each
+    this.airBy = {};
     if (this.wave >= this.total) {
       this.phase = 'victory';
       this.emit({ type: 'win' });
+      return;
+    }
+    if (this.world.travel && !this.endless && this.wave % 5 === 0) {
+      this.startTravel();
       return;
     }
     this.phase = 'prep';
@@ -374,6 +410,24 @@ export class WaveSim {
     for (const b of this.barricades) b.hp = Math.min(b.max, b.hp + b.max * 0.35);
     this.baseHp = Math.min(this.baseMax, this.baseHp + this.baseMax * 0.1);
     this.emit({ type: 'cleared', wave: this.wave });
+  }
+
+  // The Traveling Map: every 5 waves the whole team leaves by boat, helicopter, RV or car for a new place (the host picks; everyone is told)
+  startTravel() {
+    const { dest, seed } = travelSeed(this.world.seedStr);
+    const water = ['tidal', 'emerald', 'crystal', 'marsh', 'beach'].includes(dest);
+    const options = water ? ['boat', 'boat', 'helicopter', 'rv'] : ['helicopter', 'rv', 'car', 'car'];
+    const vehicle = options[Math.floor(Math.random() * options.length)];
+    this.phase = 'travel';
+    this.emit({
+      type: 'travel',
+      vehicle,
+      dest,
+      destName: mapInfo(dest).name,
+      seed,
+      wave: this.wave,
+      shelter: { wave: this.wave, baseLevel: this.baseLevel, lightLevel: this.lightLevel || 0, mendLevel: this.mendLevel || 0, allies: this.allies.map((a) => a.kind) },
+    });
   }
 
   // Survival only: halfway through a wave a pack of runners comes in from one side, and a wave that drags on
@@ -489,7 +543,7 @@ export class WaveSim {
     }
 
     const players = this.g.waveTargets().filter((p) => !p.hidden);
-    if (def.boss && this.bossSkill(m, def, dt, players)) return;
+    if (def.boss && (def.caster ? this.casterSkill(m, def, dt, players) : this.bossSkill(m, def, dt, players))) return;
     const speed = def.speed * (m.sp || 1) * (this.enraged ? 1.25 : 1) * slow;
     const scale = def.scale || 1;
     const reach = 8 + scale * 5;
@@ -499,7 +553,8 @@ export class WaveSim {
     let ty = this.center.y + 8;
     let kind = 'house';
     // Monsters want the base. They only turn on a hero who is practically in their way.
-    let best = def.kind === 'shoot' ? 44 : 30;
+    // (a shooter picks a hero anywhere in its range, and only when nobody is near does it go for the barricades, then the shelter)
+    let best = def.kind === 'shoot' ? def.range : 30;
     for (const p of players) {
       const d = Math.hypot(p.x - m.x, p.y - m.y);
       if (d < best) {
@@ -595,7 +650,8 @@ export class WaveSim {
     const scale = def.scale || 1;
     const radius = 30 + 14 * scale;
     let sk = m.skill;
-    m.skT = (m.skT ?? 3.5) - dt;
+    const wind = BOSS_WIND * (def.agile ? 0.7 : 1); // (an agile boss winds up quicker, but the red mark still shows first)
+    m.skT = (m.skT ?? (def.agile ? 2 : 3.5)) - dt;
     if (!sk) {
       if (m.skT > 0) return false;
       let near = null;
@@ -611,14 +667,18 @@ export class WaveSim {
         m.skT = 1;
         return false;
       }
-      m.skill = sk = { kind: Math.random() < 0.5 ? 'dash' : 'spiral', phase: 0, t: 0, prog: 0, ang: Math.atan2(near.y - m.y, near.x - m.x), hit: false };
+      m.skill = sk = { kind: Math.random() < (def.agile ? 0.7 : 0.5) ? 'dash' : 'spiral', phase: 0, t: 0, prog: 0, ang: Math.atan2(near.y - m.y, near.x - m.x), hit: false };
       return true;
     }
     sk.t += dt;
     m.face = Math.cos(sk.ang) >= 0 ? 1 : -1;
+    // (a four-direction boss turns to where the charge goes: 0 down, 1 up, 2 right, 3 left)
+    const ax = Math.cos(sk.ang);
+    const ay = Math.sin(sk.ang);
+    m.dirv = Math.abs(ax) >= Math.abs(ay) ? (ax >= 0 ? 2 : 3) : ay >= 0 ? 0 : 1;
     if (sk.phase === 0) {
-      sk.prog = Math.min(1, sk.t / BOSS_WIND);
-      if (sk.t >= BOSS_WIND) {
+      sk.prog = Math.min(1, sk.t / wind);
+      if (sk.t >= wind) {
         sk.phase = 1;
         sk.t = 0;
         sk.prog = 0;
@@ -633,18 +693,63 @@ export class WaveSim {
       this.step(m, def, Math.cos(sk.ang) * BOSS_DASH_SPEED * dt, Math.sin(sk.ang) * BOSS_DASH_SPEED * dt);
       if (!sk.hit) sk.hit = this.bossHit(m, def, players, (p) => Math.hypot(p.x - m.x, p.y - m.y) < bossDashHalf(scale), 1.4);
       m.atk = Math.max(m.atk, 0.1);
-      if (sk.t >= BOSS_DASH_TIME) this.endSkill(m);
+      if (sk.t >= BOSS_DASH_TIME) this.endSkill(m, def);
     } else {
       sk.prog = Math.min(1, sk.t / 0.35);
-      if (sk.t >= 0.35) this.endSkill(m);
+      if (sk.t >= 0.35) this.endSkill(m, def);
     }
     return true;
   }
 
-  endSkill(m) {
+  endSkill(m, def = null) {
     m.skill = null;
-    m.skT = 5 + Math.random() * 4;
-    m.cd = Math.max(m.cd, 1.3); // it catches its breath before the next blow
+    m.skT = def?.agile ? 2.5 + Math.random() * 2 : 5 + Math.random() * 4;
+    m.cd = Math.max(m.cd, def?.agile ? 0.8 : 1.3); // it catches its breath before the next blow
+  }
+
+  // The Zombie Warlock's spell: red circles appear on the ground where heroes stand and fill up, then the spells land there (like a staff's)
+  // Returns true while the spell is taking over the boss.
+  casterSkill(m, def, dt, players) {
+    const R = 26;
+    let sk = m.skill;
+    m.skT = (m.skT ?? 3) - dt;
+    if (!sk) {
+      if (m.skT > 0) return false;
+      const near = players.filter((p) => Math.hypot(p.x - m.x, p.y - m.y) < def.range + 50).sort((a, b) => Math.hypot(a.x - m.x, a.y - m.y) - Math.hypot(b.x - m.x, b.y - m.y));
+      if (!near.length) {
+        m.skT = 1;
+        return false;
+      }
+      // one circle on each of up to three heroes, and a couple more beside the nearest one to cut off where it can step
+      const spots = near.slice(0, 3).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
+      for (let k = 0; k < 2; k++) {
+        const a = Math.random() * Math.PI * 2;
+        spots.push({ x: Math.round(near[0].x + Math.cos(a) * 34), y: Math.round(near[0].y + Math.sin(a) * 28) });
+      }
+      m.skill = sk = { kind: 'spell', phase: 0, t: 0, prog: 0, ang: Math.atan2(near[0].y - m.y, near[0].x - m.x), hit: false, spots, R };
+      return true;
+    }
+    sk.t += dt;
+    m.face = Math.cos(sk.ang) >= 0 ? 1 : -1;
+    if (sk.phase === 0) {
+      sk.prog = Math.min(1, sk.t / (BOSS_WIND * 0.9));
+      if (sk.t >= BOSS_WIND * 0.9) {
+        sk.phase = 1;
+        sk.t = 0;
+        sk.prog = 0;
+        m.atk = 0.5;
+        // (a spell hurts inside the red circle it showed, and nowhere else)
+        for (const s of sk.spots) this.bossHit(m, def, players, (p) => ((p.x - s.x) / R) ** 2 + ((p.y - 2 - s.y) / (R * 0.8)) ** 2 <= 1, 1.5);
+      }
+      return true;
+    }
+    sk.prog = Math.min(1, sk.t / 0.4);
+    if (sk.t >= 0.4) {
+      m.skill = null;
+      m.skT = 4.5 + Math.random() * 3;
+      m.cd = Math.max(m.cd, 1);
+    }
+    return true;
   }
 
   // hurt every hero the test picks; true if anyone was hit
@@ -1005,15 +1110,36 @@ export class WaveSim {
 
   // 'carpet': a helicopter sweeps across the whole map and drops bombs along its path. 'gunship': a chopper circles the shelter
   // for a minute, firing its machine gun at the zombies. They can be bought any time, as many as you like (a few at once is plenty).
-  callAir(kind) {
-    if (this.phase === 'victory' || this.phase === 'defeat' || this.airs.length >= MAX_AIR || this.airUsed >= MAX_AIR_PER_WAVE) return false;
+  // Each player may call 3 carpet bombings and 3 gunships per wave (their own counts: a team of two can call 6 of each).
+  // `route` (carpet only): { a0, a1 } are the angles (radians, around the shelter) where the bomber comes in and where it flies out.
+  callAir(kind, who = null, route = null) {
+    const id = String(who ?? this.g.mp?.you ?? 'me');
+    const mine = (this.airBy[id] ||= { carpet: 0, gunship: 0, drone: 0, helix: 0 });
+    if (this.phase === 'victory' || this.phase === 'defeat' || this.airs.length >= MAX_AIR || !(kind in mine) || mine[kind] >= MAX_AIR_PER_WAVE) return false;
     const c = this.center;
     if (kind === 'carpet') {
-      const ang = Math.random() * Math.PI * 2;
-      this.airs.push({ kind, t: 0, dur: 5.6, ang, x: c.x - Math.cos(ang) * 460, y: c.y - Math.sin(ang) * 460, dropT: 0.4 });
-    } else if (kind === 'gunship') {
-      this.airs.push({ kind, t: 0, dur: 60, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false });
+      const R = 460;
+      let a0 = Number(route?.a0);
+      let a1 = Number(route?.a1);
+      if (!Number.isFinite(a0) || !Number.isFinite(a1)) {
+        a0 = Math.random() * Math.PI * 2;
+        a1 = a0 + Math.PI;
+      }
+      let x0 = c.x + Math.cos(a0) * R;
+      let y0 = c.y + Math.sin(a0) * R;
+      let x1 = c.x + Math.cos(a1) * R;
+      let y1 = c.y + Math.sin(a1) * R;
+      if (Math.hypot(x1 - x0, y1 - y0) < 240) {
+        // (the same spot twice would not be a run: it flies right across instead)
+        x1 = c.x - Math.cos(a0) * R;
+        y1 = c.y - Math.sin(a0) * R;
+      }
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      this.airs.push({ kind, t: 0, dur: len / 164, len, ang: Math.atan2(y1 - y0, x1 - x0), x: x0, y: y0, dropT: 0.4 });
+    } else if (AIRP[kind]) {
+      this.airs.push({ kind, t: 0, dur: AIRP[kind].dur, ang: Math.random() * Math.PI * 2, x: c.x, y: c.y, fireT: 0.5, firing: false });
     } else return false;
+    mine[kind]++;
     this.airUsed++;
     this.emit({ type: 'air', kind });
     return true;
@@ -1024,11 +1150,68 @@ export class WaveSim {
   }
 
   // (false once it has flown its time)
+  // a drone: out to the nearest zombie that is within its reach of the shelter, shoot it from a distance, and back home when there are none
+  updateDrone(a, dt, P) {
+    const c = this.center;
+    a.fireT -= dt;
+    a.firing = false;
+    let target = this.monsters.find((m) => m.id === a.tid && m.state !== 'dead' && Math.hypot(m.x - c.x, m.y - c.y) <= P.chase);
+    if (!target) {
+      a.tid = null;
+      let td = 1e9;
+      for (const m of this.monsters) {
+        if (m.state === 'dead' || Math.hypot(m.x - c.x, m.y - c.y) > P.chase) continue;
+        const d = Math.hypot(m.x - a.x, m.y - a.y);
+        if (d < td) {
+          td = d;
+          target = m;
+        }
+      }
+      if (target) a.tid = target.id;
+    }
+    let gx;
+    let gy;
+    if (target) {
+      // hold off at about two thirds of its range, on the side it came from
+      const dx = target.x - a.x;
+      const dy = target.y - 8 - a.y;
+      const d = Math.hypot(dx, dy) || 1;
+      gx = target.x - (dx / d) * P.range * 0.6;
+      gy = target.y - 8 - (dy / d) * P.range * 0.6;
+    } else {
+      // nothing to hunt: back over the shelter, drifting about
+      gx = c.x + Math.cos(a.t * 0.8 + (a.kind === 'helix' ? 2 : 0)) * 22;
+      gy = c.y - 30 + Math.sin(a.t * 1.1) * 8;
+    }
+    const dx = gx - a.x;
+    const dy = gy - a.y;
+    const dist = Math.hypot(dx, dy);
+    const step = Math.min(dist, P.fly * dt);
+    if (dist > 0.5) {
+      a.x += (dx / dist) * step;
+      a.y += (dy / dist) * step;
+      a.ang = Math.atan2(dy, dx);
+    }
+    if (target && a.fireT <= 0) {
+      const td = Math.hypot(target.x - a.x, target.y - 8 - a.y);
+      if (td <= P.range + 10) {
+        a.firing = true;
+        a.fireT = P.fire;
+        const ang = Math.atan2(target.y - 8 - a.y, target.x - a.x) + (Math.random() - 0.5) * 0.1;
+        this.ashots.push({ x: a.x, y: a.y, vx: Math.cos(ang) * 330, vy: Math.sin(ang) * 330, dmg: P.dmg, life: td / 330 + 0.1, k: 1, pierce: 0, hit: [] });
+      }
+    }
+  }
+
   updateOneAir(a, dt) {
     a.t += dt;
     const c = this.center;
+    if (a.kind === 'drone' || a.kind === 'helix') {
+      this.updateDrone(a, dt, AIRP[a.kind]);
+      return a.t < a.dur;
+    }
     if (a.kind === 'carpet') {
-      const sp = 920 / a.dur;
+      const sp = (a.len || 920) / a.dur;
       a.x += Math.cos(a.ang) * sp * dt;
       a.y += Math.sin(a.ang) * sp * dt;
       a.dropT -= dt;
@@ -1039,15 +1222,16 @@ export class WaveSim {
         this.airBombs.push({ x: a.x + Math.cos(a.ang) * 60 - Math.sin(a.ang) * side, y: a.y + Math.sin(a.ang) * 60 + Math.cos(a.ang) * side, fall: 0.9, R: 34 });
       }
     } else {
-      // the gunship circles the shelter, a little wide, and shoots whatever walks into range
-      a.ang += 0.55 * dt;
-      a.x = c.x + Math.cos(a.ang) * 130;
-      a.y = c.y + Math.sin(a.ang) * 80;
+      // the gunship (or a drone) circles the shelter and shoots whatever walks into range
+      const P = AIRP[a.kind] || AIRP.gunship;
+      a.ang += P.spd * dt;
+      a.x = c.x + Math.cos(a.ang) * P.rx;
+      a.y = c.y + Math.sin(a.ang) * P.ry;
       a.fireT -= dt;
       a.firing = false;
       if (a.fireT <= 0) {
         let target = null;
-        let td = 240;
+        let td = P.range;
         for (const m of this.monsters) {
           if (m.state === 'dead') continue;
           const d = Math.hypot(m.x - a.x, m.y - a.y);
@@ -1058,9 +1242,9 @@ export class WaveSim {
         }
         if (target) {
           a.firing = true;
-          a.fireT = 0.09;
+          a.fireT = P.fire;
           const ang = Math.atan2(target.y - 8 - a.y, target.x - a.x) + (Math.random() - 0.5) * 0.1;
-          this.ashots.push({ x: a.x, y: a.y, vx: Math.cos(ang) * 330, vy: Math.sin(ang) * 330, dmg: 1.3, life: td / 330 + 0.1, k: 1, pierce: 0, hit: [] });
+          this.ashots.push({ x: a.x, y: a.y, vx: Math.cos(ang) * 330, vy: Math.sin(ang) * 330, dmg: P.dmg, life: td / 330 + 0.1, k: 1, pierce: 0, hit: [] });
         } else a.fireT = 0.25;
       }
     }
@@ -1125,7 +1309,7 @@ export class WaveSim {
     else if (k === 'recruit') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'recruit', ok: ALLY_KINDS.includes(d.kind) && this.recruit(d.kind), cost: ALLIES[d.kind]?.cost } });
     else if (k === 'upg') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'upg', ok: this.upgradeBase() } });
     else if (k === 'mend') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: d.what === 'heal' ? 'mendHeal' : 'mendUp', ok: d.what === 'heal' ? this.repairShelter(0.3) : this.upgradeMend() } });
-    else if (k === 'air') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'air', ok: this.callAir(d.kind) } });
+    else if (k === 'air') this.g.mp?.net.send({ t: 'w', to: from, k: 'ack', d: { op: 'air', ok: this.callAir(d.kind, from, d.route) } });
   }
 
   snapshot() {
@@ -1139,7 +1323,7 @@ export class WaveSim {
       qn: this.queue.length,
       wt: this.waveTotal || 0,
       qb: this.queueCounts().map(([t, n]) => [MONSTER_IDS.indexOf(t), n]),
-      m: this.monsters.map((m) => [m.id, MONSTER_IDS.indexOf(m.type), Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10, m.hp, m.max, m.face, m.state === 'dead' ? 2 : m.state === 'hurt' ? 1 : 0, m.atk > 0 ? 1 : 0, m.dirv, m.lv || 1, m.skill ? [m.skill.kind === 'dash' ? 1 : 2, m.skill.phase, Math.round(m.skill.prog * 100) / 100, Math.round(m.skill.ang * 100) / 100] : 0]),
+      m: this.monsters.map((m) => [m.id, MONSTER_IDS.indexOf(m.type), Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10, m.hp, m.max, m.face, m.state === 'dead' ? 2 : m.state === 'hurt' ? 1 : 0, m.atk > 0 ? 1 : 0, m.dirv, m.lv || 1, m.skill ? [m.skill.kind === 'dash' ? 1 : m.skill.kind === 'spell' ? 3 : 2, m.skill.phase, Math.round(m.skill.prog * 100) / 100, Math.round(m.skill.ang * 100) / 100, ...(m.skill.spots ? [m.skill.spots.map((s) => [s.x, s.y])] : [])] : 0]),
       b: this.barricades.map((b) => [b.id, b.x, b.y, Math.round(b.hp * 10) / 10, b.max, b.v ? 1 : 0, b.r ? 1 : 0]),
       s: this.shots.map((s) => [Math.round(s.x), Math.round(s.y), s.bolt ? 5 : s.arrow ? 1 + s.arrow : s.spit ? 1 : 0, Math.round(Math.atan2(s.vy, s.vx) * 100)]),
       a: this.allies.map((a) => [a.id, ALLY_KINDS.indexOf(a.kind), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, a.dir, a.moving ? 1 : 0, a.atk > 0 ? 1 : 0]),
@@ -1147,9 +1331,10 @@ export class WaveSim {
       bl: this.baseLevel,
       sl: this.lightLevel || 0,
       ml: this.mendLevel || 0,
-      ar: this.airs.map((a) => [a.kind === 'carpet' ? 1 : 2, Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10]),
+      ar: this.airs.map((a) => [Math.max(1, AIR_CODES.indexOf(a.kind)), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10]),
       ab: (this.airBombs || []).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.fall * 100) / 100, b.R]),
       au: this.airUsed || 0,
+      abp: this.airBy,
       el: Math.round(this.elapsed),
       sm: this.startMode,
       tw: this.endless ? 0 : this.total,
@@ -1233,6 +1418,7 @@ export class WaveMirror {
       air: this.airs.length,
       airUsed: this.airUsed || 0,
       airMax: MAX_AIR_PER_WAVE,
+      airMine: { carpet: 0, gunship: 0, ...(this.airBy || {})[String(this.g.mp?.you ?? 'me')] },
       wrecks: this.wrecks.length,
       kills: { ...this.kills },
       boss: boss ? { hp: boss.hp, max: boss.max, name: MONSTERS[boss.type].name } : null,
@@ -1280,7 +1466,7 @@ export class WaveMirror {
       const m = old.get(id) || { id, x, y, anim: Math.random() * 4, t: 0 };
       const state = st === 2 ? 'dead' : st === 1 ? 'hurt' : 'walk';
       if (state !== m.state) m.t = 0;
-      Object.assign(m, { type: MONSTER_IDS[ti], tx: x, ty: y, hp, max, face, dirv: dirv ?? 0, lv: lv || 1, skill: sk ? { kind: sk[0] === 1 ? 'dash' : 'spiral', phase: sk[1], prog: sk[2], ang: sk[3] } : null, state, atk: atk ? 0.3 : m.atk || 0 });
+      Object.assign(m, { type: MONSTER_IDS[ti], tx: x, ty: y, hp, max, face, dirv: dirv ?? 0, lv: lv || 1, skill: sk ? { kind: sk[0] === 1 ? 'dash' : sk[0] === 3 ? 'spell' : 'spiral', phase: sk[1], prog: sk[2], ang: sk[3], ...(sk[4] ? { spots: sk[4].map(([x, y]) => ({ x, y })), R: 26 } : {}) } : null, state, atk: atk ? 0.3 : m.atk || 0 });
       return m;
     });
     this.barricades = s.b.map(([id, x, y, hp, max, v, r]) => ({ id, x, y, hp, max, v: !!v, r: !!r }));
@@ -1299,10 +1485,11 @@ export class WaveMirror {
     this.airs.length = Math.min(this.airs.length, sky.length);
     sky.forEach(([k, x, y, ang, firing], i) => {
       if (!this.airs[i]) this.airs[i] = { x, y };
-      Object.assign(this.airs[i], { kind: k === 1 ? 'carpet' : 'gunship', tx: x, ty: y, ang, firing: !!firing });
+      Object.assign(this.airs[i], { kind: AIR_CODES[k] || 'gunship', tx: x, ty: y, ang, firing: !!firing });
     });
     this.airBombs = (s.ab || []).map(([x, y, fall, R]) => ({ x, y, fall, R }));
     this.airUsed = s.au || 0;
+    this.airBy = s.abp || {};
     this.elapsed = s.el || 0;
     this.startMode = s.sm || 'timer';
     if (s.tw !== undefined) {
@@ -1351,8 +1538,8 @@ export class WaveMirror {
     return 'pending';
   }
 
-  callAir(kind) {
-    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'air', d: { kind } });
+  callAir(kind, who = null, route = null) {
+    this.g.mp?.net.send({ t: 'w', to: 'host', k: 'air', d: { kind, route } });
     return 'pending';
   }
 

@@ -124,7 +124,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
         <div className="wait-head">
         <p className="tagline">
           {MODE_LABEL[room.mode] || MODE_LABEL.free}
-          {room.escape ? ` · 🚁 Escape: the chopper lands in ${room.escapeMins || 10} min` : room.soccer ? (room.rumble ? ` · 🏖️ Beach Rumble: three goals, first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : ` · 🏖️ Beach Ball: first to ${room.target || 5} goals${room.matchMins ? ` · ${room.matchMins} min` : ''}${duelHumans.length === 2 ? ' · 1v1' : ''}`) : room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''}
+          {room.escape ? ` · 🚁 Escape: the chopper lands in ${room.escapeMins || 10} min` : room.soccer ? (room.rumble ? ` · 🏖️ Beach Rumble: four goals, first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : ` · 🏖️ Beach Ball: first to ${room.target || 5} goals${room.matchMins ? ` · ${room.matchMins} min` : ''}${duelHumans.length === 2 ? ' · 1v1' : ''}`) : room.duel ? ` · 🏛️ ${room.teams ? 'Team duel' : '1v1 duel, the rest watch'} in the Colosseum · ${room.duelMins || 3} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : room.pvp ? ` · first to ${room.target} ${room.winBy === 'monsters' ? 'monster ' : ''}kills wins` : ''}
           {!room.duel && room.mode === 'free' && room.duelEvery > 0 ? ` · ⚔️ a duel every ${room.duelEvery} min${room.bet > 0 ? ' · 🎲 bets' : ''}` : ''} · 👥 {ordered.length}/{room.max}
         </p>
 

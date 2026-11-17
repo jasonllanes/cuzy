@@ -9,6 +9,7 @@ import { isUnlocked, lockAgain } from '../game/access';
 import Avatar from './Avatar';
 import V2Sprite from './V2Sprite';
 import AccountBox from './AccountBox';
+import Leaderboard from './Leaderboard';
 
 
 // The main menu: Play, Multiplay, Settings, About and Exit, and the pages behind them.
@@ -67,6 +68,10 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onMaze, onTra
             <b><span className="home-ico"><V2Sprite theme="worksite" name="Tool_Box_1" scale={1.25} /></span>Settings</b>
             <small>Sound, your name and saved games</small>
           </button>
+          <button type="button" className="home-btn" onClick={() => setView('board')}>
+            <b><span className="home-ico">🏆</span>Leaderboards</b>
+            <small>The top 10 fastest Survival clears, and the longest Endless runs</small>
+          </button>
           <button type="button" className="home-btn" onClick={() => setView('about')}>
             <b><span className="home-ico"><img src={`${import.meta.env.BASE_URL}assets/items/book_01.png`} alt="" width="28" height="32" /></span>About</b>
             <small>How to play and who made the art</small>
@@ -115,6 +120,14 @@ export default function MenuHome({ view, setView, onPlay, onMulti, onMaze, onTra
           {msg && <p className="hint">{msg}</p>}
           </div>
           </div>
+          <div className="nav-row">{back}<span /></div>
+        </section>
+      )}
+
+      {view === 'board' && (
+        <section className="page">
+          <h2 className="page-title">🏆 Leaderboards</h2>
+          <Leaderboard />
           <div className="nav-row">{back}<span /></div>
         </section>
       )}
