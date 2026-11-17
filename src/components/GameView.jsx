@@ -10,6 +10,9 @@ import { TEAMS } from '../game/teams';
 import IntroScene from './IntroScene';
 import OpeningScene from './OpeningScene';
 import EvacScene from './EvacScene';
+import AirPlanOverlay from './AirPlanOverlay';
+import { AIR_SUPPORT } from '../game/upgrades';
+import TravelScene from './TravelScene';
 import GameOverScene from './GameOverScene';
 import OnlinePlayers from './OnlinePlayers';
 import { sfx } from '../game/sfx';
@@ -1376,18 +1379,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {hud.travel && (
-        <div className="travel-overlay" role="status">
-          <div className="travel-card">
-            <h2>🧭 Wave {hud.travel.wave} cleared!</h2>
-            <p>{{ boat: '⛵ The team sails', helicopter: '🚁 The team flies', rv: '🚐 The team drives the RV', car: '🚙 The team drives' }[hud.travel.vehicle] || 'The team travels'} to <b>{hud.travel.destName}</b>…</p>
-            <div className={`travel-road ${hud.travel.vehicle}`}>
-              <span className="travel-ride" style={{ left: `${Math.min(100, (1 - hud.travel.left / hud.travel.dur) * 100)}%` }}>{{ boat: '⛵', helicopter: '🚁', rv: '🚐', car: '🚙' }[hud.travel.vehicle] || '🧭'}</span>
-            </div>
-            <small>Your coins, weapons, guns, upgrades and helpers come along.</small>
-          </div>
-        </div>
-      )}
+      {hud.airPlan && <AirPlanOverlay view={hud.airPlan} cost={AIR_SUPPORT.carpet.cost} onConfirm={(r) => gameRef.current?.confirmAirPlan(r)} onCancel={() => gameRef.current?.cancelAirPlan()} />}
+      {hud.travel && <TravelScene assets={assets} heroes={[profile.hero, ...peers.map((p) => p.hero).filter(Boolean)]} vehicle={hud.travel.vehicle} dest={hud.travel.dest} destName={hud.travel.destName} wave={hud.travel.wave} left={hud.travel.left} dur={hud.travel.dur} />}
     </div>
   );
 }

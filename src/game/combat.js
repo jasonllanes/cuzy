@@ -3606,7 +3606,7 @@ export class Combat {
     const p = this.g.player;
     const dx = p.x - d.x;
     const dy = p.y - 4 - d.y;
-    const dist = Math.hypot(dx, dy);
+    const dist = this.g.dead ? 1e6 : Math.hypot(dx, dy); // (a downed hero, a ghost, cannot pick anything up: everything waits where it lies)
     if (d.nopick > 0) {
       d.nopick -= dt;
       return true;

@@ -257,6 +257,7 @@ export class Game {
     if (world.apoc) this.pfx.preload(['critters/slime', 'critters/snake', 'critters/frog', 'critters/wisp', 'critters/ghost', 'critters/flying-skull', 'critters/eyeball', 'critters/jellyfish', 'spawn/poof']);
     this.pfx.preload(['ice/frost-nova', 'explosions/small-explosion', 'nature/acid-splash', 'lightning/lightning-strike', 'arcane/mana-burst', 'lightning/zap-hit', 'fire/flame-pillar', 'explosions/grenade', 'impacts/hit-spark', 'shadow/dark-explosion']);
     this.combo = null;
+    this.airPlan = null; // set while you are planning a carpet bombing run on the game screen
     this.zoom = 3;
     this.viewW = 0;
     this.viewH = 0;
@@ -1352,17 +1353,17 @@ export class Game {
   }
 
   drawXpOrbs(ctx) {
-    const orb = bakedLoop('pickups/xp-orb', { palette: ['#0c0418', '#2a0f55', '#4d1fa0', '#7d3de0', '#a96bff', '#caa0ff', '#e8d2ff', '#ffffff'] }, 15);
     for (const o of this.xpOrbs) {
-      if (orb) {
-        drawBaked(ctx, orb, o.x, o.y + 4, this.t + o.x * 0.1);
-        continue;
-      }
       const x = Math.round(o.x);
       const y = Math.round(o.y);
-      ctx.fillStyle = 'rgba(179,140,255,0.28)';
+      const pulse = 1 + 0.18 * Math.sin(this.t * 9 + o.x);
+      ctx.fillStyle = 'rgba(179,140,255,0.22)';
       ctx.beginPath();
-      ctx.arc(x, y, o.r + 2.5, 0, Math.PI * 2);
+      ctx.arc(x, y, (o.r + 3) * pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(179,140,255,0.4)';
+      ctx.beginPath();
+      ctx.arc(x, y, (o.r + 1.4) * pulse, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#c9a8ff';
       ctx.beginPath();
@@ -1370,6 +1371,7 @@ export class Game {
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.fillRect(x - 1, y - 1, 1, 1);
+      if (Math.sin(this.t * 7 + o.x * 3) > 0.7) ctx.fillRect(x + 2, y - 3, 1, 1); // (a little twinkle)
     }
   }
 
@@ -3281,6 +3283,38 @@ export class Game {
     if (this.wave.repairShelter(REPAIR_HEAL) === false) this.giveCoins(cost);
   }
 
+  // Carpet bombing: the shop closes and you plan the run on the game screen (drag the start and the end round the shelter), see AirPlanOverlay
+  startAirPlan() {
+    if (!this.wave || !this.world.apoc || this.dead) return;
+    this.airPlan = { on: true };
+    this.paused = false;
+    this.emitHud();
+  }
+
+  cancelAirPlan() {
+    this.airPlan = null;
+    this.emitHud();
+  }
+
+  confirmAirPlan(route) {
+    this.airPlan = null;
+    this.buyAir('carpet', route);
+    this.emitHud();
+  }
+
+  // where the shelter is on the screen and how big the planning ring is (as fractions of the canvas, so the overlay can place itself)
+  airPlanView() {
+    const cv = this.canvas;
+    const c = this.wave?.center;
+    if (!c || !cv.width) return null;
+    const camX = Math.round(this.cam.x - this.viewW / 2);
+    const camY = Math.round(this.cam.y - this.viewH / 2);
+    const [sx, sy] = this.toScreen(c.x, c.y, camX, camY);
+    const R = Math.min(460 * this.zoom, cv.height * 0.3); // (the ring is shrunk to fit the screen, with room for the buttons below)
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    return { fx: clamp(sx / cv.width, 0.4, 0.6), fy: clamp(sy / cv.height, 0.36, 0.4), fr: R / cv.width };
+  }
+
   buyAir(kind, route = null) {
     const info = AIR_SUPPORT[kind];
     if (!this.wave || !this.world.apoc || !info) return;
@@ -5059,7 +5093,8 @@ export class Game {
       nextDuel: this.nextDuelHud(),
       marks: this.duelMarks(),
       wave: this.wave?.hudState() || null,
-      travel: this.travelling ? { vehicle: this.travelling.vehicle, destName: this.travelling.destName, left: Math.max(0, this.travelling.dur - this.travelling.t), dur: this.travelling.dur, wave: this.travelling.wave } : null,
+      airPlan: this.airPlan ? this.airPlanView() : null,
+      travel: this.travelling ? { vehicle: this.travelling.vehicle, dest: this.travelling.dest, destName: this.travelling.destName, left: Math.max(0, this.travelling.dur - this.travelling.t), dur: this.travelling.dur, wave: this.travelling.wave } : null,
       fight: this.bots?.scoreboard() || null,
       duel: this.duelHud(),
       upg: this.upgrades,
@@ -5113,6 +5148,12 @@ export class Game {
   }
 
   updateInteraction() {
+    if (this.dead) {
+      // a ghost cannot open chests, pick things up or use anything
+      this.prompt = null;
+      this.interactPressed = false;
+      return;
+    }
     const p = this.player;
     const cx = Math.floor(p.x / CHUNK_PX);
     const cy = Math.floor(p.y / CHUNK_PX);

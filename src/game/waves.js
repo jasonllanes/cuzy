@@ -137,8 +137,13 @@ export class WaveSim {
       this.lightLevel = sh.lightLevel || 0;
       this.mendLevel = sh.mendLevel || 0;
       this.baseMax = Math.round(this.diff.baseHp * (1 + 0.3 * this.baseLevel));
-      this.baseHp = this.baseMax;
+      this.baseHp = Math.max(1, Math.round(this.baseMax * (sh.baseHpPct ?? 1)));
       this.carryAllies = sh.allies || [];
+      if (Array.isArray(sh.bars) && sh.bars.length) {
+        // every barricade stands where it stood round the shelter (with the health it had)
+        this.barricades = sh.bars.map(([dx, dy, v, r, pct, max]) => ({ id: this.nextId++, x: this.center.x + dx, y: this.center.y + dy, hp: Math.max(1, max * pct), max, v: !!v, r: !!r }));
+        this.syncRects();
+      }
       this.timer = 25;
     }
     this.snapT = 0;
@@ -148,6 +153,7 @@ export class WaveSim {
 
   // A wall of tree barricades round the house, with a gate at the front where the path comes in
   buildRing() {
+    if (this.barricades.length) return; // (arriving on the Traveling Map: the barricades came along)
     const { x0, x1, y0, y1, gate: [g0, g1] } = this.ring;
     const gate = (x) => x > g0 && x < g1;
     // Survival's ring is made of sturdier fence sections, flat along the top and bottom, upright on the sides
@@ -427,7 +433,8 @@ export class WaveSim {
       destName: mapInfo(dest).name,
       seed,
       wave: this.wave,
-      shelter: { wave: this.wave, baseLevel: this.baseLevel, lightLevel: this.lightLevel || 0, mendLevel: this.mendLevel || 0, allies: this.allies.map((a) => a.kind) },
+      // the shelter comes along as it is: its level, helpers, and every barricade (where it stood round the shelter, and how hurt it was)
+      shelter: { wave: this.wave, baseLevel: this.baseLevel, lightLevel: this.lightLevel || 0, mendLevel: this.mendLevel || 0, allies: this.allies.map((a) => a.kind), baseHpPct: this.baseMax > 0 ? this.baseHp / this.baseMax : 1, bars: this.barricades.map((b) => [Math.round(b.x - this.center.x), Math.round(b.y - this.center.y), b.v ? 1 : 0, b.r ? 1 : 0, Math.round((b.hp / b.max) * 100) / 100, b.max]) },
     });
   }
 

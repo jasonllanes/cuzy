@@ -2031,3 +2031,9 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .multi-side .who-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12ch; }
 .room-browser .room-row { flex-wrap: nowrap; }
 .rb-tools select { flex: 0 1 auto; }
+
+/* planning a carpet bombing run on the game screen */
+.air-plan { position: fixed; inset: 0; z-index: 120; touch-action: none; user-select: none; background: rgba(0, 0, 0, 0.12); }
+.air-plan-svg { position: absolute; inset: 0; }
+.air-plan-bar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; text-align: center; padding: 10px 16px; background: var(--paper); max-width: min(94vw, 560px); }
+.air-plan-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }

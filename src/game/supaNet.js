@@ -1406,6 +1406,8 @@ export class SupaNet {
     const free = cfg.mode === 'free';
     if (typeof m.allowLate === 'boolean') cfg.allowLate = m.allowLate;
     if (typeof m.allowCheats === 'boolean') cfg.allowCheats = m.allowCheats;
+    // the Traveling Map: when the team moves to a new place the room remembers it, so someone who reconnects (or joins late) lands in the place that is running now
+    if (cfg.mode === 'survival' && typeof m.seed === 'string' && /^cuzy-survival(@[a-z0-9]{1,8})?~[a-z]+~travel$/.test(m.seed)) cfg.seed = m.seed;
     if (typeof m.allowVisit === 'boolean') cfg.allowVisit = m.allowVisit;
     if (typeof m.private === 'boolean') cfg.private = m.private;
     if (m.waves !== undefined && Number.isInteger(Number(m.waves)) && Number(m.waves) >= 0 && Number(m.waves) <= 99) cfg.waves = Number(m.waves);

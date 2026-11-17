@@ -47,6 +47,11 @@ const rejoinSet = (patch) => {
 };
 const rejoinClear = () => {
   try {
+    window.sessionStorage.removeItem('cuzy-travel');
+  } catch {
+    /* storage may be unavailable */
+  }
+  try {
     window.sessionStorage.removeItem(REJOIN_KEY);
   } catch {
     /* storage may be unavailable */
@@ -255,7 +260,16 @@ export default function App() {
   };
   const enterNow = (p, joined, back = null) => {
     const next = remember(p);
-    setTravel(null);
+    // coming back into a Traveling Map room: what you carried over to this place is still yours
+    let tv = null;
+    if (back) {
+      try {
+        tv = JSON.parse(window.sessionStorage.getItem('cuzy-travel'));
+      } catch {
+        tv = null;
+      }
+    }
+    setTravel(tv && tv.code === joined.room.code && tv.seed === joined.room.seed ? { carry: tv.carry, shelter: tv.shelter, n: 1 } : null);
     if (!back) wipeSave(joined.room.seed);
     setProfile({ ...next, seed: joined.room.seed });
     setSession({ ...joined, clockAt: performance.now(), keepSave: !!back?.keepSave, autoStart: !!back?.autoStart });
@@ -336,6 +350,13 @@ export default function App() {
   const onTravel = ({ seed, carry, shelter }) =>
     playTransition('shatter-wipe', {
       onCover: () => {
+        // (the host tells the room where the team is now, and everyone keeps what they carry for a reconnect)
+        if (session && session.host === session.you) net.send({ t: 'settings', seed });
+        try {
+          window.sessionStorage.setItem('cuzy-travel', JSON.stringify({ code: session?.room?.code || null, seed, carry, shelter }));
+        } catch {
+          /* private window */
+        }
         setProfile((p) => ({ ...p, seed }));
         setSession((s) => (s ? { ...s, room: { ...s.room, seed }, keepSave: false, autoStart: false } : s));
         setTravel((t) => ({ carry, shelter, n: (t?.n || 0) + 1 }));

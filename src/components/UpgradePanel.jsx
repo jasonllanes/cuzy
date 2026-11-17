@@ -10,14 +10,12 @@ import ItemIcon from './ItemIcon';
 import SellPanel from './SellPanel';
 import PetShop from './PetShop';
 import RarityTabs from './RarityTabs';
-import AirRoutePicker from './AirRoutePicker';
 
 // Spend coins from monster drops on permanent upgrades. Helpers are hired here too.
 export default function UpgradePanel({ hud, game, onClose, inventory = [], survival = false }) {
   const team = hud.wave?.allies || 0;
   const cap = hud.wave?.teamCap ?? teamCap(hud.wave?.baseLevel || 0);
   const [tab, setTab] = useState('shelter');
-  const [route, setRoute] = useState(false); // planning a carpet bombing run
   const tabs = survival
     ? [['shelter', '🏚️ Shelter & Stats'], ['defense', '🧱 Barricades & Grenades'], ['melee', '⚔️ Weapons'], ['guns', '🔫 Guns'], ['people', '🧑‍🤝‍🧑 Backup'], ['air', '✈️ Air support'], ['pets', '🐾 Pets'], ['sell', '💰 Sell']]
     : [['shelter', '📊 Upgrades'], ['defense', '🧱 Barricades & Grenades'], ['people', '🪙 Helpers'], ['sell', '💰 Sell']];
@@ -115,14 +113,13 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
               {Object.entries(AIR_SUPPORT).map(([kind, a]) => (
                 <div key={kind} className="recruit-chip hire rar rar-epic">
                   <span><b>{a.icon} {a.name}</b><small>{a.blurb}</small></span>
-                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airMine?.[kind] ?? 0) >= (hud.wave?.airMax ?? 3)} onClick={() => (kind === 'carpet' ? setRoute(true) : game.buyAir(kind))}>{kind === 'carpet' ? '🧭 Plan the run · ' : ''}🪙 {a.cost}</button>
+                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airMine?.[kind] ?? 0) >= (hud.wave?.airMax ?? 3)} onClick={() => (kind === 'carpet' ? (game.startAirPlan(), onClose()) : game.buyAir(kind))}>{kind === 'carpet' ? '🧭 Plan the run · ' : ''}🪙 {a.cost}</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {route && <AirRoutePicker cost={AIR_SUPPORT.carpet.cost} onCancel={() => setRoute(false)} onConfirm={(r) => { setRoute(false); game.buyAir('carpet', r); }} />}
 
         {tab === 'defense' && <div className="recruit-note">
           <b>🧱 Barricades</b> (a barricade you set down stays put until zombies destroy it)
