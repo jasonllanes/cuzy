@@ -103,3 +103,7 @@ export const weaponIconFile = (w) => (w.file ? `weapons/${w.file}` : `weapons/w$
 // Attack speed upgrade: each level trims this much off the time between swings
 export const ATK_PER_LEVEL = 0.09;
 export const swingTime = (w, level) => w.cd * (1 - ATK_PER_LEVEL * level);
+
+// the kinds of melee weapon, for the shop filter (a weapon without a kind is a sword; the starter bat goes under Others)
+export const WEAPON_TYPES = [['sword', '🗡️ Swords'], ['staff', '🪄 Staffs'], ['axe', '🪓 Axes'], ['fan', '🪭 Fans'], ['trident', '🔱 Tridents'], ['sling', '🏹 Slings'], ['other', '✨ Others']];
+export const weaponType = (w) => (w.id === 'trusty' ? 'other' : w.kind || 'sword');

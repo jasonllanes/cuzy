@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { drawHero, heroById, retroId, RETRO_COUNT } from '../game/heroes';
 import { hash2 } from '../game/rng';
 import { sfx } from '../game/sfx';
+import { playTransition } from '../game/fxTransition';
 
 // The opening of a new Survival game, before the story at the shelter: a short film drawn on a canvas from the animated Modern Exteriors
 // sheets. Two versions (picked at random): the beach concert where a zombie bites someone in the crowd and a storm breaks, and the
@@ -40,7 +41,8 @@ export default function OpeningScene({ assets, hero, onDone }) {
   const finish = () => {
     if (doneRef.current) return;
     doneRef.current = true;
-    onDone();
+    // the film ends with a pixelfx transition, and the story at the shelter begins under it
+    playTransition(kind === 'concert' ? 'glitch-wipe' : 'iris', { color: '#05060a', onCover: onDone });
   };
 
   useEffect(() => {

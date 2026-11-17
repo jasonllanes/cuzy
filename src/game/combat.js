@@ -155,6 +155,10 @@ export const GUNS = {
   quantum: { name: 'Quantum plasma', icon: '⚡', len: 24, mag: 30, reload: 2.8, rate: 0.2, pellets: 1, spread: 0.02, dmg: 3.5, life: 0.8, price: 320, plasma: true, pierce: 2, arc: 3, blurb: 'The best gun there is: plasma through whole lines of zombies, and every hit throws lightning on to three more. 30 charges.' },
   plasma: { name: 'Plasma gun', icon: '⚡', len: 26, mag: 20, reload: 2.4, rate: 0.42, pellets: 1, spread: 0.02, dmg: 4, life: 0.75, price: 160, plasma: true, arc: 1, blurb: 'Glowing bolts that burn through two enemies in a line, and a lightning arc leaps to one nearby. 20 charges.' },
 };
+// the kinds of gun, for the shop filter
+export const GUN_TYPES = [['pistol', '🔫 Pistols'], ['smg', '💨 SMGs'], ['rifle', '🎯 Rifles'], ['shotgun', '💥 Shotguns'], ['sniper', '🔭 Snipers'], ['energy', '⚡ Energy'], ['other', '🔥 Others']];
+const GUN_KIND = { pistol: 'pistol', sidearm: 'pistol', glock: 'pistol', m1911: 'pistol', magnum: 'pistol', deagle: 'pistol', uzi: 'smg', rifle: 'rifle', lever: 'rifle', ak47: 'rifle', shotgun: 'shotgun', sawedoff: 'shotgun', pump: 'shotgun', sniper: 'sniper', raygun: 'energy', laser: 'energy', quantum: 'energy', plasma: 'energy' };
+export const gunType = (id) => GUN_KIND[id] || 'other';
 export const POWERS = {
   slowmo: { name: 'Slow-mo', icon: '⏳', color: '#7ea8ff', blurb: 'Monsters crawl and strike slowly for a few seconds.' },
   blast: { name: 'Big Blast', icon: '💣', color: '#ff9a3c', blurb: 'Wipes out every ordinary monster at once.' },

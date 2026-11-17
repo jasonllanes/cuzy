@@ -20,6 +20,8 @@ import InviteToasts from './components/InviteToasts';
 import MazeGame from './maze/MazeGame';
 import FeedbackHost from './components/FeedbackForm';
 import { hashSegs, onHash, roomFromHash, setHash } from './game/router';
+import FxTransitionHost from './components/FxTransitionHost';
+import { FAST, LEAVE, START, pick, playTransition } from './game/fxTransition';
 
 const PROFILE_KEY = 'cuzi-profile';
 const REJOIN_KEY = 'cuzy-rejoin';
@@ -231,17 +233,25 @@ export default function App() {
     }
   };
 
-  const begin = (p) => {
-    wipeSave(remember(p).seed);
-    setTravel(null);
-    setSession(null);
-    setPlaying(true);
-    setHash('game');
-  };
+  const begin = (p) =>
+    playTransition(pick(START), {
+      onCover: () => {
+        wipeSave(remember(p).seed);
+        setTravel(null);
+        setSession(null);
+        setPlaying(true);
+        setHash('game');
+      },
+    });
 
   // `joined` is the server's reply to create/join; the room decides the world seed
   // `back` is set when we are returning to a room after a reload: whatever was saved for the map is kept
   const enterRoom = (p, joined, back = null) => {
+    // (a reload that puts you back in your room goes straight in; coming from the menu there is a transition)
+    if (back) return enterNow(p, joined, back);
+    return playTransition(pick(FAST), { onCover: () => enterNow(p, joined, back) });
+  };
+  const enterNow = (p, joined, back = null) => {
     const next = remember(p);
     setTravel(null);
     if (!back) wipeSave(joined.room.seed);
@@ -291,7 +301,8 @@ export default function App() {
   }, [assets, reconnect]);
 
   // the host pressed Start: everyone gets the fresh roster, scores and clock
-  const startRound = (m) => {
+  const startRound = (m) => playTransition(pick(START), { onCover: () => startNow(m) });
+  const startNow = (m) => {
     if (!session?.keepSave) wipeSave(m.room?.seed || session?.room?.seed || profile.seed); // every round starts from nothing again (except one we are carrying on)
     if (m.room?.seed) setProfile((p) => ({ ...p, seed: m.room.seed })); // (the host may have switched the map by changing the game mode)
     setSession((s) => ({ ...s, keepSave: false, autoStart: false, room: m.room || s.room, teams: m.teams || {}, host: m.host, players: m.players, slot: m.players?.find((p) => p.id === s.you)?.slot ?? s.slot, scores: m.scores, clock: m.clock, clockAt: performance.now() }));
@@ -320,11 +331,14 @@ export default function App() {
   };
 
   // the Traveling Map: the trip is over, so the next place starts (a new world, with what you carried over and the wave count going on)
-  const onTravel = ({ seed, carry, shelter }) => {
-    setProfile((p) => ({ ...p, seed }));
-    setSession((s) => (s ? { ...s, room: { ...s.room, seed }, keepSave: false, autoStart: false } : s));
-    setTravel((t) => ({ carry, shelter, n: (t?.n || 0) + 1 }));
-  };
+  const onTravel = ({ seed, carry, shelter }) =>
+    playTransition('shatter-wipe', {
+      onCover: () => {
+        setProfile((p) => ({ ...p, seed }));
+        setSession((s) => (s ? { ...s, room: { ...s.room, seed }, keepSave: false, autoStart: false } : s));
+        setTravel((t) => ({ carry, shelter, n: (t?.n || 0) + 1 }));
+      },
+    });
 
   const dismissInvite = (key) => setInvites((list) => list.filter((i) => i.key !== key));
 
@@ -341,7 +355,8 @@ export default function App() {
     setHash(`room/${String(invite.code).toUpperCase().slice(0, 8)}`, true);
   };
 
-  const exit = () => {
+  const exit = () => playTransition(pick(LEAVE), { onCover: exitNow });
+  const exitNow = () => {
     setHash('', true); // (back on the main menu's address)
     rejoinClear(); // leaving on purpose: no going back after a reload
     setTravel(null);
@@ -405,6 +420,7 @@ export default function App() {
       <InviteToasts invites={invites} assets={assets} onJoin={joinInvite} onDismiss={dismissInvite} />
       <ControlToggle playing={playing && !(session && lobby)} />
       <FeedbackHost playing={playing && !(session && lobby)} />
+      <FxTransitionHost />
     </>
   );
 }

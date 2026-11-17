@@ -469,6 +469,13 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                   <small>{sp.blurb}</small>
                 </button>
               ))}
+              {!v2 && onMaze && (
+                <button type="button" className="type-card" onClick={onMaze}>
+                  <span className="type-emoji" style={{ fontSize: '2.6rem' }}>🍓</span>
+                  <b>Maze Rush</b>
+                  <small>An endless Pac-Man style maze: collect the fruit on the list, dodge the monsters, find the portal. Solo, 2 players on one keyboard, or online.</small>
+                </button>
+              )}
             </div>
             {fromMulti ? (
               <div className="nav-row">

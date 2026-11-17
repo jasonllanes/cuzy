@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { drawHero, heroById, retroId, RETRO_COUNT } from '../game/heroes';
 import { hash2 } from '../game/rng';
+import { playTransition } from '../game/fxTransition';
 
 // The film after a won Survival run: at dawn a helicopter lands by the shelter and every survivor climbs aboard, it flies out over the
 // ocean (cut), and lands in the morning among a crowd of cheering people. Skip (or Esc) jumps to the summary. `heroes` are the hero ids of
@@ -8,7 +9,7 @@ import { hash2 } from '../game/rng';
 
 const W = 320;
 const H = 180;
-const LEN = 17.2;
+const LEN = 15.8;
 const CAPS = [
   [0, '🌅 Dawn. The shelter held. A helicopter is coming down!'],
   [3.4, 'Everybody on board. Quickly!'],
@@ -28,7 +29,7 @@ export default function EvacScene({ assets, heroes, onDone }) {
   const finish = () => {
     if (doneRef.current) return;
     doneRef.current = true;
-    onDone();
+    playTransition('star-iris', { color: '#0b0a10', onCover: onDone });
   };
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function EvacScene({ assets, heroes, onDone }) {
     let raf = 0;
     let start = 0;
     let lastCap = 0;
+    let cutStarted = false;
     let scale = 2;
     const fit = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -241,22 +243,16 @@ export default function EvacScene({ assets, heroes, onDone }) {
       ctx.beginPath();
       ctx.rect(0, 0, W, H);
       ctx.clip();
+      if (!cutStarted && t >= 8.85) {
+        cutStarted = true;
+        playTransition('slash-wipe', { color: '#10131c' }); // (covered at about 9.6s: the cut happens under it)
+      }
       if (t < 6) dawn(t);
       else if (t < 9.6) ocean(t);
       else if (t >= 10) morning(t);
       // the cut: a flash of white, then the morning
-      if (t >= 9.5 && t < 10.2) {
-        ctx.fillStyle = `rgba(255,255,255,${t < 9.8 ? (t - 9.5) / 0.3 : 1 - (t - 9.8) / 0.4})`;
-        ctx.fillRect(0, 0, W, H);
-        if (t >= 9.6 && t < 10) {
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(0, 0, W, H);
-        }
-      }
-      if (t > LEN - 1.2) {
-        ctx.fillStyle = `rgba(0,0,0,${Math.min(1, (t - (LEN - 1.2)) / 1.2)})`;
-        ctx.fillRect(0, 0, W, H);
-      }
+
+
       ctx.restore();
       let ci = 0;
       for (let i = 0; i < CAPS.length; i++) if (t >= CAPS[i][0]) ci = i;

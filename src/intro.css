@@ -76,4 +76,50 @@
 .intro.cut .intro-talk { bottom: calc(9vh + 14px); top: auto; pointer-events: none; }
 .intro.cut .intro-skip { bottom: calc(9vh + 14px); right: 16px; pointer-events: auto; }
 /* nothing from the game's screen (hud, hotbar) shows while the story plays */
-.game.cutscene > *:not(.game-canvas):not(.intro) { visibility: hidden; }
+.game.cutscene > *:not(.game-canvas):not(.intro):not(.opening-scene):not(.fx-transition) { visibility: hidden; }
+
+/* ---------- the story dialog box: a colour for each mood, and some life ---------- */
+.intro.cut .intro-talk.panel {
+  --tone: #6fd8c0; --tone-dark: #0e2a2a; --tone-glow: rgba(111, 216, 192, 0.45);
+  position: absolute; display: flex; align-items: center; gap: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tone-dark) 92%, #000), #0a0d16 85%);
+  border: 3px solid var(--tone); border-radius: 16px; color: #f4f7ff;
+  box-shadow: 0 0 0 3px #05070c, 0 0 22px var(--tone-glow), inset 0 0 18px rgba(255, 255, 255, 0.05);
+  overflow: hidden; animation: talk-pop 0.35s cubic-bezier(0.2, 1.5, 0.4, 1) both, talk-glow 1.6s ease-in-out 0.35s infinite alternate;
+}
+.intro.cut .intro-talk.tone-radio { --tone: #6fd8c0; --tone-dark: #0e2a2a; --tone-glow: rgba(111, 216, 192, 0.5); }
+.intro.cut .intro-talk.tone-safe { --tone: #8bdc6a; --tone-dark: #14280f; --tone-glow: rgba(139, 220, 106, 0.5); }
+.intro.cut .intro-talk.tone-alarm { --tone: #ff5a5f; --tone-dark: #330d10; --tone-glow: rgba(255, 90, 95, 0.6); animation: talk-pop 0.35s cubic-bezier(0.2, 1.5, 0.4, 1) both, talk-shake 0.5s ease-in-out 0.1s 2, talk-glow 0.7s ease-in-out 0.6s infinite alternate; }
+.intro.cut .intro-talk.tone-gold { --tone: #ffc857; --tone-dark: #302208; --tone-glow: rgba(255, 200, 87, 0.5); }
+@keyframes talk-pop { from { transform: translateX(-50%) translateY(24px) scale(0.9); opacity: 0; } }
+@keyframes talk-glow { from { box-shadow: 0 0 0 3px #05070c, 0 0 10px var(--tone-glow), inset 0 0 14px rgba(255, 255, 255, 0.04); } to { box-shadow: 0 0 0 3px #05070c, 0 0 30px var(--tone-glow), inset 0 0 24px rgba(255, 255, 255, 0.08); } }
+@keyframes talk-shake { 0%, 100% { margin-left: 0; } 25% { margin-left: -6px; } 75% { margin-left: 6px; } }
+.intro.cut .intro-talk p { color: #f4f7ff; font: 600 1.15rem var(--body); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); position: relative; }
+.intro.cut .intro-em { font-style: normal; font-weight: 800; color: var(--tone); text-shadow: 0 0 10px var(--tone-glow); animation: em-glow 1s ease-in-out infinite alternate; }
+@keyframes em-glow { from { filter: brightness(1); } to { filter: brightness(1.35); } }
+.intro.cut .intro-caret { color: var(--tone); opacity: 1; }
+/* the name tag, with a sound wave that dances while it talks, and the line counter */
+.intro.cut .intro-bot { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; position: relative; }
+.intro.cut .intro-tag { font: 800 0.78rem var(--pixel); color: #0a0d16; background: var(--tone); padding: 3px 10px; border-radius: 999px; box-shadow: 0 0 10px var(--tone-glow); }
+.intro-wave { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; }
+.intro-wave i { width: 3px; height: 4px; border-radius: 2px; background: var(--tone); opacity: 0.6; }
+.intro-talk.talking .intro-wave i { animation: wave-dance 0.45s ease-in-out infinite alternate; opacity: 1; }
+.intro-wave i:nth-child(2) { animation-delay: 0.08s; }
+.intro-wave i:nth-child(3) { animation-delay: 0.16s; }
+.intro-wave i:nth-child(4) { animation-delay: 0.05s; }
+.intro-wave i:nth-child(5) { animation-delay: 0.12s; }
+@keyframes wave-dance { from { height: 3px; } to { height: 16px; } }
+.intro-dots { margin-left: auto; display: inline-flex; gap: 4px; }
+.intro-dots b { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); }
+.intro-dots b.past { background: color-mix(in srgb, var(--tone) 50%, #000); }
+.intro-dots b.on { background: var(--tone); box-shadow: 0 0 8px var(--tone-glow); }
+/* the portrait in the mood colour, bobbing while it talks */
+.intro.cut .intro-hero { position: relative; background: color-mix(in srgb, var(--tone-dark) 70%, #fff3df 30%); border-color: var(--tone); box-shadow: 0 0 12px var(--tone-glow); }
+.intro-talk.talking .intro-hero { animation: hero-bob 0.28s ease-in-out infinite alternate; }
+@keyframes hero-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+/* scan lines drifting over the box, like an old radio screen */
+.intro-scan { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.045) 0 2px, transparent 2px 4px); animation: scan-drift 2.4s linear infinite; }
+@keyframes scan-drift { to { background-position-y: 16px; } }
+/* a red pulse over the screen for a scary line */
+.intro-alarm { position: absolute; inset: 0; pointer-events: none; z-index: 1; background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 40, 50, 0.35)); animation: alarm-pulse 0.5s ease-in-out 3; opacity: 0; }
+@keyframes alarm-pulse { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }

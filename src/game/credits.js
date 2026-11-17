@@ -4,6 +4,14 @@
 
 export const CREDITS = [
   {
+    pack: 'pixelfx',
+    authors: 'Patch and Hugo Duprez',
+    link: 'https://github.com/patch-gg/pixelfx',
+    used: 'The pixel-art screen transitions (iris, slash wipe, shatter wipe and more) between menus, rooms, games and places.',
+    license: 'MIT License: Copyright (c) 2026 Patch and Hugo Duprez (the notice is kept in src/pixelfx/LICENSE).',
+    checked: 'file',
+  },
+  {
     pack: 'Modern Exteriors',
     authors: 'LimeZu',
     link: 'https://limezu.itch.io/modernexteriors',

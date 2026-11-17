@@ -2,7 +2,7 @@ import PetShop from './PetShop';
 import RarityTabs from './RarityTabs';
 import { useState } from 'react';
 import { BOAT_COST, FREE_UPGRADES, MAX_LEVEL, REVIVE, SKILL_SHOP, SUPPLY_SHOP, THROW_SHOP, WOOD_SHOP } from '../game/upgrades';
-import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
+import { EFFECTS, WEAPONS, WEAPON_TYPES, swingTime, weaponIconFile, weaponRarity, weaponType } from '../game/weapons';
 import { ITEMS, RARITIES, rarityOf, sellPrice, throwDamage, throwRange, throwWeight } from '../game/items';
 import ItemIcon from './ItemIcon';
 import SellPanel from './SellPanel';
@@ -59,7 +59,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
 
         {tab === 'swords' && (
           <div className="sword-shop">
-            <RarityTabs items={WEAPONS} rarity={weaponRarity}>{(list) => (
+            <RarityTabs items={WEAPONS} rarity={weaponRarity} types={WEAPON_TYPES} typeOf={weaponType}>{(list) => (
             <div className="sword-grid">
               {list.map((w) => {
                 const have = !!hud.weapons?.owned?.[w.id];

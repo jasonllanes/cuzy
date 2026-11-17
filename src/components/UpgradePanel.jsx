@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { ALLIES, ALLY_KINDS, teamCap } from '../game/allies';
-import { GUNS, GUN_ORDER } from '../game/combat';
+import { GUNS, GUN_ORDER, GUN_TYPES, gunType } from '../game/combat';
 import { AIR_SUPPORT, MAX_LEVEL, REPAIR_HEAL, REVIVE, UPGRADES, mendCost, repairKitCost, upgradeCost } from '../game/upgrades';
 import { ITEMS, RARITIES, gunRarity, rarityByCost, rarityOf, sellPrice } from '../game/items';
 import { BARRICADE_COST, REPAIR_COST } from '../game/waves';
-import { EFFECTS, WEAPONS, swingTime, weaponIconFile, weaponRarity } from '../game/weapons';
+import { EFFECTS, WEAPONS, WEAPON_TYPES, swingTime, weaponIconFile, weaponRarity, weaponType } from '../game/weapons';
 import { GRENADE_COSTS } from '../game/engine';
 import ItemIcon from './ItemIcon';
 import SellPanel from './SellPanel';
@@ -154,7 +154,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
           <div className="recruit-note">
             <b>⚔️ Weapons</b> (swords have their own tricks; you start with the baseball bat, in the Common list)
             <div className="recruit-list">
-              <RarityTabs items={WEAPONS} rarity={weaponRarity} owned={(w) => w.id !== 'trusty' && !!hud.weapons.owned?.[w.id]}>{(list) => (<>
+              <RarityTabs items={WEAPONS} rarity={weaponRarity} types={WEAPON_TYPES} typeOf={weaponType} owned={(w) => w.id !== 'trusty' && !!hud.weapons.owned?.[w.id]}>{(list) => (<>
               {list.map((w) => {
                 const starter = w.id === 'trusty'; // (the baseball bat: always yours, and it is in the Common list like the rest)
                 const have = starter || !!hud.weapons.owned?.[w.id];
@@ -183,7 +183,7 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
           <div className="recruit-note">
             <b>🔫 Guns</b> (the pistol is free; switch with R or the slot beside the hotbar). Every gun you own can be upgraded: a bigger magazine and more firepower.
             <div className="recruit-list">
-              <RarityTabs items={GUN_ORDER} rarity={(id) => gunRarity(GUNS[id].price)} owned={(id) => id !== 'pistol' && !!hud.gunsOwned[id]}>{(list) => (<>
+              <RarityTabs items={GUN_ORDER} rarity={(id) => gunRarity(GUNS[id].price)} types={GUN_TYPES} typeOf={gunType} owned={(id) => id !== 'pistol' && !!hud.gunsOwned[id]}>{(list) => (<>
               {list.map((id) => {
                 const g = GUNS[id];
                 const have = !!hud.gunsOwned[id];

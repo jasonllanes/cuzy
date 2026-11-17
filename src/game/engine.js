@@ -42,6 +42,7 @@ import { KINDS, DREGION } from './dungeon';
 import { drawEntrance, drawExit, drawTorch, makeRuinHouse, riftColor } from './dungeonArt';
 import { HOUSE_SPRITE } from './world';
 import { devLayout, drawHero, heroById } from './heroes';
+import { playTransition } from './fxTransition';
 
 // how much longer than you a mount can sprint: a chicken lasts 2x, a cow 3x as long
 export const MONSTER_TARGET = 15; // monster kills that win a "monster kills" round
@@ -1820,14 +1821,23 @@ export class Game {
     }
     const d = list[(i + 1) % list.length];
     sfx.play('respawn');
-    this.transition(() => {
-      this.dismount();
-      this.player.x = d.x;
-      this.player.y = d.y + 14;
-      this.player.dir = 'down';
-      this.cam.x = d.x;
-      this.cam.y = d.y;
-      this.onToast?.('🌀 You stepped out of another portal.');
+    if (this.portaling) return;
+    this.portaling = true;
+    // the haunted door swallows the screen (a pixelfx transition), and you step out of the next one when it is covered
+    playTransition('pixel-dissolve', {
+      color: '#0d1a14',
+      onCover: () => {
+        this.dismount();
+        this.player.x = d.x;
+        this.player.y = d.y + 14;
+        this.player.dir = 'down';
+        this.cam.x = d.x;
+        this.cam.y = d.y;
+        this.onToast?.('🌀 You stepped out of another portal.');
+      },
+      onDone: () => {
+        this.portaling = false;
+      },
     });
   }
 
@@ -4652,22 +4662,9 @@ export class Game {
 
   // `who` is 'bot' for a computer rival, who never goes indoors; you may only enter your own house
   blocked(x, y, who) {
+    if (this.cutscene && !who) return false; // in the opening story you are a ghost: nothing can stop the walk to the shelter
     // heroes can wade through water, so only trees, walls and the like stop them
-    if (this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true, !who && !!this.wave)) return true;
-    if (!who && this.wave && this.wave.center && this.world.extraRects.length) {
-      // the shelter's barricades: you walk in through them freely, but going out they stop you (the gate is the way out)
-      const l = x - FOOT_W / 2;
-      const t = y - FOOT_H;
-      for (const r of this.world.extraRects) {
-        if (l < r.x + r.w && l + FOOT_W > r.x && t < r.y + r.h && t + FOOT_H > r.y) {
-          const c = this.wave.center;
-          const now = Math.hypot(this.player.x - c.x, this.player.y - c.y);
-          const next = Math.hypot(x - c.x, y - c.y);
-          if (next >= now - 1e-6) return true; // not towards the shelter: blocked
-          break;
-        }
-      }
-    }
+    if (this.world.isBlocked(x - FOOT_W / 2, y - FOOT_H, FOOT_W, FOOT_H, true, !who && !!this.wave)) return true; // (the shelter barricades only stop enemies: a hero walks through them, in and out)
     if (this.boat) {
       const tx = Math.floor(x / T);
       const ty = Math.floor((y - 2) / T);
@@ -6737,7 +6734,7 @@ export class Game {
             break;
           }
           if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
-          ctx.globalAlpha = this.combat.inBush && this.combat.hidden ? 0.45 : this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
+          ctx.globalAlpha = this.cutscene ? 0.6 : this.combat.inBush && this.combat.hidden ? 0.45 : this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
           ctx.globalAlpha = 1;
           if (this.stunnedT > 0) this.combat.drawStun(ctx, this.player.x, this.player.y - 26, '#ffe36b');

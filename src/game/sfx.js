@@ -180,6 +180,23 @@ const SOUNDS = {
     tone({ type: 'triangle', f0: 98, f1: 70, dur: 0.7, vol: 0.3 });
   },
   bat: () => tone({ type: 'sawtooth', f0: 1800, f1: 2400, dur: 0.06, vol: 0.05 }),
+  // screen transitions and the story's dialog boxes
+  whoosh: () => noise({ dur: 0.5, vol: 0.28, f0: 250, f1: 3200, q: 0.8 }),
+  impact: () => {
+    tone({ type: 'triangle', f0: 140, f1: 40, dur: 0.32, vol: 0.34 });
+    noise({ dur: 0.18, vol: 0.22, f0: 900, f1: 200, q: 0.7 });
+  },
+  glitch: () => [0, 0.05, 0.11, 0.16, 0.24].forEach((at, i) => tone({ type: 'square', f0: 300 + ((i * 397) % 1300), f1: 200 + ((i * 211) % 900), dur: 0.05, vol: 0.09, at })),
+  crtoff: () => {
+    tone({ type: 'sine', f0: 2200, f1: 70, dur: 0.38, vol: 0.2 });
+    noise({ dur: 0.08, vol: 0.12, f0: 4000, f1: 1500, q: 1 });
+  },
+  shatter: () => [0, 0.04, 0.09, 0.15].forEach((at) => noise({ dur: 0.12, vol: 0.2, at, f0: 3500 + at * 4000, f1: 1800, q: 2.5 })),
+  burn: () => noise({ dur: 0.7, vol: 0.2, f0: 700, f1: 160, q: 0.6 }),
+  sparkle: () => [1047, 1319, 1568, 2093].forEach((f, i) => tone({ type: 'sine', f0: f, dur: 0.12, vol: 0.12, at: i * 0.05 })),
+  blip: () => tone({ type: 'square', f0: 640 + Math.random() * 360, dur: 0.035, vol: 0.05 }),
+  radio: () => noise({ dur: 0.16, vol: 0.1, f0: 2800, f1: 1400, q: 0.8 }),
+  alarm: () => [0, 0.16].forEach((at, i) => tone({ type: 'sawtooth', f0: i ? 520 : 700, dur: 0.14, vol: 0.12, at })),
 };
 
 const lastAt = {};

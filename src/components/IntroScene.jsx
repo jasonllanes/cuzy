@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import '../intro.css';
 import Avatar from './Avatar';
+import { sfx } from '../game/sfx';
 
 // The opening story. It happens on the real map: your hero walks to the house (or the shelter) by itself while a voice on the
 // radio talks. This is only the caption box; the walking is the game's (see Game.startCutscene). It plays on its own, with
@@ -14,6 +15,7 @@ function script(kind, name, fight) {
   if (kind === 'survival') {
     return {
       bot: '📻 The radio',
+      tones: ['radio', 'safe', 'alarm', 'gold'],
       lines: [
         `Wake up, ${name}. The radio went quiet an hour ago.`,
         'That container shelter up ahead is home base now. Get inside.',
@@ -25,6 +27,7 @@ function script(kind, name, fight) {
   if (kind === 'waves') {
     return {
       bot: '📻 Biscuit-Bot (radio)',
+      tones: ['gold', 'safe', 'alarm', 'gold'],
       lines: [
         `Good morning, ${name}! You made it to the meadow. That little house is yours.`,
         'Go on in and make yourself at home.',
@@ -35,6 +38,7 @@ function script(kind, name, fight) {
   }
   return {
     bot: '📻 Biscuit-Bot (radio)',
+    tones: ['gold', 'safe', 'radio', 'gold'],
     lines: [
       `Good morning, ${name}! You made it to the meadow. That little house is yours.`,
       'Go on in and make yourself at home.',
@@ -45,7 +49,7 @@ function script(kind, name, fight) {
 }
 
 export default function IntroScene({ kind, name, fight, hero, assets, onDone }) {
-  const { bot, lines } = useRef(script(kind, name, fight)).current;
+  const { bot, lines, tones = [] } = useRef(script(kind, name, fight)).current;
   // when each line starts, and the whole thing's length
   const plan = useRef(null);
   if (!plan.current) {
@@ -93,16 +97,42 @@ export default function IntroScene({ kind, name, fight, hero, assets, onDone }) 
     if (t >= s) idx = i;
   });
   const typed = Math.min(lines[idx].length, Math.floor((t - starts[idx]) / CHAR_TIME));
+  const tone = tones[idx] || 'radio';
+  const talking = typed < lines[idx].length;
+
+  // a little typewriter blip for every other letter, a radio crackle when a line begins and an alarm on the scary ones
+  const lastTyped = useRef(0);
+  const lastIdx = useRef(-1);
+  useEffect(() => {
+    if (idx !== lastIdx.current) {
+      lastIdx.current = idx;
+      lastTyped.current = 0;
+      sfx.play(tone === 'alarm' ? 'alarm' : 'radio', 0.6);
+    }
+    if (typed > lastTyped.current && typed % 2 === 0 && lines[idx][typed - 1] !== ' ') sfx.play('blip', 0.7);
+    lastTyped.current = typed;
+  }, [typed, idx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // the important words glow in the box colour
+  const EM = /(dead|Colossus|shelter|Get inside|wave after wave|something big|walls|survivors|Monsters|barricades|helpers|Forage|skeleton camps|competitive|Wake up|quiet)/gi;
+  const shown = lines[idx].slice(0, typed);
+  const parts = shown.split(EM);
 
   return (
     <div className="intro cut" role="presentation">
       <div className="intro-bar top" />
       <div className="intro-bar bottom" />
-      <div className="intro-talk panel">
+      {tone === 'alarm' && <div key={`al${idx}`} className="intro-alarm" />}
+      <div key={idx} className={`intro-talk panel tone-${tone} ${talking ? 'talking' : ''}`}>
+        <span className="intro-scan" aria-hidden="true" />
         {hero && assets && <span className="intro-hero"><Avatar assets={assets} id={hero} size={56} /></span>}
         <div className="intro-say">
-          <div className="intro-bot">{bot}</div>
-          <p>{lines[idx].slice(0, typed)}<span className="intro-caret">▍</span></p>
+          <div className="intro-bot">
+            <span className="intro-tag">{bot}</span>
+            <span className="intro-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+            <span className="intro-dots" aria-hidden="true">{lines.map((_, i) => <b key={i} className={i === idx ? 'on' : i < idx ? 'past' : ''} />)}</span>
+          </div>
+          <p>{parts.map((part, i) => (i % 2 ? <em key={i} className="intro-em">{part}</em> : part))}<span className="intro-caret">▍</span></p>
         </div>
       </div>
       <button type="button" className="intro-skip btn small-btn" onClick={finish}>Skip ⏭</button>
