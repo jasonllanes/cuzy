@@ -9,7 +9,9 @@ import SellPanel from './SellPanel';
 
 // Free Roam shop: spend coins from chests and skeletons.
 export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
-  const [tab, setTab] = useState('stats');
+  const elem = !!hud.elem;
+  const [tab0, setTab] = useState('stats');
+  const tab = elem ? 'supplies' : tab0; // the Elemental Lands shop only sells potions and the Resurrection Cross
   const coins = hud.coins;
   const owned = (id) => hud.supplies?.[id] || 0;
   const skills = hud.skills || {};
@@ -50,12 +52,12 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
           </span>
           <button className="btn small-btn" onClick={onClose} aria-label="Close shop">✕</button>
         </header>
-        <p className="hint">Coins turn up in chests and when you defeat skeletons.</p>
-        <div className="shop-tabs" role="tablist">
+        <p className="hint">{elem ? 'Health Potions (Q), Mana Potions (R) and the Resurrection Cross.' : 'Coins turn up in chests and when you defeat skeletons.'}</p>
+        {!elem && <div className="shop-tabs" role="tablist">
           {[['stats', '📊 Stats'], ['skills', '✨ Skill Upgrade'], ['supplies', '🎒 Supplies & Throwables'], ['swords', '⚔️ Weapons'], ['pets', '🐾 Pets'], ['sell', '💰 Sell']].map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id} className={`shop-tab ${tab === id ? 'on' : ''}`} onClick={() => setTab(id)}>{label}</button>
           ))}
-        </div>
+        </div>}
 
         {tab === 'swords' && (
           <div className="sword-shop">
@@ -146,7 +148,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
           </div>
         )}
 
-        {tab === 'supplies' && <div className="shop-cols two">
+        {tab === 'supplies' && <div className={`shop-cols ${elem ? 'one' : 'two'}`}>
           <section className="shop-col">
             <h3 className="shop-h">🎒 Supplies</h3>
             <div className="upg-list">
@@ -154,10 +156,10 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                 const full = owned(s.id) >= s.cap;
                 return (
                   <div className="upg-row" key={s.id}>
-                    <div className={`upg-icon rar rar-${s.item ? rarityOf(s.item) : 'common'}`}>{s.item ? <ItemIcon id={s.item} scale={2} /> : s.icon}</div>
+                    <div className={`upg-icon rar rar-${s.item ? rarityOf(s.item) : 'common'}`}>{elem && s.id === 'stam' ? '🔷' : s.item ? <ItemIcon id={s.item} scale={2} /> : s.icon}</div>
                     <div className="upg-info">
-                      <h3>{s.name} <small>carrying {owned(s.id)}/{s.cap}</small></h3>
-                      <p>{s.desc}</p>
+                      <h3>{elem ? (s.id === 'hp' ? 'Health Potion' : 'Mana Potion') : s.name} <small>carrying {owned(s.id)}/{s.cap}</small></h3>
+                      <p>{elem ? (s.id === 'hp' ? 'Restores 90% of your health. Press Q.' : 'Restores 60% of your mana. Press R.') : s.desc}</p>
                     </div>
                     <button className="btn go small-btn" disabled={full || coins < s.cost} onClick={() => game.buyShop('supply', s.id)}>
                       {full ? 'Full' : `🪙 ${s.cost}`}
@@ -175,15 +177,15 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
                   {(hud.revives || 0) >= REVIVE.cap ? 'Full' : `🪙 ${REVIVE.cost}`}
                 </button>
               </div>
-              <div className="upg-row">
+              {!elem && <div className="upg-row">
                 <div className="upg-icon rar rar-rare">⛵</div>
                 <div className="upg-info">
                   <h3>Rowing boat</h3>
                   <p>It floats on the nearest open water. Walk up to it, press F, and sail across the sea (F again near the shore to get out). Random boats drift in the ocean too.</p>
                 </div>
                 <button className="btn go small-btn" disabled={coins < BOAT_COST} onClick={() => game.buyBoat()}>🪙 {BOAT_COST}</button>
-              </div>
-              {WOOD_SHOP.map((w) => (
+              </div>}
+              {!elem && WOOD_SHOP.map((w) => (
                 <div className="upg-row" key={`wood${w.qty}`}>
                   <div className="upg-icon rar rar-common"><ItemIcon id="wood" scale={2} /></div>
                   <div className="upg-info">
@@ -196,7 +198,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
             </div>
           </section>
 
-          <section className="shop-col">
+          {!elem && <section className="shop-col">
             <h3 className="shop-h">🎯 Throwables <small>(right-click to throw)</small></h3>
             <RarityTabs items={THROW_SHOP} rarity={(t) => rarityOf(t.item)}>{(list) => (
             <div className="upg-list">
@@ -217,7 +219,7 @@ export default function ShopPanel({ hud, game, onClose, inventory = [] }) {
               })}
             </div>
             )}</RarityTabs>
-          </section>
+          </section>}
         </div>}
       </div>
     </div>

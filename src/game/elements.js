@@ -17,10 +17,10 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const seed = () => 1 + Math.floor(Math.random() * 50);
 
 export const SKILL_KEYS = ['shoot', 'dash', 'block', 'a', 'b', 'ult'];
-export const SKILL_LABEL = { shoot: 'Click', dash: 'Space', block: 'R', a: 'Q', b: 'E', ult: 'X' };
-const MAX_LV = { shoot: 5, dash: 5, block: 5, a: 5, b: 5, ult: 3 };
-const NEED_CHAR_LV = { shoot: 1, dash: 1, block: 1, a: 2, b: 4, ult: 7 }; // the character level that lets you learn a skill
-export const BASE = { shoot: { mana: 3, cd: 0.34 }, dash: { mana: 8, cd: 1.3 }, block: { mana: 12, cd: 5 }, a: { mana: 16, cd: 4.5 }, b: { mana: 24, cd: 8 }, ult: { mana: 70, cd: 40 } };
+export const SKILL_LABEL = { shoot: 'L-Click', dash: 'R-Click', block: '1', a: '2', b: '3', ult: '4' };
+const MAX_LV = { shoot: 1, dash: 1, block: 5, a: 5, b: 5, ult: 3 };
+const NEED_CHAR_LV = { shoot: 1, dash: 1, block: 1, a: 1, b: 1, ult: 1 }; // the character level that lets you learn a skill
+export const BASE = { shoot: { mana: 2, cd: 0.6 }, dash: { mana: 8, cd: 1.3 }, block: { mana: 12, cd: 5 }, a: { mana: 16, cd: 4.5 }, b: { mana: 24, cd: 8 }, ult: { mana: 70, cd: 40 } };
 export const PASSIVES = {
   pool: { name: 'Mana pool', icon: '🔷', desc: '+20 max mana', max: 8 },
   focus: { name: 'Focus', icon: '🧘', desc: 'Holding Space gathers mana faster', max: 6 },
@@ -177,7 +177,8 @@ export class ElementSystem {
   }
 
   level(k) {
-    return this.lv[k] ?? (k === 'shoot' || k === 'dash' || k === 'block' ? 1 : 0);
+    if (k === 'shoot' || k === 'dash') return 1; // the two default skills: left and right click, always there
+    return this.lv[k] ?? 0;
   }
 
   // take one level back off a skill and get the point again (the three starting skills keep their first level, which was free)
@@ -190,8 +191,7 @@ export class ElementSystem {
       this.spent = Math.max(0, this.spent - 1);
       this.mana = Math.min(this.maxMana(), this.mana);
     } else {
-      const min = k === 'shoot' || k === 'dash' || k === 'block' ? 1 : 0;
-      if (!SKILL_KEYS.includes(k) || this.level(k) <= min) return false;
+      if (!SKILL_KEYS.includes(k) || k === 'shoot' || k === 'dash' || this.level(k) <= 0) return false;
       this.lv[k] = this.level(k) - 1;
       this.spent = Math.max(0, this.spent - 1);
     }
@@ -237,7 +237,7 @@ export class ElementSystem {
     g.pfx.spawn('spawn/summon-rise', g.player.x, g.player.y + 4, { scale: 0.7, seed: seed(), palette: this.def().pal });
     g.pfx.spawn('spawn/spawn-portal', g.player.x, g.player.y + 4, { scale: 0.6, seed: seed() });
     sfx.play('levelup', 0.6);
-    g.onToast?.(`${this.def().icon} You are now a ${this.def().name} bender! Spend your skill points (press K).`);
+    g.onToast?.(`${this.def().icon} You are now a ${this.def().name} bender! Spend your skill points (press E).`);
     g.save?.();
     g.emitHud();
   }
@@ -268,7 +268,7 @@ export class ElementSystem {
     if (gained) {
       this.bonus += gained;
       this.pointsGiven = level;
-      this.g.onToast?.(`✨ +${gained} skill point${gained > 1 ? 's' : ''}: press K to upgrade your skills.`);
+      this.g.onToast?.(`✨ +${gained} skill point${gained > 1 ? 's' : ''}: press E to upgrade your skills.`);
     }
     this.mana = this.maxMana();
   }
@@ -325,7 +325,7 @@ export class ElementSystem {
     } else if (held < 0.25) this.cast('dash');
   }
 
-  // the recharge hotkey (C, or the button): hold it and you stand still in an aura while your mana fills
+  // the recharge hotkey (Space, or the button): hold it and you stand still in an aura while your mana fills
   rechargeHold(on) {
     if (!this.el) return;
     this.recharge = !!on;
@@ -333,11 +333,11 @@ export class ElementSystem {
 
   key(code) {
     if (!this.el || this.g.dead) return false;
-    if (code === 'KeyR') this.cast('block');
-    else if (code === 'KeyQ') this.cast('a');
-    else if (code === 'KeyE') this.cast('b');
-    else if (code === 'KeyX') this.cast('ult');
-    else return false;
+    if (code === 'KeyQ') return void this.g.useSupply('hp'), true; // health potion
+    if (code === 'KeyR') return void this.g.useSupply('stam'), true; // mana potion
+    const k = { Digit1: 'block', Digit2: 'a', Digit3: 'b', Digit4: 'ult' }[code];
+    if (!k) return false;
+    this.cast(k);
     return true;
   }
 
@@ -366,7 +366,7 @@ export class ElementSystem {
     const g = this.g;
     if (g.dead || g.frozen || g.cutscene || g.paused || g.stunnedT > 0 || g.inside) return false;
     if (this.level(k) < 1 || g.level < NEED_CHAR_LV[k]) {
-      if (!quiet) g.onToast?.(`${this.def().skills[k].name}: learn it first (K), it needs character level ${NEED_CHAR_LV[k]}.`);
+      if (!quiet) g.onToast?.(`${this.def().skills[k].name}: learn it first (E).`);
       return false;
     }
     if ((this.cd[k] || 0) > 0) return false;

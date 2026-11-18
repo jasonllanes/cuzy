@@ -37,7 +37,7 @@ import TouchControls from './TouchControls';
 import { getControls, useControls } from '../game/controls';
 import { COMMANDS } from '../game/commands';
 import { hp100 } from '../game/stats';
-import { isEscapeSeed, mapNameOf } from '../game/maps';
+import { isElemSeed, isEscapeSeed, mapNameOf } from '../game/maps';
 import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
 import TrainingPanel from './TrainingPanel';
@@ -472,7 +472,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     if (introRef.current === 'play' && !openingRef.current && !game.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0);
     };
     // a V2 world draws sprites from the Modern Exteriors atlases: they are loaded before the game begins
-    if (isV2Seed(profile.seed) || isEscapeSeed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) || isEscapeSeed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
+    if (isV2Seed(profile.seed) || isElemSeed(profile.seed) || isEscapeSeed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) || isElemSeed(profile.seed) || isEscapeSeed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
     else boot();
     return () => {
       dead = true;
@@ -606,7 +606,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         return;
       }
       const digit = /^Digit([1-9])$/.exec(e.code);
-      if (digit && !modal) {
+      if (digit && !modal && !gameRef.current?.elem) {
         setSelected(Number(digit[1]) - 1);
         return;
       }
@@ -691,6 +691,19 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const typed = chatText.trim().split(/\s+/)[0].toLowerCase();
   const hints = chatOpen && cheatsOn && (chatText === '' || chatText.startsWith('-')) ? COMMANDS.filter((c) => `-${c.name}`.startsWith(typed) || chatText === '') : [];
 
+  const homeBtn = (
+    <button
+      type="button"
+      className={`tp-home-btn ${hud.recallT > 0 ? 'active' : ''} ${hud.recallCd > 0 ? 'cooling' : ''}`}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => gameRef.current?.combat?.startRecall()}
+      title={`${waves ? 'Teleport to the base' : 'Teleport home'} (H): stand still for 2.5 seconds${hud.recallCd > 0 ? ` · ready in ${Math.ceil(hud.recallCd)}s` : ''}`}
+    >
+      <span>🏡</span>
+      {hud.recallCd > 0 && <b>{Math.ceil(hud.recallCd)}</b>}
+      <i className="recall-cd" style={{ height: `${Math.min(100, (hud.recallCd / RECALL_CD) * 100)}%` }} />
+    </button>
+  );
   return (
     <div className={`game ${mobile ? 'mobile' : ''} ${mobile && hudOff ? 'hud-off' : ''} ${mobile && topFold ? 'top-folded' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
       <div className="game-canvas">
@@ -883,24 +896,12 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} onSupply={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
-      {!mobile && <div className="hud hud-help">{hud.elem ? <>WASD move · Click bolt · Space tap dash · hold C (or Space) to recharge mana · R block · Q / E element skills · X ultimate · K skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
+      {!mobile && <div className="hud hud-help">{hud.elem ? <>WASD move · Click bolt · Right-click dash · 1 block · 2 / 3 element skills · 4 ultimate · hold Space to recharge mana · E skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
         </div>
       )}
-      <button
-        type="button"
-        className={`hud recall-top ${hud.recallT > 0 ? 'active' : ''} ${hud.recallCd > 0 ? 'cooling' : ''}`}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => gameRef.current?.combat?.startRecall()}
-        title={waves ? 'Stand still for 2.5 seconds to teleport back to the base' : 'Stand still for 2.5 seconds to teleport back home'}
-      >
-        <span>🏡 Teleport Home</span>
-        <kbd>H</kbd>
-        {hud.recallCd > 0 && <b>{Math.ceil(hud.recallCd)}s</b>}
-        <i className="recall-cd" style={{ width: `${Math.min(100, (hud.recallCd / RECALL_CD) * 100)}%` }} />
-      </button>
       {!hud.elem && <div className={`hud skills left ${survival ? 'with-gun' : ''}`}>
         {(waves || hud.util === 'shield' || !hud.util) && (
         <button
@@ -1167,7 +1168,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <span>{banner.sub}</span>
         </div>
       )}
-      {hud.elem && <ElementHud hud={hud} game={gameRef.current} />}
+      {hud.elem && <ElementHud hud={hud} game={gameRef.current} home={homeBtn} />}
       {!hud.elem && <Hotbar
         slots={inventory}
         selected={selected}
@@ -1189,6 +1190,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <small>{GUNS[hud.gun].name}</small>
           </button>
         )}
+        {homeBtn}
       </Hotbar>}
       {hud.celeb && (
         <div key="round-flash" className="levelup-flash round-flash" aria-hidden="true">

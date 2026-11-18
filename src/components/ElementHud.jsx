@@ -6,14 +6,14 @@ function SkillIcon({ name, size = 32 }) {
 }
 import { Pfx, bakedLoop, drawBaked, loadFx } from '../game/pfx';
 
-const KEY = { shoot: 'Click', dash: 'Space', block: 'R', a: 'Q', b: 'E', ult: 'X' };
+const KEY = { shoot: 'L-Click', dash: 'R-Click', block: '1', a: '2', b: '3', ult: '4' };
 const HOW = {
-  shoot: 'Hold to repeat',
-  dash: 'Tap Space',
-  block: 'Press R',
-  a: 'Press Q',
-  b: 'Press E',
-  ult: 'Ultimate',
+  shoot: 'Left click',
+  dash: 'Right click',
+  block: 'Press 1',
+  a: 'Press 2',
+  b: 'Press 3',
+  ult: 'Press 4',
 };
 const ORDER = ['shoot', 'dash', 'block', 'a', 'b', 'ult'];
 
@@ -157,9 +157,9 @@ function Tutorial({ el }) {
       <div className="elem-tcharge">
         <SkillPreview el={el} k="shoot" recharge />
         <div>
-          <div className="elem-tcard-top"><kbd>Hold C</kbd><b>Recharge mana</b></div>
-          <small>Hold <b>C</b> (or hold <b>Space</b>) and you stay still inside a glowing aura while your mana slowly fills. Getting hit breaks it.</small>
-          <span className="elem-chip">Blue potions drop from critters · press K to spend skill points</span>
+          <div className="elem-tcard-top"><kbd>Hold Space</kbd><b>Recharge mana</b></div>
+          <small>Hold <b>Space</b> and you stay still inside a glowing aura while your mana slowly fills. Getting hit breaks it.</small>
+          <span className="elem-chip">Blue potions drop from critters · press E to spend skill points</span>
         </div>
       </div>
     </div>
@@ -201,7 +201,7 @@ export function ElementPicker({ onPick, current }) {
   );
 }
 
-export default function ElementHud({ hud, game }) {
+export default function ElementHud({ hud, game, home }) {
   const e = hud.elem;
   const [changing, setChanging] = useState(false);
   useEffect(() => {
@@ -221,7 +221,7 @@ export default function ElementHud({ hud, game }) {
             <span className="elem-hp-fill" style={{ width: `${hpPct}%` }} />
             <b>❤ {e.hp} / {e.maxHp}</b>
           </div>
-          <div className="elem-mana" title="Mana: hold C or Space to recharge it">
+          <div className="elem-mana" title="Mana: hold Space to recharge it">
             <span className="elem-mana-fill" style={{ width: `${pct}%` }} />
             <b>🔷 {e.mana} / {e.maxMana}{e.charging ? ' · recharging…' : ''}{e.empower ? ' · ⭐ POWER' : ''}</b>
           </div>
@@ -234,25 +234,30 @@ export default function ElementHud({ hud, game }) {
             onPointerLeave={() => el?.rechargeHold(false)}
             onPointerCancel={() => el?.rechargeHold(false)}
           >
-            <kbd>C</kbd> 🔋 Recharge
+            <kbd>Space</kbd> 🔋 Recharge
           </button>
+        </div>
+        {home}
+        <div className="elem-pots">
+          <button type="button" className="elem-pot" onMouseDown={(ev) => ev.preventDefault()} onClick={() => game?.useSupply('hp')} title="Health Potion (Q)"><kbd>Q</kbd>❤️<b>{hud.supplies?.hp || 0}</b></button>
+          <button type="button" className="elem-pot mana" onMouseDown={(ev) => ev.preventDefault()} onClick={() => game?.useSupply('stam')} title="Mana Potion (R)"><kbd>R</kbd>🔷<b>{hud.supplies?.stam || 0}</b></button>
         </div>
         <div className="elem-skills">
           {e.skills.map((s) => {
             const ready = s.cd <= 0 && !s.locked && s.lv > 0;
             const cdp = s.cdMax > 0 ? Math.min(100, (s.cd / s.cdMax) * 100) : 0;
             return (
-              <button key={s.k} type="button" className={`elem-skill ${ready ? 'ready' : ''} ${s.lv < 1 ? 'locked' : ''} ${e.mana < s.mana ? 'nomana' : ''}`} title={`${s.name}: ${s.desc} (${s.mana} mana)`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => s.k !== 'shoot' && s.k !== 'dash' && el?.cast(s.k)}>
+              <button key={s.k} type="button" className={`elem-skill ${ready ? 'ready' : ''} ${s.lv < 1 ? 'locked' : ''} ${e.mana < s.mana ? 'nomana' : ''}`} title={`${s.name}: ${s.desc} (${s.mana} mana)`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => s.k !== 'shoot' && el?.cast(s.k)}>
                 <kbd>{s.key}</kbd>
                 <SkillIcon name={s.ico} size={30} />
                 <b>{s.name}</b>
-                <small>{s.lv > 0 ? `Lv ${s.lv}` : s.locked ? `🔒 Lv ${s.needLv}` : 'learn (K)'}</small>
+                <small>{s.lv > 0 ? `Lv ${s.lv}` : s.locked ? `🔒 Lv ${s.needLv}` : 'learn (E)'}</small>
                 {s.cd > 0 && <i style={{ height: `${cdp}%` }} />}
               </button>
             );
           })}
-          <button type="button" className={`elem-skill pts ${e.points > 0 ? 'ready' : ''}`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => el?.togglePanel()} title="Upgrade your skills (K)">
-            <kbd>K</kbd>
+          <button type="button" className={`elem-skill pts ${e.points > 0 ? 'ready' : ''}`} onMouseDown={(ev) => ev.preventDefault()} onClick={() => el?.togglePanel()} title="Upgrade your skills (E)">
+            <kbd>E</kbd>
             <span className="elem-star">⭐</span>
             <b>Skills</b>
             <small>{e.points > 0 ? `⭐ ${e.points} point${e.points > 1 ? 's' : ''}` : 'upgrade'}</small>
@@ -265,12 +270,12 @@ export default function ElementHud({ hud, game }) {
             <div className="elem-pick-card panel" style={{ '--ec': e.color }}>
               <h2>{e.icon} {e.name} skills <small>⭐ {e.points} point{e.points === 1 ? '' : 's'} to spend · you get one every level</small></h2>
               <div className="elem-up">
-                {e.skills.map((s) => (
+                {e.skills.filter((s) => s.k !== 'shoot' && s.k !== 'dash').map((s) => (
                   <div key={s.k} className="elem-up-row">
                     <span className="elem-up-ico"><SkillIcon name={s.ico} size={36} /><kbd>{s.key}</kbd></span>
                     <div><b>{s.name}</b> <small>Lv {s.lv}/{s.max}</small><br /><small className="muted">{s.desc}</small></div>
                     <span className="elem-up-btn">
-                      <button type="button" className="btn small-btn ghost" title="Take a level back and get the point again" disabled={s.lv <= (['shoot', 'dash', 'block'].includes(s.k) ? 1 : 0)} onClick={() => el?.downgrade(s.k)}>−</button>
+                      <button type="button" className="btn small-btn ghost" title="Take a level back and get the point again" disabled={s.lv <= 0} onClick={() => el?.downgrade(s.k)}>−</button>
                       <button type="button" className="btn small-btn" disabled={e.points < 1 || s.lv >= s.max || s.locked} onClick={() => el?.upgrade(s.k)}>{s.locked ? `🔒 Lv ${s.needLv}` : s.lv >= s.max ? 'Max' : s.lv < 1 ? 'Learn' : '+ Upgrade'}</button>
                     </span>
                   </div>
@@ -288,7 +293,7 @@ export default function ElementHud({ hud, game }) {
               </div>
               <div className="elem-up-btns">
                 <button type="button" className="btn ghost" onClick={() => setChanging(true)}>🔁 Change element</button>
-                <button type="button" className="btn go" onClick={() => el?.togglePanel()}>Close (K)</button>
+                <button type="button" className="btn go" onClick={() => el?.togglePanel()}>Close (E)</button>
               </div>
             </div>
             <Tutorial el={e.el} />

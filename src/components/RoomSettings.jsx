@@ -159,7 +159,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       </Section>
 
       {free && (
-        <Section icon="🚁" title="Escape" note={escape ? `chopper in ${room.escapeMins || 10} min · waits ${room.extractMins || 5}` : 'off'} open={escape}>
+        <Section icon="🚁" title="Escape" note={escape ? `chopper in ${room.escapeMins || 10} min · waits ${room.extractMins || 5}` : 'off'}>
           <Switch label="Escape (open world survival)" hint={escape ? 'A co-op round in a big open world: loot the houses, shops, clinics, police stations and cars for guns, grenades, bullets and medicine (there is no shop), fight the zombies that keep coming, and find the compass. When the timer ends a chopper lands somewhere far away: reach it to escape!' : 'Loot buildings, survive zombie hordes, and escape on a chopper that lands far away. No shop: everything is found.'} on={escape} disabled={locked} onChange={(v) => onChange({ escape: v })} />
           {escape && (
             <>
@@ -181,7 +181,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       )}
 
       {free && (
-        <Section icon="🏖️" title="Beach Ball" note={soccer ? `first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : 'off'} open={soccer}>
+        <Section icon="🏖️" title="Beach Ball" note={soccer ? `first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : 'off'}>
           <Switch label="Beach Ball match" hint={soccer ? 'Two teams, one beach ball and a goal at each end: kick it by walking into it (run or dash for a hard kick) and roll it into the other team’s goal. With only two players it is a 1v1.' : 'A cozy ball game on a beach pitch: two teams, one ball, a goal at each end. No fighting, no monsters.'} on={soccer} disabled={locked} onChange={(v) => onChange({ soccer: v })} />
           {soccer && (
             <>
@@ -243,7 +243,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       )}
 
       {free && !soccer && !escape && (
-        <Section icon="🏛️" title="Duels" note={duelNote} open={duels !== 'off'}>
+        <Section icon="🏛️" title="Duels" note={duelNote}>
           <div className="set-row wide">
             <div className="set-label">
               <b>Colosseum duels</b>

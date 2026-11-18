@@ -2267,3 +2267,61 @@ kbd { display: inline-block; min-width: 34px; text-align: center; padding: 1px 5
 .elem-tcard .elem-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .elem-tcharge { min-width: 0; }
 @media (max-width: 700px) { .elem-tut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* room code at the very top; the teleport-home icon sits right of the hotbar / skill bar */
+.room-panel { top: 6px; }
+.tp-home-btn { position: absolute; left: calc(100% + 10px); bottom: 2px; width: 46px; height: 46px; display: grid; place-items: center; overflow: hidden; padding: 0; cursor: pointer; pointer-events: auto; font-size: 1.5rem; line-height: 1; color: var(--ink); background: var(--paper); border: 3px solid var(--wood); border-radius: 14px; box-shadow: 0 3px 0 var(--wood-dark); z-index: 5; }
+.tp-home-btn:hover { filter: brightness(1.06); }
+.tp-home-btn.active { border-color: #5aaee8; box-shadow: 0 0 0 3px rgba(90, 174, 232, 0.35), 0 3px 0 #3a86c0; }
+.tp-home-btn.cooling span { opacity: 0.45; }
+.tp-home-btn b { position: absolute; font: 700 0.8rem var(--pixel); color: var(--rose-dark); }
+.tp-home-btn .recall-cd { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.18); pointer-events: none; }
+.elem-bar .tp-home-btn { left: calc(100% + 8px); bottom: 4px; background: rgba(10, 12, 30, 0.6); border-color: rgba(255, 255, 255, 0.35); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); backdrop-filter: blur(6px); }
+.game.mobile .tp-home-btn { display: none; }
+
+.elem-pots { position: absolute; right: calc(100% + 8px); bottom: 4px; display: flex; gap: 6px; pointer-events: auto; }
+.elem-pot { position: relative; width: 46px; height: 46px; display: grid; place-items: center; font-size: 1.2rem; padding: 0; cursor: pointer; color: #fff; background: rgba(10, 12, 30, 0.6); border: 2px solid rgba(255, 90, 120, 0.7); border-radius: 12px; backdrop-filter: blur(6px); }
+.elem-pot.mana { border-color: rgba(90, 176, 255, 0.8); }
+.elem-pot kbd { position: absolute; left: 3px; top: 2px; font: 700 8px var(--pixel); background: rgba(0, 0, 0, 0.5); border-radius: 4px; padding: 0 3px; }
+.elem-pot b { position: absolute; right: 4px; bottom: 1px; font: 700 0.7rem var(--pixel); }
+.shop-cols.one { grid-template-columns: 1fr; }
+
+/* ---- interface upgrade: glass cards, softer edges, lift on hover ---- */
+.menu.welcome { background: radial-gradient(ellipse at 50% 30%, #4b4377 0%, #2a2547 55%, #15122b 100%); }
+.menu-card {
+  background: linear-gradient(160deg, rgba(58, 54, 94, 0.82), rgba(24, 21, 46, 0.9));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.menu-card .home-btn {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
+  border: 1.5px solid rgba(255, 255, 255, 0.16); border-radius: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: transform 0.12s, background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.menu-card .home-btn:hover:not(:disabled) { transform: translateY(-2px); background: linear-gradient(160deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.07)); border-color: rgba(255, 190, 120, 0.7); box-shadow: 0 10px 22px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+.menu-card .home-btn:active:not(:disabled) { transform: translateY(0); }
+.menu-card .home-btn.play { background: linear-gradient(160deg, rgba(95, 174, 122, 0.4), rgba(47, 107, 69, 0.35)); border-color: rgba(120, 220, 150, 0.7); }
+.menu-card .home-btn.play:hover:not(:disabled) { background: linear-gradient(160deg, rgba(110, 195, 140, 0.5), rgba(47, 107, 69, 0.4)); border-color: #9cf0b4; }
+.menu-card .settings, .menu-card .settings-panel, .menu-card .credit { background: rgba(0, 0, 0, 0.22); border-color: rgba(255, 255, 255, 0.14); border-radius: 14px; }
+.menu-card input { border-radius: 12px; background: rgba(0, 0, 0, 0.3); }
+
+/* in-game panels and chips */
+.hud.panel, .hud .panel, .room-pill, .coin-chip, .hud-help, .status-pill {
+  background: rgba(255, 249, 238, 0.84);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(30, 20, 50, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+.coin-chip, .room-pill { border-radius: 999px; }
+.hud-right .btn, .hud-right button.btn, .hud .btn:not(.go):not(.ghost) {
+  border-radius: 14px; transition: transform 0.1s, filter 0.1s, box-shadow 0.1s;
+}
+.hud-right .btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+.tp-home-btn { border-radius: 16px; background: rgba(255, 249, 238, 0.88); border: 1.5px solid rgba(255, 255, 255, 0.7); box-shadow: 0 6px 16px rgba(30, 20, 50, 0.35); backdrop-filter: blur(8px); }
+.hotbar button, .hotbar .slot { border-radius: 12px; }
+.overlay > .panel { backdrop-filter: blur(10px); border-radius: 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+.overlay { background: rgba(10, 8, 24, 0.55); backdrop-filter: blur(3px); }

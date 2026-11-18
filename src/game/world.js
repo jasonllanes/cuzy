@@ -84,7 +84,7 @@ export class World {
     this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(stripElem(stripTravel(seedStr)))))))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
-    this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape); // Free Roam V2: the same world with the Modern Exteriors props on top
+    this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape || this.elem); // Free Roam V2: the same world with the Modern Exteriors props on top
     this.seed = hashString(this.seedStr);
     // the island maps (Tidal Isles, Emerald Isles and so on) are drawn with a tileset of their own: Free Roam picks it by the
     // start of the seed, and a Survival map names it

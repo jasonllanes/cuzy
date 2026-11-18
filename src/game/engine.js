@@ -411,11 +411,8 @@ export class Game {
         }
       } else if (e.code === 'Space' && this.elem) {
         e.preventDefault();
-        if (!e.repeat && !this.dead) this.elem.spaceDown(); // Elements: tap = dash, hold = gather mana
-      } else if (this.elem && e.code === 'KeyC') {
-        e.preventDefault();
-        if (!e.repeat && !this.dead) this.elem.rechargeHold(true); // hold C: stand still and recharge mana
-      } else if (this.elem && !e.repeat && e.code === 'KeyK') {
+        if (!e.repeat && !this.dead) this.elem.rechargeHold(true); // Elements: hold Space to stand still and recharge mana
+      } else if (this.elem && !e.repeat && e.code === 'KeyE') {
         this.elem.togglePanel();
       } else if (this.elem && !e.repeat && !this.dead && this.elem.key(e.code)) {
         e.preventDefault();
@@ -442,9 +439,8 @@ export class Game {
         this.spaceLock = false;
         this.spaceHold = 0;
       }
-      if (e.code === 'KeyC') this.elem?.rechargeHold(false);
       if (e.code === 'Space') {
-        if (this.elem) this.elem.spaceUp();
+        if (this.elem) this.elem.rechargeHold(false);
         else this.combat?.skillKeyUp();
       }
     };
@@ -477,6 +473,10 @@ export class Game {
         // the compass: right-click opens it (and closes it again)
         this.compassOpen = !this.compassOpen;
         sfx.play('pickup', 0.5);
+        return;
+      }
+      if (e.button === 2 && this.elem) {
+        if (!this.dead) this.elem.cast('dash'); // Elements: right click is the dash
         return;
       }
       this.mouseHeld[e.button] = true;
@@ -2731,6 +2731,21 @@ export class Game {
   // (`packOnly`: the list asked for the pack itself, so no falling back to the other food)
   useSupply(kind, packOnly = false) {
     if (this.dead || (this.wave && !this.world.apoc)) return;
+    if (this.elem && kind === 'stam') {
+      // Elements: the second potion is a Mana Potion
+      const e = this.elem;
+      if (this.cds.stam > 0) return void this.onToast?.(`Mana Potion is recharging (${Math.ceil(this.cds.stam)}s).`);
+      if (this.supplies.stam <= 0) return void this.onToast?.('No Mana Potions left. Buy some in the shop (U).');
+      if (e.mana >= e.maxMana() - 1) return void this.onToast?.('Your mana is already full.');
+      this.supplies.stam--;
+      this.cds.stam = STAM_CD;
+      const add = Math.round(e.maxMana() * 0.6);
+      e.mana = Math.min(e.maxMana(), e.mana + add);
+      sfx.play('drink');
+      this.combat.addFloater({ x: this.player.x, y: this.player.y - 34, text: `+${add} mana`, color: '#5ab0ff', t: 0 });
+      this.emitHud();
+      return;
+    }
     const c = this.combat;
     const item = kind === 'hp' ? ITEMS.hppack : ITEMS.soupcan;
     if (this.cds[kind] > 0) {
@@ -4999,7 +5014,7 @@ export class Game {
       }
       this.updateDeath(dt);
       this.syncSelectedGun();
-      if (this.mouseHeld[2] && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot); // right click always throws what is selected in the backpack
+      if (this.mouseHeld[2] && !this.elem && !this.dead && !this.celeb) this.combat.throwSelected(this.selectedSlot); // right click always throws what is selected in the backpack
       // still holding left click when the last throw, shot or cast is over: the charge bar starts again by itself
       if (this.mouseHeld[0] && !this.dead && !this.celeb && !this.wave && !this.combat.hold && !this.combat.dash && !this.combat.spin && !this.combat.thrown && !this.paused && this.rules?.melee !== false && this.combat.canFight()) this.combat.holdStart();
       // the aim stick is held: keep swinging that way (the sword's own cool-down sets the pace)

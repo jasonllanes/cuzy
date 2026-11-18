@@ -86,6 +86,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   };
   const special = SPECIAL[gameType] || null;
   const survival = gameType === 'survival';
+  const skipMap = !!special && mode === 'solo'; // a fixed world has nothing to pick on the map page: the hero page opens the room
 
   // Free Roam heroes: the Super Retro World pack
   const [hero, setHero] = useState(() => {
@@ -183,8 +184,8 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const submit = (e) => {
     e.preventDefault();
     if (step === 'name') go('game');
-    else if (step === 'hero') go('play');
-    else if (step === 'play' && mode === 'solo') {
+    else if (step === 'hero' && !skipMap) go('play');
+    else if ((step === 'play' || (step === 'hero' && skipMap)) && mode === 'solo') {
       // a plain Free Roam game starts in its own room (so it has a waiting area and settings); the rest go straight in
       if (soloRoom) createSolo();
       else onBegin(profile());
@@ -390,7 +391,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
         )}
 
         <nav className="stepper" aria-label="Setup steps">
-          {STEPS.map(([id, label], i) => (
+          {STEPS.filter(([id]) => !(skipMap && id === 'play')).map(([id, label], i) => (
             <button
               key={id}
               type="button"
@@ -541,7 +542,12 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
                 <p className="hero-blurb">Selected: <b>{selected.label}</b>. {survival ? 'Your hero faces the horde in Survival too. ' : ''}Super Retro World pixel heroes (credit: Gif, Noiracide &amp; Romi).</p>
               </>
             )}
-            {nav('game', 'play')}
+            {skipMap ? (
+              <div className="nav-row">
+                <button type="button" className="btn ghost" onClick={() => go('game')}>← Back</button>
+                <button type="submit" className="btn go" disabled={busy || !online}>{busy ? 'Opening…' : soloRoom ? 'Open the room ➜' : 'Begin adventure ➜'}</button>
+              </div>
+            ) : nav('game', 'play')}
           </section>
         )}
 
