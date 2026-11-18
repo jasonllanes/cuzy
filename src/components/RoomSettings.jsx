@@ -90,7 +90,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
             </select>
           </div>
         )}
-        <div className="set-row">
+        {!room.dod && <div className="set-row">
           <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Opens the map page, with a preview. Everyone in the room gets the new world.'}</small></div>
           {(() => {
             const fixed = duel || soccer || escape || !!room.elem || !!room.dod;
@@ -102,28 +102,28 @@ export default function RoomSettings({ room, count, editable, onChange, players 
               </div>
             );
           })()}
-        </div>
+        </div>}
         <div className="set-row">
           <div className="set-label"><b>Max players</b><small>{count} in the room now</small></div>
           <select value={room.max} disabled={!editable} onChange={(e) => onChange({ max: Number(e.target.value) })}>
             {[2, 3, 4, 5, 6, 7, 8, 9, 10].filter((n) => n >= count).map((n) => <option key={n} value={n}>{n} players</option>)}
           </select>
         </div>
-        <div className="set-row">
+        {!room.dod && <div className="set-row">
           <div className="set-label"><b>Startup money</b><small>Coins everyone begins the round with</small></div>
           <select value={room.startMoney || 0} disabled={!editable || room.started} onChange={(e) => onChange({ startMoney: Number(e.target.value) })}>
             {[0, 25, 50, 100, 250, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n ? `🪙 ${n}` : 'None'}</option>)}
           </select>
-        </div>
-        {free && (
+        </div>}
+        {free && !room.dod && (
           <Switch label="Max stats" hint="Everyone starts with every shop upgrade (health, stamina, damage, armor, attack speed...) at its top level." on={room.maxStats !== false} disabled={!editable || room.started} onChange={(v) => onChange({ maxStats: v })} />
         )}
-        <div className="set-row">
+        {!room.dod && <div className="set-row">
           <div className="set-label"><b>Startup wood</b><small>Wood everyone begins the round with (for crafting weapons)</small></div>
           <select value={room.startWood || 0} disabled={!editable || room.started} onChange={(e) => onChange({ startWood: Number(e.target.value) })}>
             {[0, 5, 10, 20, 50, 100, 250, 500].map((n) => <option key={n} value={n}>{n ? `🪵 ${n}` : 'None'}</option>)}
           </select>
-        </div>
+        </div>}
       </Section>
 
       {!free && (
@@ -162,9 +162,9 @@ export default function RoomSettings({ room, count, editable, onChange, players 
       <Section icon="👥" title="Players" note={[room.allowLate !== false ? 'late join' : 'no late join', room.allowVisit ? 'visit' : null, room.allowCheats ? 'cheats' : null].filter(Boolean).join(' · ')}>
         <Switch label="Private room" hint="Hidden from the room list: only people with the room code or the invite link can join" on={!!room.private} disabled={!editable} onChange={(v) => onChange({ private: v })} />
         <Switch label="Allow late join" hint="Let people in after the round has started" on={room.allowLate !== false} disabled={!editable} onChange={(v) => onChange({ allowLate: v })} />
-        <Switch label="Allow visit" hint="Teleport straight to another player (Room button, then Visit)" on={!!room.allowVisit} disabled={!editable} onChange={(v) => onChange({ allowVisit: v })} />
+        {!room.dod && <Switch label="Allow visit" hint="Teleport straight to another player (Room button, then Visit)" on={!!room.allowVisit} disabled={!editable} onChange={(v) => onChange({ allowVisit: v })} />}
         <Switch label="Allow cheats?" hint="Chat commands like -gold 100 or -level 5 (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />
-        <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />
+        {!room.dod && <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />}
       </Section>
 
       {free && !!room.dod && (
@@ -176,11 +176,29 @@ export default function RoomSettings({ room, count, editable, onChange, players 
             </select>
           </div>
           <div className="set-row">
-            <div className="set-label"><b>Who is the Werebear</b><small>Random, one of the players, or the computer (then one player can play alone).</small></div>
+            <div className="set-label"><b>Who is the Werebear</b><small>Random, one of the players, or the computer. With one player and a computer seat, whoever is not the Werebear is the survivor.</small></div>
             <select value={room.dodKiller || 'random'} disabled={locked} onChange={(e) => onChange({ dodKiller: e.target.value })}>
               <option value="random">🎲 Random</option>
               <option value="ai">🤖 The computer</option>
               {players.filter((p) => !p.ai).map((p) => <option key={p.id} value={p.id}>🐻 {p.name}</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <div className="set-label"><b>Starting flashbangs</b><small>What every survivor begins with.</small></div>
+            <select value={room.dodFlash ?? 0} disabled={locked} onChange={(e) => onChange({ dodFlash: Number(e.target.value) })}>
+              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <div className="set-label"><b>Starting smoke grenades</b><small>What every survivor begins with.</small></div>
+            <select value={room.dodSmoke ?? 0} disabled={locked} onChange={(e) => onChange({ dodSmoke: Number(e.target.value) })}>
+              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <div className="set-label"><b>Starting flashlight level</b><small>How wide the glow is when the round begins (upgrades add to it).</small></div>
+            <select value={room.dodLight ?? 0} disabled={locked} onChange={(e) => onChange({ dodLight: Number(e.target.value) })}>
+              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>Level {n}</option>)}
             </select>
           </div>
           <div className="set-row">
@@ -189,11 +207,11 @@ export default function RoomSettings({ room, count, editable, onChange, players 
               {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </div>
-          <p className="hint">A round needs 2 players, or 1 player with the computer Werebear.</p>
+          <p className="hint">A round needs 2 players, or 1 player with a computer player in a seat (or the computer chosen above): the computer is the Werebear.</p>
         </Section>
       )}
 
-      {free && (
+      {free && !room.dod && (
         <Section icon="🚁" title="Escape" note={escape ? `chopper in ${room.escapeMins || 10} min · waits ${room.extractMins || 5}` : 'off'}>
           <Switch label="Escape (open world survival)" hint={escape ? 'A co-op round in a big open world: loot the houses, shops, clinics, police stations and cars for guns, grenades, bullets and medicine (there is no shop), fight the zombies that keep coming, and find the compass. When the timer ends a chopper lands somewhere far away: reach it to escape!' : 'Loot buildings, survive zombie hordes, and escape on a chopper that lands far away. No shop: everything is found.'} on={escape} disabled={locked} onChange={(v) => onChange({ escape: v })} />
           {escape && (
@@ -215,7 +233,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         </Section>
       )}
 
-      {free && (
+      {free && !room.dod && (
         <Section icon="🏖️" title="Beach Ball" note={soccer ? `first to ${room.target || 5}${room.matchMins ? ` · ${room.matchMins} min` : ''}` : 'off'}>
           <Switch label="Beach Ball match" hint={soccer ? 'Two teams, one beach ball and a goal at each end: kick it by walking into it (run or dash for a hard kick) and roll it into the other team’s goal. With only two players it is a 1v1.' : 'A cozy ball game on a beach pitch: two teams, one ball, a goal at each end. No fighting, no monsters.'} on={soccer} disabled={locked} onChange={(v) => onChange({ soccer: v })} />
           {soccer && (
@@ -242,7 +260,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         </Section>
       )}
 
-      {free && !soccer && !escape && (
+      {free && !room.dod && !soccer && !escape && (
         <Section icon="⚔️" title="Fighting" note={fightNote}>
           <div className="set-row">
             <div className="set-label"><b>Teams</b><small>{room.teams ? 'Teammates cannot hurt each other and share one score and one camp. Tap a free slot under a team to join it, or use Shuffle.' : 'Free for all: everyone for themselves'}</small></div>
@@ -277,7 +295,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         </Section>
       )}
 
-      {free && !soccer && !escape && (
+      {free && !room.dod && !soccer && !escape && (
         <Section icon="🏛️" title="Duels" note={duelNote}>
           <div className="set-row wide">
             <div className="set-label">

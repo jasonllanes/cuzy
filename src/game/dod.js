@@ -6,8 +6,11 @@
 // chopper); this file is everything one player's game does: the fog, the abilities, the tasks and the pictures.
 import { sfx } from './sfx';
 import { TINY } from './tiny';
+import { dodHouseNear } from './v2world';
+import { DESIGNS } from './interior';
 
 const TYPES = ['wires', 'math', 'colors', 'ricochet', 'switches', 'engine'];
+export const TASK_ICON_OF = null;
 export const TASK_NAMES = {
   wires: 'Connect the wires',
   math: 'Crack the lock (maths)',
@@ -16,8 +19,8 @@ export const TASK_NAMES = {
   switches: 'Switch everything on',
   engine: 'Start the engine',
 };
-const TASK_ICON = { wires: '🔌', math: '🔢', colors: '🎨', ricochet: '🎯', switches: '🔦', engine: '🚗' };
-const HUMAN_FOG = 'rgba(1,2,6,0.985)';
+export const TASK_ICON = { wires: '🔌', math: '🔢', colors: '🎨', ricochet: '🎯', switches: '🔦', engine: '🚗' };
+const HUMAN_FOG = 'rgba(4,6,20,0.66)';
 const REVIVE_TIME = 6;
 const CRATE_TIME = 1.4;
 const ITEM_CD = 4; // seconds between two grenades
@@ -28,7 +31,12 @@ const HOOK_CD = 12;
 const HOOK_RANGE = 200;
 const EYE_CD = 30;
 const EYE_TIME = 5;
-const SWING_CD = 0.9;
+const NEAR_KILLER = 110; // the Werebear this close shuts a task window
+const SWING_CD = 1.1;
+const SWING_DUR = 0.5; // the claw animation
+const SWING_HIT = 0.22; // ...and the moment in it when the claws land
+const WOUND_RUN = 4; // seconds a wounded survivor runs fast
+const WOUND_SEE = 6; // seconds the Werebear is lit up for the one he hit
 const KILL_R = 30;
 const MAX_TRAPS = 3;
 const hash = (a, b) => {
@@ -70,6 +78,14 @@ export class DodSystem {
     this.alert = null; // a line of text for the HUD
     this.task = null; // the task window that is open: { i, type }
     this.hold = null; // { kind: 'revive' | 'crate', id, t, need }
+    this.guideI = -1; // the task a glittering trail leads to
+    this.guideT = 0;
+    this.sprung = []; // traps that were stepped on (the Werebear is told where)
+    this.rings = []; // green rings where a task was just finished
+    this.news = null;
+    this.taskDoneT = 0;
+    this.doneBy = new Map();
+    this.mineDone = new Set();
     this.fDown = false;
     this.warnT = 0; // a red edge on the screen for a moment (the Eye is looking)
     this.prompt = null;
@@ -105,14 +121,18 @@ export class DodSystem {
     } else if (op === 'kill') {
       const t = s.p.find((x) => x[0] === String(m.id));
       if (t && t[1] === 'alive') {
-        t[1] = 'dead';
-        t[3] = m.x;
-        t[4] = m.y;
+        t[5] = (t[5] ?? 2) - 1;
+        if (t[5] <= 0) {
+          t[1] = 'dead';
+          t[3] = m.x;
+          t[4] = m.y;
+        }
       }
     } else if (op === 'revive') {
       const t = s.p.find((x) => x[0] === String(m.id));
       if (t && t[1] === 'dead' && t[2] < s.lives) {
         t[1] = 'alive';
+        t[5] = 2;
         t[2]++;
       }
     } else if (op === 'out' && me) me[1] = 'out';
@@ -149,6 +169,81 @@ export class DodSystem {
     return this.g.world.dodSpot(i, 1, 14, 78);
   }
 
+  // every third task is inside a house (the nearest one to its spot): you find it when you walk in
+  taskHome(i) {
+    if (i % 3 !== 1) return null;
+    this.homes ||= new Map();
+    if (!this.homes.has(i)) {
+      const s = this.stationPos(i);
+      this.homes.set(i, dodHouseNear(this.g.world, s.x, s.y));
+    }
+    return this.homes.get(i);
+  }
+
+  // a number for a building (the same on every computer), for its room's layout
+  roomSeed(b) {
+    let h = this.g.world.seed >>> 0;
+    for (const ch of String(b.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h;
+  }
+
+  indoorKey(i) {
+    const b = this.g.inside?.b;
+    return b ? 100 + (this.roomSeed(b) % 900000) * 10 + i : -1;
+  }
+
+  chestsHere() {
+    return DESIGNS[this.g.inside?.design]?.chests || [];
+  }
+
+  indoorOpened(i) {
+    return this.opened.has(this.indoorKey(i));
+  }
+
+  // a chest in a room: what it holds depends on how good it is
+  openIndoor(i) {
+    const g = this.g;
+    const D = DESIGNS[g.inside?.design];
+    const c = D?.chests?.[i];
+    if (!c || this.isKiller || this.ghost) {
+      if (this.isKiller) g.onToast?.('Only the survivors can use the chests.');
+      return;
+    }
+    const key = this.indoorKey(i);
+    if (this.opened.has(key)) {
+      g.onToast?.('The chest is empty.');
+      return;
+    }
+    this.opened.add(key);
+    this.fx('loot', { i: key });
+    sfx.play('chest');
+    const any = () => (Math.random() < 0.5 ? 'flash' : 'smoke');
+    const give = { common: [any()], rare: [any(), any()], epic: ['light', any()], legendary: ['light', 'flash', 'smoke'] }[c.rar] || [any()];
+    give.forEach((k, n) => setTimeout(() => this.gotItem(k), n * 350));
+    g.onToast?.(`📦 A ${c.rar} chest!`);
+  }
+
+  // where to point to for a task: the station, or the door of the house it is in
+  taskTarget(i) {
+    const h = this.taskHome(i);
+    return h ? { x: h.x, y: h.y + 14 } : this.stationPos(i);
+  }
+
+  // the tasks in the house you are standing in, with their place in the room
+  insideTasks() {
+    const g = this.g;
+    const b = g.inside?.b;
+    if (!b) return [];
+    const out = [];
+    let k = 0;
+    for (let i = 0; i < this.tot; i++) {
+      if (this.done.has(i) || this.taskHome(i)?.id !== b.id) continue;
+      out.push({ i, x: g.cam.x + 95 - k * 34, y: g.cam.y + 55 });
+      k++;
+    }
+    return out;
+  }
+
   stationType(i) {
     return TYPES[Math.floor(hash(i + 3, this.g.world.seed) * 997 + i) % TYPES.length];
   }
@@ -178,11 +273,39 @@ export class DodSystem {
     this.tot = Number(m.tot) || 0;
     this.lives = Number(m.lives) || 0;
     this.done = new Set((m.done || []).map(Number));
-    this.players = new Map((m.p || []).map(([id, st, rv, bx, by]) => [String(id), { st, rv, bx, by }]));
+    if (!this.gotItems && Array.isArray(m.si)) {
+      this.gotItems = true;
+      this.items.flash = Math.min(3, m.si[0] || 0);
+      this.items.smoke = Math.min(3, m.si[1] || 0);
+      this.light = Math.min(3, m.si[2] || 0);
+    }
+    const doneBefore = new Set(this.done);
+    const hpWas = this.my?.hp;
+    this.players = new Map((m.p || []).map(([id, st, rv, bx, by, hp]) => [String(id), { st, rv, bx, by, hp: hp ?? 2 }]));
+    if (hpWas !== undefined && this.my && this.my.st === 'alive' && this.my.hp < hpWas) this.wounded();
     const prevPh = this.ph;
     this.ph = m.ph || 'tasks';
     this.ch = Number.isFinite(m.ch) ? m.ch : -1;
     this.got = true;
+    // tasks that were just finished: a green ring where it was, and a line of news (for the ones somebody else did)
+    if (!first) {
+      for (const i of this.done) {
+        if (doneBefore.has(i)) continue;
+        const pos = this.taskTarget(i);
+        this.rings.push({ x: pos.x, y: pos.y, t: 0 });
+        if (this.mineDone?.has(i)) continue;
+        setTimeout(() => {
+          this.news = { text: `✅ ${this.doneBy?.get(i) || 'A survivor'} finished a task (${this.done.size}/${this.tot})`, t: 4 };
+          sfx.play('pickup', 0.6);
+          g.emitHud();
+        }, 350);
+      }
+    }
+    // somebody else got there first: leave the window
+    if (this.task && this.done.has(this.task.i)) {
+      this.task = null;
+      g.onToast?.('Someone else just finished that task.');
+    }
     if (this.ph === 'extract' && this.ch >= 0 && !g.chopper) {
       const c = this.chopperPos(this.ch);
       g.chopper = { x: c.x, y: c.y, t: first ? 10 : 0, lift: 0 };
@@ -193,6 +316,7 @@ export class DodSystem {
     }
     if (!this.positioned) {
       this.positioned = true;
+      if (g.inside && !first) g.exitHouse(true); // (everybody starts outside)
       if (this.isKiller && !first) {
         const s = g.world.dodSpot(0, 4, 55, 75);
         g.player.x = s.x;
@@ -209,6 +333,19 @@ export class DodSystem {
     const now = this.my?.st;
     if (wasMine && now !== wasMine) this.myChanged(wasMine, now);
     if (prevPh !== this.ph && this.ph === 'extract' && this.isKiller) this.alert = { text: 'The chopper has landed: the survivors will come to it.', t: 6 };
+  }
+
+  // the Werebear hit me, and I am still up: I run, and I can see where he is
+  wounded() {
+    const g = this.g;
+    this.speedT = WOUND_RUN;
+    this.seeKillerT = WOUND_SEE;
+    this.warnT = 1.2;
+    this.task = null;
+    this.hold = null;
+    sfx.play('hurt', 0.9);
+    g.onToast?.('🩸 The Werebear hit you! Run: you are faster for a moment, and you can see him.');
+    this.alert = { text: 'One more hit and you are down!', t: 5 };
   }
 
   myChanged(from, to) {
@@ -229,18 +366,27 @@ export class DodSystem {
     }
   }
 
+  // the round is over: the end scene takes the screen
+  finish(m) {
+    const g = this.g;
+    this.end = { who: m.who, outN: m.outN, total: m.total };
+    g.frozen = true;
+    sfx.play(m.who === 'survivors' ? 'win' : 'wave');
+    g.emitHud();
+  }
+
   onNet(m) {
     const g = this.g;
     if (m.t === 'dod') return this.applyState(m);
     if (m.t !== 'dodfx') return;
     const from = String(m.from ?? '');
     if (m.k === 'bot') {
-      if (!this.amHost()) this.botNet = { x: m.x, y: m.y, dir: ['down', 'up', 'left', 'right'][m.a] || 'down', moving: !!(m.i & 1), swing: m.i & 2 ? 0.3 : 0 };
+      if (!this.amHost()) this.botNet = { x: m.x, y: m.y, dir: ['down', 'up', 'left', 'right'][m.a] || 'down', moving: !!(m.i & 1), swing: m.i & 2 ? SWING_DUR : 0 };
       return;
     }
     if (m.k === 'flash') {
       this.puff(m.x, m.y, '#ffffff');
-      if (this.botKiller && this.bot && this.amHost() && Math.hypot(m.x - this.bot.x, m.y - this.bot.y) < FLASH_R) this.bot.flashT = FLASH_TIME;
+      this.flashBot(m.x, m.y);
       if (this.isKiller && this.flashT <= 0.2 && Math.hypot(m.x - g.player.x, m.y - g.player.y) < FLASH_R) {
         this.flashT = FLASH_TIME; // (only the first one counts: while you are blind another one adds nothing)
         sfx.play('boom', 0.6);
@@ -275,7 +421,20 @@ export class DodSystem {
       }
     } else if (m.k === 'swing') {
       const r = this.g.remotes.get(from);
-      if (r) r.dodSwing = 0.3;
+      if (r) {
+        r.dodSwing = SWING_DUR;
+        r.dodSwingDir = Math.cos(m.a) < 0 ? 'left' : 'right';
+      }
+    } else if (m.k === 'sprung') {
+      const r = g.remotes.get(from);
+      if (r) r.dodStun = 2;
+      if (this.isKiller) {
+        this.sprung.push({ x: m.x, y: m.y, t: 0 });
+        this.alert = { text: '🪤 A survivor stepped on your trap!', t: 5 };
+        sfx.play('wave', 0.7);
+      }
+    } else if (m.k === 'done') {
+      this.doneBy.set(m.i, g.remotes.get(from)?.name || 'A survivor');
     } else if (m.k === 'loot') {
       this.opened.add(m.i);
     }
@@ -293,6 +452,14 @@ export class DodSystem {
 
   puff(x, y) {
     this.g.pfx?.spawn('impacts/hit-spark', x, y - 10, { scale: 1.4, seed: 1 });
+  }
+
+  // a glittering trail to a task (click it in the list)
+  guide(i) {
+    if (this.done.has(i)) return;
+    this.guideI = this.guideI === i && this.guideT > 0 ? -1 : i;
+    this.guideT = this.guideI < 0 ? 0 : 14;
+    this.g.emitHud();
   }
 
   // ---------- input ----------
@@ -342,7 +509,11 @@ export class DodSystem {
   }
 
   openWorldChest(o) {
-    this.gotItem(this.chestItem(o));
+    // the better the chest (its skin), the better what is in it
+    const rank = (o.skin ?? 0) & 3;
+    const any = () => (Math.random() < 0.5 ? 'flash' : 'smoke');
+    const give = [[this.chestItem(o)], [any(), any()], ['light', any()], ['light', 'flash', 'smoke']][rank] || [this.chestItem(o)];
+    give.forEach((k, n) => setTimeout(() => this.gotItem(k), n * 350));
   }
 
   keyUp(e) {
@@ -367,6 +538,20 @@ export class DodSystem {
   }
 
   drawInside(ctx) {
+    if (!this.got) return;
+    if (this.ph === 'tasks') {
+      for (const t of this.insideTasks()) {
+        this.drawStation(ctx, t.x, t.y, TASK_ICON[this.stationType(t.i)], this.t);
+        if (!this.isKiller && Math.hypot(t.x - this.g.player.x, t.y - this.g.player.y) < 28 && !this.task) {
+          ctx.fillStyle = 'rgba(232,124,150,0.95)';
+          ctx.fillRect(t.x - 42, t.y - 40, 84, 11);
+          ctx.fillStyle = '#fff';
+          ctx.font = '7px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`F · ${TASK_NAMES[this.stationType(t.i)]}`, t.x, t.y - 32);
+        }
+      }
+    }
     if (!this.isKiller) return;
     for (const f of this.found()) {
       this.g.drawHeroAt(ctx, f.r.hero, 'down', false, this.g.animT, f.x, f.y);
@@ -381,16 +566,24 @@ export class DodSystem {
     if (!this.isKiller || this.ghost || this.stunT > 0 || this.swingCd > 0 || this.flashT > 2.5) return;
     const g = this.g;
     this.swingCd = SWING_CD;
-    this.swingT = 0.3;
-    const p = g.player;
-    this.fx('swing');
+    this.swingT = SWING_DUR;
+    const aim = this.aim();
+    this.swingDir = Math.cos(aim) < 0 ? 'left' : 'right'; // (the Werebear turns to where the mouse is)
+    this.fx('swing', { a: aim });
     sfx.play('swing', 0.7);
+    this.strike = { t: SWING_HIT, aim }; // (the claws land in the middle of the animation: that is when it is decided whether they hit)
+  }
+
+  // the moment the claws land
+  doStrike(aim) {
+    const g = this.g;
+    const p = g.player;
     if (g.inside) {
       // inside a house: the ones found in it are right there
       for (const f of this.found()) {
         if (Math.hypot(f.x - p.x, f.y - p.y) < 44) {
           this.send('kill', { id: f.id, x: f.r.x, y: f.r.y });
-          g.onToast?.('🐻 Got one!');
+          g.onToast?.('🐻 Hit!');
         }
       }
       return;
@@ -399,10 +592,14 @@ export class DodSystem {
       if (v.st !== 'alive') continue;
       const r = g.remotes.get(id);
       if (!r) continue;
-      if (Math.hypot(r.x - p.x, r.y - p.y) <= KILL_R) {
+      const dx = r.x - p.x;
+      const dy = r.y - p.y;
+      const dd = Math.hypot(dx, dy);
+      // only what is in front of the claws (within a half circle towards the mouse), or right on top of him
+      if (dd <= KILL_R && (dd < 12 || dx * Math.cos(aim) + dy * Math.sin(aim) > 0)) {
         this.send('kill', { id, x: r.x, y: r.y });
         sfx.play('hit', 0.8);
-        g.onToast?.('🐻 Got one!');
+        g.onToast?.('🐻 Hit!');
       }
     }
   }
@@ -411,14 +608,19 @@ export class DodSystem {
   nearThing() {
     const g = this.g;
     const p = g.player;
-    if (this.stunT > 0 || this.pull || g.inside || this.ghost || this.out) return null;
+    if (this.stunT > 0 || this.pull || this.ghost || this.out) return null;
+    if (g.inside) {
+      if (this.isKiller || this.ph !== 'tasks') return null;
+      for (const t of this.insideTasks()) if (Math.hypot(t.x - p.x, t.y - p.y) < 28) return { kind: 'station', i: t.i, x: t.x, y: t.y };
+      return null;
+    }
     if (!this.isKiller) {
       for (const [id, v] of this.players) {
         if (v.st === 'dead' && id !== this.me && v.rv < this.lives && Math.hypot(v.bx - p.x, v.by - p.y) < 26) return { kind: 'body', id, x: v.bx, y: v.by };
       }
       if (this.ph === 'tasks') {
         for (let i = 0; i < this.tot; i++) {
-          if (this.done.has(i)) continue;
+          if (this.done.has(i) || this.taskHome(i)) continue;
           const s = this.stationPos(i);
           if (Math.hypot(s.x - p.x, s.y - p.y) < 24) return { kind: 'station', i, x: s.x, y: s.y };
         }
@@ -449,8 +651,14 @@ export class DodSystem {
     const t = this.task;
     this.task = null;
     if (ok && t && !this.done.has(t.i)) {
+      this.mineDone.add(t.i);
       this.send('task', { i: t.i });
-      sfx.play('levelup', 0.6);
+      this.fx('done', { i: t.i }); // (the others are told who did it)
+      sfx.play('levelup', 0.8);
+      this.taskDoneT = 2.4;
+      const p = this.g.player;
+      this.g.pfx?.spawn('pickups/collect-burst', p.x, p.y - 8, { scale: 1.2 });
+      this.g.pfx?.spawn('holy/sunburst', p.x, p.y + 2, { scale: 0.5, seed: 3 });
     }
     this.g.emitHud();
   }
@@ -462,10 +670,21 @@ export class DodSystem {
     this.itemCd = ITEM_CD;
     const p = this.g.player;
     this.fx('flash');
+    this.flashBot(p.x, p.y); // (the message does not come back to me, and I am the one who runs the computer Werebear)
     this.puff(p.x, p.y);
     sfx.play('boom', 0.4);
     this.g.onToast?.('💥 Flashbang!');
     this.g.emitHud();
+  }
+
+  // a flashbang went off here: the computer Werebear (run by the host's game) is blinded if it is close
+  flashBot(x, y) {
+    if (!this.botKiller || !this.bot || !this.amHost() || this.bot.flashT > 0.2) return;
+    if (Math.hypot(x - this.bot.x, y - this.bot.y) >= FLASH_R) return;
+    this.bot.flashT = FLASH_TIME;
+    this.bot.hitT = 0; // (a swing in the middle of its wind-up is lost)
+    this.g.pfx?.spawn('status/stunned', this.bot.x, this.bot.y - 20, { scale: 0.6, seed: 2 });
+    this.g.onToast?.('💥 The Werebear is blinded!');
   }
 
   useSmoke() {
@@ -492,6 +711,14 @@ export class DodSystem {
     sfx.play('pickup', 0.7);
     g.onToast?.(k === 'flash' ? '💥 Flashbang (Q)' : k === 'smoke' ? '💨 Smoke grenade (E)' : `🔦 Flashlight upgrade! (level ${this.light})`);
     g.emitHud();
+  }
+
+  // which way the Werebear (me) faces: the mouse's side while striking or standing, the way he walks otherwise
+  facing() {
+    const g = this.g;
+    if (this.swingT > 0 && this.swingDir) return this.swingDir;
+    if (!g.touchMode && !g.player.moving) return Math.cos(this.aim()) < 0 ? 'left' : 'right';
+    return g.player.dir === 'left' ? 'left' : g.player.dir === 'right' ? 'right' : this.swingDir || 'right';
   }
 
   // ---------- the Werebear's skills ----------
@@ -560,6 +787,133 @@ export class DodSystem {
     sfx.play('recall', 0.7);
     this.g.onToast?.('👁 Killer Eye: they cannot hide!');
     this.g.emitHud();
+  }
+
+  // ---------- computer survivors (a computer seat plays a survivor when the player is the Werebear) ----------
+  killerPos() {
+    const g = this.g;
+    if (this.killer === 'bot') return this.bot;
+    if (this.isKiller) return g.player;
+    return g.remotes.get(this.killer) || null;
+  }
+
+  updateAiSurvivors(dt) {
+    const g = this.g;
+    this.aiS ||= {};
+    this.aiSendT = (this.aiSendT || 0) - dt;
+    const list = [];
+    for (const [id, v] of this.players) {
+      const r = g.remotes.get(id);
+      if (!r || !r.ai) continue;
+      r.sim = true; // (this game moves it: nothing glides it about)
+      const a = (this.aiS[id] ||= { work: 0, i: -1, stuck: 0 });
+      if (v.st === 'alive') this.stepAi(a, r, id, dt);
+      else {
+        r.moving = false;
+        if (v.st === 'dead') {
+          r.x = v.bx || r.x;
+          r.y = v.by || r.y;
+        }
+      }
+      r.hidden = v.st !== 'alive';
+      list.push({ id, x: r.x, y: r.y, dir: r.dir || 'down', moving: !!r.moving, hidden: r.hidden, hp: 6 });
+    }
+    if (list.length && this.aiSendT <= 0) {
+      this.aiSendT = 0.1;
+      g.mp.net.send({ t: 'aistate', list });
+    }
+  }
+
+  stepAi(a, r, id, dt) {
+    const g = this.g;
+    const kp = this.killerPos();
+    const dk = kp ? Math.hypot(kp.x - r.x, kp.y - r.y) : 1e9;
+    let gx = r.x;
+    let gy = r.y;
+    let speed = 46;
+    let working = false;
+    if (dk < 150) {
+      // the Werebear is close: run the other way
+      gx = r.x + (r.x - kp.x);
+      gy = r.y + (r.y - kp.y);
+      speed = 76;
+      a.work = 0;
+    } else if (this.ph === 'extract' && g.chopper) {
+      gx = g.chopper.x;
+      gy = g.chopper.y;
+      speed = 60;
+      if (Math.hypot(gx - r.x, gy - r.y) < 30 && g.chopper.t > 4) {
+        this.send('aiout', { id });
+        return;
+      }
+    } else if (this.ph === 'tasks') {
+      if (a.i < 0 || this.done.has(a.i)) {
+        // the nearest task that is not done
+        let best = -1;
+        let bd = 1e9;
+        for (let i = 0; i < this.tot; i++) {
+          if (this.done.has(i)) continue;
+          const s = this.stationPos(i);
+          const d = Math.hypot(s.x - r.x, s.y - r.y);
+          if (d < bd) {
+            bd = d;
+            best = i;
+          }
+        }
+        a.i = best;
+        a.work = 0;
+      }
+      if (a.i >= 0) {
+        const s = this.stationPos(a.i);
+        if (Math.hypot(s.x - r.x, s.y - r.y) < 16) {
+          working = true;
+          a.work += dt;
+          if (a.work >= 7) {
+            this.send('aitask', { id, i: a.i });
+            a.i = -1;
+            a.work = 0;
+          }
+        } else {
+          gx = s.x;
+          gy = s.y;
+        }
+      }
+    }
+    if (working) {
+      r.moving = false;
+      return;
+    }
+    const dx = gx - r.x;
+    const dy = gy - r.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 2) {
+      r.moving = false;
+      return;
+    }
+    const step = Math.min(dist, speed * dt);
+    const nx = r.x + (dx / dist) * step;
+    const ny = r.y + (dy / dist) * step;
+    let moved = 0;
+    if (!g.blocked(nx, r.y, true)) {
+      moved += Math.abs(nx - r.x);
+      r.x = nx;
+    }
+    if (!g.blocked(r.x, ny, true)) {
+      moved += Math.abs(ny - r.y);
+      r.y = ny;
+    }
+    r.tx = r.x;
+    r.ty = r.y;
+    r.moving = moved > 0.01;
+    r.dir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'up' : 'down';
+    if (moved < step * 0.3) {
+      a.stuck += dt;
+      if (a.stuck > 0.4) {
+        a.stuck = 0;
+        r.x += (Math.random() - 0.5) * 24; // (nudge past whatever is in the way)
+        r.y += (Math.random() - 0.5) * 24;
+      }
+    } else a.stuck = 0;
   }
 
   // ---------- the computer Werebear (it runs on the host's game, and everybody is told where it is) ----------
@@ -639,9 +993,15 @@ export class DodSystem {
     } else b.stuck = 0;
     // a strike
     if (tgt && td < 26 && b.cd <= 0 && b.flashT <= 0) {
-      b.cd = 1.4;
-      b.swing = 0.3;
-      this.send('kill', { id: tgt.id, x: tgt.x, y: tgt.y });
+      b.cd = 1.5;
+      b.swing = SWING_DUR;
+      b.hitT = SWING_HIT;
+      b.hitId = tgt.id;
+    }
+    if (b.hitT > 0 && (b.hitT -= dt) <= 0) {
+      const hid = b.hitId;
+      const pos = hid === this.me ? g.player : g.remotes.get(hid);
+      if (pos && Math.hypot(pos.x - b.x, pos.y - b.y) < 34 && this.players.get(hid)?.st === 'alive') this.send('kill', { id: hid, x: pos.x, y: pos.y });
     }
     if (g.mp) {
       b.sendT -= dt;
@@ -656,13 +1016,14 @@ export class DodSystem {
   speedMul() {
     if (this.task || this.hold || this.stunT > 0 || this.pull) return 0;
     if (this.isKiller) return this.flashT > 0.5 ? 0.7 : 1.1;
-    return 1;
+    return this.speedT > 0 ? 1.65 : 1; // (a wounded survivor is much faster than the Werebear)
   }
 
   update(dt) {
     const g = this.g;
     this.t += dt;
     this.revealT = Math.max(0, this.revealT - dt);
+    if (g.mp && this.amHost()) this.updateAiSurvivors(dt);
     if (this.botKiller) {
       if (this.amHost()) this.updateBot(dt);
       else if (this.botNet) {
@@ -688,6 +1049,22 @@ export class DodSystem {
     this.stunT = Math.max(0, this.stunT - dt);
     this.smokeT = Math.max(0, this.smokeT - dt);
     this.warnT = Math.max(0, this.warnT - dt);
+    this.taskDoneT = Math.max(0, this.taskDoneT - dt);
+    this.guideT = Math.max(0, this.guideT - dt);
+    this.sprung = this.sprung.filter((s) => (s.t += dt) < 8);
+    for (const r of g.remotes.values()) if (r.dodStun > 0) r.dodStun = Math.max(0, r.dodStun - dt);
+    this.rings = this.rings.filter((r) => (r.t += dt) < 1.6);
+    if (this.news && (this.news.t -= dt) <= 0) this.news = null;
+    this.speedT = Math.max(0, (this.speedT || 0) - dt);
+    this.seeKillerT = Math.max(0, (this.seeKillerT || 0) - dt);
+    if (this.strike) {
+      if (this.ghost || this.stunT > 0) this.strike = null;
+      else if ((this.strike.t -= dt) <= 0) {
+        const a = this.strike.aim;
+        this.strike = null;
+        this.doStrike(a);
+      }
+    }
     if (this.alert && (this.alert.t -= dt) <= 0) this.alert = null;
     this.hooks = this.hooks.filter((h) => (h.t += dt) < 0.45);
     this.clouds = this.clouds.filter((c) => (c.t += dt) < SMOKE_TIME);
@@ -719,12 +1096,25 @@ export class DodSystem {
           this.hold = null;
           this.traps = this.traps.filter((t) => t !== tr);
           this.fx('trapoff', { i: tr.i });
+          this.fx('sprung');
           sfx.play('hurt', 0.8);
           g.onToast?.('🪤 Caught in a bear trap!');
           break;
         }
       }
     }
+    // the Werebear comes close: the window shuts at once
+    if ((this.task || this.hold) && !this.isKiller && this.killer) {
+      const kp = this.killerPos();
+      if (kp && Math.hypot(kp.x - p.x, kp.y - p.y) < NEAR_KILLER && !g.inside) {
+        this.task = null;
+        this.hold = null;
+        this.nearT = 3;
+        sfx.play('wave', 0.7);
+        g.emitHud();
+      }
+    }
+    this.nearT = Math.max(0, (this.nearT || 0) - dt);
     // a task window or a held action ends when you are caught, or walk away
     if (this.task && (this.ghost || this.stunT > 0)) this.task = null;
     if (this.hold) {
@@ -779,6 +1169,8 @@ export class DodSystem {
 
   // can I see this other player right now?
   canSee(r) {
+    if (this.seeKillerT > 0 && this.isKillerId(r.id)) return true; // (he hit me: I can see him)
+    if (r.ai && !this.players.has(String(r.id))) return false; // (a computer seat that is not playing is only a stand-in: the computer Werebear is drawn by the game itself)
     if (this.ghost) return true; // the fallen see everything
     const p = this.g.player;
     const d = Math.hypot(r.x - p.x, r.y - p.y);
@@ -787,16 +1179,16 @@ export class DodSystem {
     return this.lit(r.x, r.y);
   }
 
-  // is this point inside my light?
+  // the radius of my glow: a small one for a survivor (each flashlight upgrade widens it), a bigger one for the Werebear
+  glowR() {
+    return this.isKiller ? 150 : 112 + 10 * this.light; // a survivor starts with 3/4 of the Werebear's glow, and each upgrade widens it
+  }
+
+  // is this point inside my glow? (what moves out there cannot be seen)
   lit(x, y) {
-    const p = this.g.player;
-    const d = Math.hypot(x - p.x, y - p.y);
     if (this.ghost) return true;
-    if (this.isKiller) return d < 235;
-    if (d < 34 + this.light * 6) return true;
-    const a = this.faceAngle();
-    const diff = Math.abs(Math.atan2(Math.sin(Math.atan2(y - p.y, x - p.x) - a), Math.cos(Math.atan2(y - p.y, x - p.x) - a)));
-    return d < this.beamLen() && diff < this.beamHalf() && this.clear(p.x, p.y - 8, x, y - 8);
+    const p = this.g.player;
+    return Math.hypot(x - p.x, y - p.y) < this.glowR();
   }
 
   // ---------- sight lines ----------
@@ -864,7 +1256,7 @@ export class DodSystem {
     // the stations
     if (this.ph === 'tasks') {
       for (let i = 0; i < this.tot; i++) {
-        if (this.done.has(i)) continue;
+        if (this.done.has(i) || this.taskHome(i)) continue;
         const s = this.stationPos(i);
         this.drawStation(ctx, s.x, s.y, TASK_ICON[this.stationType(i)], t);
       }
@@ -872,6 +1264,7 @@ export class DodSystem {
     for (let i = 0; i < this.crateCount(); i++) {
       if (this.opened.has(i)) continue;
       const s = this.cratePos(i);
+      if (!this.lit(s.x, s.y) && !(this.isKiller && this.eyeT > 0)) continue; // (loot is only seen up close, inside the glow)
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.fillRect(Math.round(s.x - 8), Math.round(s.y - 1), 16, 3);
       ctx.fillStyle = '#7b5a35';
@@ -881,15 +1274,24 @@ export class DodSystem {
       ctx.fillStyle = '#e8c96a';
       ctx.fillRect(Math.round(s.x - 1), Math.round(s.y - 7), 2, 3);
     }
-    if (this.botKiller && this.bot) this.drawKiller(ctx, this.bot.x, this.bot.y, { moving: this.bot.moving, dir: this.bot.dir, swing: this.bot.swing || 0 });
+    if (this.botKiller && this.bot && (this.lit(this.bot.x, this.bot.y) || this.seeKillerT > 0 || (this.isKiller && this.eyeT > 0))) this.drawKiller(ctx, this.bot.x, this.bot.y, { moving: this.bot.moving, dir: this.bot.dir, swing: this.bot.swing || 0 });
+    for (const r of this.rings) {
+      const k = r.t / 1.6;
+      ctx.strokeStyle = `rgba(125,255,160,${1 - k})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y - 4, 10 + k * 46, (10 + k * 46) * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     // bodies
     for (const [id, v] of this.players) {
-      if (v.st !== 'dead') continue;
+      if (v.st !== 'dead' || !(this.lit(v.bx, v.by) || (this.isKiller && this.eyeT > 0))) continue;
       this.drawBody(ctx, v, id, t);
     }
     // traps (the Werebear's own are bright; the others are barely there)
     for (const tr of this.traps) {
       const mine = tr.by === this.me;
+      if (!mine && !this.ghost && !this.lit(tr.x, tr.y)) continue;
       ctx.globalAlpha = mine || this.ghost ? 1 : 0.55;
       ctx.fillStyle = '#4a4d5a';
       ctx.beginPath();
@@ -927,16 +1329,6 @@ export class DodSystem {
       ctx.stroke();
       ctx.fillStyle = '#9aa0b0';
       ctx.fillRect(Math.round(h.x + (h.tx - h.x) * k) - 2, Math.round(h.y + (h.ty - h.y) * k) - 2, 4, 4);
-    }
-    // the Werebear's swing
-    if (this.swingT > 0 && this.isKiller) {
-      const p = g.player;
-      const a = this.aim();
-      ctx.strokeStyle = `rgba(255,70,70,${this.swingT / 0.3})`;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y - 10, 24, a - 0.9, a + 0.9);
-      ctx.stroke();
     }
     // a revive in progress
     if (this.hold?.kind === 'revive') {
@@ -994,7 +1386,7 @@ export class DodSystem {
     let f = Math.floor(this.t * 6);
     if (o.swing > 0) {
       row = 'atk1';
-      f = Math.min(info.atk1[1] - 1, Math.floor((1 - o.swing / 0.3) * info.atk1[1]));
+      f = Math.min(info.atk1[1] - 1, Math.floor((1 - o.swing / SWING_DUR) * info.atk1[1]));
     } else if (o.moving) {
       row = 'walk';
       f = Math.floor(this.t * 10);
@@ -1020,7 +1412,8 @@ export class DodSystem {
     const W = cv.width;
     const H = cv.height;
     const z = g.zoom;
-    if (!this.ghost && !g.inside) {
+    // the map is always there (dimly), but what moves is only seen inside your glow; the Killer Eye lifts the veil for a moment
+    if (!this.ghost && !g.inside && !(this.isKiller && this.eyeT > 0)) {
       if (!this.fogCv) this.fogCv = document.createElement('canvas');
       const f = this.fogCv;
       if (f.width !== W || f.height !== H) {
@@ -1035,102 +1428,177 @@ export class DodSystem {
       fc.globalCompositeOperation = 'destination-out';
       const p = g.player;
       const [sx, sy] = g.toScreen(p.x, p.y - 8, camX, camY);
-      const wx = p.x;
-      const wy = p.y - 8;
-      // what you can see is what the light can reach in a straight line: trees, buildings and other solid things cast shadows (like Among Us)
-      const hole = (rays, from, to, grad) => {
-        fc.save();
-        fc.beginPath();
-        fc.moveTo(sx, sy);
-        for (const r of rays) {
-          if (r.a < from || r.a > to) continue;
-          fc.lineTo(sx + Math.cos(r.a) * r.d * z, sy + Math.sin(r.a) * r.d * z);
-        }
-        fc.closePath();
-        fc.clip();
-        fc.fillStyle = grad;
-        fc.fillRect(0, 0, W, H);
-        fc.restore();
-      };
-      const soft = (R, al) => {
-        const gr = fc.createRadialGradient(sx, sy, R * 0.1, sx, sy, R);
-        gr.addColorStop(0, `rgba(0,0,0,${al})`);
-        gr.addColorStop(0.72, `rgba(0,0,0,${al * 0.72})`);
-        gr.addColorStop(1, 'rgba(0,0,0,0)');
-        return gr;
-      };
-      if (this.isKiller) {
-        // the Werebear sees all round him, a little less far
-        hole(this.cast(wx, wy, -Math.PI, Math.PI, 0.04, 235), -Math.PI, Math.PI, soft(235 * z, 1));
-      } else {
-        const a = this.faceAngle();
-        const L = this.beamLen();
-        const half = this.beamHalf();
-        // the cone of the flashlight, soft at the edges (a wide faint one, a narrow bright one), cut off by whatever stands in the way
-        const rays = this.cast(wx, wy, a - half * 1.2, a + half * 1.2, 0.022, L);
-        hole(rays, a - half * 1.2, a + half * 1.2, soft(L * z, 0.55));
-        hole(rays, a - half * 0.85, a + half * 0.85, soft(L * 0.92 * z, 0.8));
-        hole(rays, a - half * 0.5, a + half * 0.5, soft(L * 0.72 * z, 1));
-        // the little glow round you (it also stops at walls)
-        const R = 36 + this.light * 8;
-        hole(this.cast(wx, wy, -Math.PI, Math.PI, 0.13, R), -Math.PI, Math.PI, soft(R * z, 1));
-      }
-      // the Killer Eye: the survivors stand out of the dark
-      if (this.isKiller && this.eyeT > 0) {
-        for (const [id, v] of this.players) {
-          if (v.st === 'out') continue;
-          const r = g.remotes.get(id);
-          const x = v.st === 'dead' ? v.bx : r?.x;
-          const y = v.st === 'dead' ? v.by : r?.y;
-          if (x === undefined) continue;
-          const [ex, ey] = g.toScreen(x, y - 8, camX, camY);
-          const gr3 = fc.createRadialGradient(ex, ey, 2, ex, ey, 30 * z);
-          gr3.addColorStop(0, 'rgba(0,0,0,1)');
-          gr3.addColorStop(1, 'rgba(0,0,0,0)');
-          fc.fillStyle = gr3;
-          fc.beginPath();
-          fc.arc(ex, ey, 30 * z, 0, Math.PI * 2);
-          fc.fill();
-        }
-      }
+      const R = this.glowR() * z;
+      const gr = fc.createRadialGradient(sx, sy, R * 0.3, sx, sy, R);
+      gr.addColorStop(0, 'rgba(0,0,0,1)');
+      gr.addColorStop(0.6, 'rgba(0,0,0,0.92)');
+      gr.addColorStop(1, 'rgba(0,0,0,0)');
+      fc.fillStyle = gr;
+      fc.beginPath();
+      fc.arc(sx, sy, R, 0, Math.PI * 2);
+      fc.fill();
       ctx.drawImage(f, 0, 0);
+      // a warm edge to the glow
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const warm = ctx.createRadialGradient(sx, sy, R * 0.15, sx, sy, R * 0.85);
+      warm.addColorStop(0, 'rgba(255,214,140,0.14)');
+      warm.addColorStop(1, 'rgba(255,214,140,0)');
+      ctx.fillStyle = warm;
+      ctx.beginPath();
+      ctx.arc(sx, sy, R * 0.85, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
-    // the Eye's marks: a red outline round every survivor, even through walls and bushes
-    if (this.isKiller && this.eyeT > 0) {
+    // the Eye's marks: a red blinking outline round every survivor (or the house they hide in), even through walls and bushes;
+    // far off the screen it is an arrow instead
+    if (this.isKiller && this.eyeT > 0 && !g.inside) {
+      const blink = 0.45 + 0.45 * Math.sin(this.t * 10);
       for (const [id, v] of this.players) {
         if (v.st === 'out') continue;
         const r = g.remotes.get(id);
         const x = v.st === 'dead' ? v.bx : r?.x;
         const y = v.st === 'dead' ? v.by : r?.y;
         if (x === undefined) continue;
-        const [ex, ey] = g.toScreen(x, y - 12, camX, camY);
-        ctx.strokeStyle = `rgba(255,50,60,${0.5 + 0.4 * Math.sin(this.t * 10)})`;
-        ctx.lineWidth = 3;
-        ctx.strokeRect(ex - 7 * z, ey - 12 * z, 14 * z, 26 * z);
-        ctx.fillStyle = 'rgba(255,60,70,0.9)';
-        ctx.font = `${Math.round(3.4 * z)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText(g.remotes.get(id)?.name || '', ex, ey - 14 * z);
-        // (and an arrow at the edge when they are off the screen)
-        if (ex < 0 || ey < 0 || ex > W || ey > H) {
-          const cx = W / 2;
-          const cy = H / 2;
-          const ang = Math.atan2(ey - cy, ex - cx);
-          const m = 22;
-          const px = Math.min(W - m, Math.max(m, cx + Math.cos(ang) * W));
-          const py = Math.min(H - m, Math.max(m, cy + Math.sin(ang) * H));
-          ctx.save();
-          ctx.translate(px, py);
-          ctx.rotate(ang);
-          ctx.fillStyle = '#ff3c46';
+        const house = v.st === 'alive' && r?.hidden ? dodHouseNear(g.world, x, y - 14, 12) : null;
+        let cx;
+        let cy;
+        if (house) {
+          const [x0, y0] = g.toScreen(house.x - house.w / 2, house.y - house.h, camX, camY);
+          const [x1, y1] = g.toScreen(house.x + house.w / 2, house.y, camX, camY);
+          cx = (x0 + x1) / 2;
+          cy = (y0 + y1) / 2;
+          if (x1 > 0 && x0 < W && y1 > 0 && y0 < H) {
+            ctx.strokeStyle = `rgba(255,50,60,${blink + 0.1})`;
+            ctx.lineWidth = 5;
+            ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+          }
+        } else {
+          const [ex, ey] = g.toScreen(x, y - 12, camX, camY);
+          cx = ex;
+          cy = ey;
+          if (ex > 0 && ey > 0 && ex < W && ey < H) {
+            ctx.strokeStyle = `rgba(255,50,60,${blink + 0.1})`;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(ex - 7 * z, ey - 12 * z, 14 * z, 26 * z);
+            ctx.fillStyle = 'rgba(255,60,70,0.9)';
+            ctx.font = `${Math.round(3.4 * z)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText(r?.name || '', ex, ey - 14 * z);
+          }
+        }
+        if (cx < 0 || cy < 0 || cx > W || cy > H) this.edgeArrow(ctx, cx, cy, W, H, '#ff3c46', house ? '🏠' : '');
+      }
+    }
+    // the one he hit sees him lit up in red (an arrow when he is off the screen)
+    if (this.seeKillerT > 0 && !this.isKiller && !this.ghost && !g.inside) {
+      const kp = this.killerPos();
+      if (kp) {
+        const blink = 0.45 + 0.45 * Math.sin(this.t * 12);
+        const [kx, ky] = g.toScreen(kp.x, kp.y - 12, camX, camY);
+        if (kx > 0 && ky > 0 && kx < W && ky < H) {
+          ctx.strokeStyle = `rgba(255,50,60,${blink + 0.1})`;
+          ctx.lineWidth = 4;
+          ctx.strokeRect(kx - 10 * z, ky - 14 * z, 20 * z, 30 * z);
+        } else this.edgeArrow(ctx, kx, ky, W, H, '#ff3c46', '🐻');
+      }
+    }
+    // the trail: faded glitter along the way to the task you picked, and a wisp that runs ahead of you
+    if (this.guideI >= 0 && this.guideT > 0 && !this.isKiller && !g.inside && !this.done.has(this.guideI)) {
+      const t = this.taskTarget(this.guideI);
+      const p = g.player;
+      const dx = t.x - p.x;
+      const dy = t.y - (p.y - 8);
+      const dist = Math.hypot(dx, dy);
+      if (dist < 24) this.guideT = 0;
+      else {
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const L = Math.min(dist, 300);
+        const fade = Math.min(1, this.guideT / 2);
+        const spark = (wx, wy, a, r, col) => {
+          const [sx, sy] = g.toScreen(wx, wy, camX, camY);
+          ctx.globalAlpha = a * fade;
+          ctx.fillStyle = col;
+          ctx.fillRect(sx - r, sy - 1, r * 2, 2);
+          ctx.fillRect(sx - 1, sy - r, 2, r * 2);
+          ctx.fillRect(sx - 1, sy - 1, 2, 2);
+        };
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        // a faint ribbon under the glitter
+        const [r0x, r0y] = g.toScreen(p.x, p.y - 8, camX, camY);
+        const [r1x, r1y] = g.toScreen(p.x + ux * L, p.y - 8 + uy * L, camX, camY);
+        const rib = ctx.createLinearGradient(r0x, r0y, r1x, r1y);
+        rib.addColorStop(0, `rgba(255,233,160,${0.35 * fade})`);
+        rib.addColorStop(1, 'rgba(255,233,160,0)');
+        ctx.strokeStyle = rib;
+        ctx.lineWidth = 5 * z * 0.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(r0x, r0y);
+        ctx.lineTo(r1x, r1y);
+        ctx.stroke();
+        for (let k = 1; k <= 26; k++) {
+          const u = k / 26;
+          const w = Math.sin(this.t * 3 + k * 0.9) * 5 * (1 - u * 0.4);
+          const wx = p.x + ux * L * u - uy * w;
+          const wy = p.y - 8 + uy * L * u + ux * w;
+          const tw = 0.5 + 0.5 * Math.sin(this.t * 7 + k * 1.7);
+          spark(wx, wy, (1 - u * 0.7) * (0.55 + 0.45 * tw), 2 + ((k + Math.floor(this.t * 3)) % 3), k % 2 ? '#ffe9a0' : '#9ff0ff');
+        }
+        // the wisp itself
+        const run = (this.t * 0.5) % 1;
+        const wx = p.x + ux * L * run;
+        const wy = p.y - 8 + uy * L * run + Math.sin(this.t * 9) * 2;
+        const [wsx, wsy] = g.toScreen(wx, wy, camX, camY);
+        const gr = ctx.createRadialGradient(wsx, wsy, 1, wsx, wsy, 14 * z);
+        gr.addColorStop(0, `rgba(255,245,200,${0.9 * fade * (1 - run * 0.5)})`);
+        gr.addColorStop(1, 'rgba(255,200,120,0)');
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = gr;
+        ctx.beginPath();
+        ctx.arc(wsx, wsy, 14 * z, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    }
+    // the Werebear: where his traps were stepped on
+    if (this.isKiller) {
+      for (const sp of this.sprung) {
+        const [ex, ey] = g.toScreen(sp.x, sp.y - 6, camX, camY);
+        const k = (sp.t % 1) / 1;
+        if (ex > 0 && ey > 0 && ex < W && ey < H) {
+          ctx.strokeStyle = `rgba(255,60,70,${1 - k})`;
+          ctx.lineWidth = 3;
           ctx.beginPath();
-          ctx.moveTo(14, 0);
-          ctx.lineTo(-8, -9);
-          ctx.lineTo(-8, 9);
+          ctx.arc(ex, ey, (8 + k * 36) * z * 0.6, 0, Math.PI * 2);
+          ctx.stroke();
+        } else this.edgeArrow(ctx, ex, ey, W, H, '#ff3c46', '🪤');
+      }
+    }
+    // survivors: an arrow to every task that is not done (to the door of the house when it is inside one)
+    if (!this.isKiller && !this.ghost && !this.out && !g.inside && this.ph === 'tasks') {
+      for (let i = 0; i < this.tot; i++) {
+        if (this.done.has(i)) continue;
+        const t = this.taskTarget(i);
+        const [tx, ty] = g.toScreen(t.x, t.y - 20, camX, camY);
+        const icon = this.taskHome(i) ? '🏠' : TASK_ICON[this.stationType(i)];
+        if (tx > 30 && ty > 30 && tx < W - 30 && ty < H - 30) {
+          // on the screen: a small bobbing mark over the spot
+          const bob = Math.sin(this.t * 4 + i) * 3;
+          ctx.fillStyle = 'rgba(255,211,107,0.95)';
+          ctx.beginPath();
+          ctx.moveTo(tx, ty + 12 + bob);
+          ctx.lineTo(tx - 7, ty + bob);
+          ctx.lineTo(tx + 7, ty + bob);
           ctx.closePath();
           ctx.fill();
-          ctx.restore();
-        }
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(icon, tx, ty - 4 + bob);
+        } else this.edgeArrow(ctx, tx, ty, W, H, '#ffd36b', icon);
       }
     }
     // a revive somewhere: a ping for the Werebear
@@ -1173,12 +1641,38 @@ export class DodSystem {
     }
   }
 
+  // an arrow on the edge of the screen pointing at something that is off it
+  edgeArrow(ctx, tx, ty, W, H, color, icon) {
+    const cx = W / 2;
+    const cy = H / 2;
+    const ang = Math.atan2(ty - cy, tx - cx);
+    const m = 58; // (clear of the buttons down the right side)
+    const px = Math.min(W - m, Math.max(m, cx + Math.cos(ang) * W));
+    const py = Math.min(H - m, Math.max(m, cy + Math.sin(ang) * H));
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(ang);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(15, 0);
+    ctx.lineTo(-9, -10);
+    ctx.lineTo(-9, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    if (icon) {
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(icon, px - Math.cos(ang) * 22, py - Math.sin(ang) * 22 + 5);
+    }
+  }
+
   // ---------- what the React side shows ----------
   hud() {
     const g = this.g;
     const p = g.player;
     const names = (id) => (id === this.me ? g.name || 'You' : id === 'bot' ? 'Computer' : g.remotes.get(id)?.name || 'Friend');
-    const list = [...this.players].map(([id, v]) => ({ id, name: names(id), st: v.st, rv: v.rv, me: id === this.me }));
+    const list = [...this.players].map(([id, v]) => ({ id, name: names(id), st: v.st, rv: v.rv, hp: v.hp ?? 2, me: id === this.me }));
     let compass;
     if (g.chopper) {
       const dx = g.chopper.x - p.x;
@@ -1211,7 +1705,19 @@ export class DodSystem {
       stun: this.stunT > 0,
       blind: this.flashT > 0,
       alert: this.alert?.text || null,
+      taskDone: this.taskDoneT > 0,
+      nearKiller: this.nearT > 0,
+      tasks: Array.from({ length: this.tot }, (_, i) => ({ i, name: TASK_NAMES[this.stationType(i)], icon: TASK_ICON[this.stationType(i)], done: this.done.has(i), indoor: !!this.taskHome(i), guiding: this.guideI === i && this.guideT > 0 })),
+      news: this.news?.text || null,
       sel: this.sel,
+      inside: !!g.inside,
+      end: this.end
+        ? {
+            mode: this.end.who,
+            role: this.isKiller ? 'killer' : 'survivor',
+            heroes: [...this.players.keys()].map((id) => (id === this.me ? g.hero?.id : g.remotes.get(id)?.hero?.id)).filter(Boolean),
+          }
+        : null,
       reveal: this.revealT > 0 ? (this.isKiller ? 'killer' : 'survivor') : null,
       practice: !this.killer,
     };

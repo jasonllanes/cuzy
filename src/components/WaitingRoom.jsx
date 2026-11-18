@@ -96,7 +96,7 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
   const hostName = ordered.find((p) => p.id === host)?.name || 'the host';
   const duelHumans = ordered.filter((p) => !p.ai);
   const sides = new Set(duelHumans.map((p) => teams[p.id]).filter((t) => t !== undefined && t !== null));
-  const dodReady = !room.dod || ordered.filter((p) => !p.ai).length >= 2 || room.dodKiller === 'ai';
+  const dodReady = !room.dod || ordered.length >= 2 || room.dodKiller === 'ai'; // (a computer player in a seat counts: it plays the Werebear)
   const duelReady = room.soccer ? (room.rumble ? sides.size >= 2 : sides.has(0) && sides.has(1)) : !room.duel || (room.teams ? new Set(duelHumans.map((p) => teams[p.id]).filter((t) => t !== undefined && t !== null)).size >= 2 : duelHumans.length >= 2);
 
   // a computer player takes a seat: a hero nobody else is using, and a name from the list
@@ -235,11 +235,17 @@ export default function WaitingRoom({ assets, net, session, profile, onStart, on
           </aside>
         </div>
 
+        {imHost && room.dod && !dodReady && (
+          <div className="notice dod-need">
+            <b>🐻 Not enough players to start.</b> A round needs a Werebear and a survivor: invite a friend, add an AI seat, or
+            <button type="button" className="btn go small-btn" onClick={() => net.send({ t: 'settings', dodKiller: 'ai' })}>🤖 play against the computer Werebear</button>
+          </div>
+        )}
         <div className="nav-row">
           <button type="button" className="btn ghost" onClick={onLeave}>← Leave room</button>
           {imHost ? (
             <button type="button" className="btn go" disabled={!duelReady || !dodReady} onClick={() => net.send({ t: 'start' })}>
-              {room.soccer ? (duelReady ? 'Kick off ➜' : room.rumble ? 'Two teams need a player' : 'Both teams need a player') : room.dod && !dodReady ? '2 players, or the computer Werebear' : room.duel ? (duelReady ? 'Start the duel ➜' : room.teams ? 'A duel needs two teams with players' : 'A duel needs two players') : ordered.length > 1 ? `Start with ${ordered.length} players ➜` : 'Start alone ➜'}
+              {room.soccer ? (duelReady ? 'Kick off ➜' : room.rumble ? 'Two teams need a player' : 'Both teams need a player') : room.dod && !dodReady ? 'Waiting for a second player…' : room.duel ? (duelReady ? 'Start the duel ➜' : room.teams ? 'A duel needs two teams with players' : 'A duel needs two players') : ordered.length > 1 ? `Start with ${ordered.length} players ➜` : 'Start alone ➜'}
             </button>
           ) : (
             <span className="wait-note">⏳ Waiting for {hostName} to start…</span>

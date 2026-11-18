@@ -38,7 +38,7 @@ const cleanMins = (v) => (Number.isFinite(Number(v)) ? Math.min(10, Math.max(1, 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'tod', 'dod', 'dodTasks', 'dodLives', 'dodKiller', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins', 'private', 'elem'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'tod', 'dod', 'dodTasks', 'dodLives', 'dodKiller', 'dodFlash', 'dodSmoke', 'dodLight', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins', 'private', 'elem'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -382,6 +382,9 @@ export class SupaNet {
       dod: false, // Do or Die: a Werebear hunts the survivors, who do tasks and then run for a chopper (the seed says so too)
       dodTasks: cleanEsc(dodTasks, 1, 20, 6), // how many tasks the survivors share
       dodLives: cleanEsc(dodLives, 0, 3, 1), // how many times a fallen survivor can be brought back
+      dodFlash: 0, // what every survivor starts with: flashbangs, smoke grenades and the level of the flashlight (each 0 to 3)
+      dodSmoke: 0,
+      dodLight: 0,
       dodKiller: 'random', // who is the Werebear: random | ai (the computer) | a player's id
       escape: false, // the Escape zone: loot, zombies and a chopper to find (kept in the channel)
       escapeMins: cleanEsc(escapeMins, 3, 30, 10), // minutes until the chopper lands
@@ -982,7 +985,7 @@ export class SupaNet {
         this.request('dod', { op: String(m.op), i: Math.round(Number(m.i)) || 0, id: m.id === undefined ? undefined : String(m.id), x: num(m.x), y: num(m.y) });
         break;
       case 'dodfx':
-        if (!this.cfg.dod || !['eye', 'flash', 'smoke', 'trap', 'trapoff', 'hook', 'revive', 'swing', 'stun', 'loot', 'bot'].includes(m.k)) return;
+        if (!this.cfg.dod || !['eye', 'flash', 'smoke', 'trap', 'trapoff', 'hook', 'revive', 'swing', 'stun', 'loot', 'bot', 'done', 'sprung'].includes(m.k)) return;
         this.bcast({ t: 'dodfx', from: this.me, k: m.k, x: num(m.x), y: num(m.y), a: num(m.a), i: Math.round(Number(m.i)) || 0, ...(typeof m.to === 'string' ? { to: m.to } : {}) });
         break;
       // the host's game reports where its computer players are, what they swing and throw, who they hurt and who beat them
@@ -1058,6 +1061,9 @@ export class SupaNet {
         if (typeof m.k !== 'string') return;
         if (m.to === 'host' && this.isHost) return;
         this.bcast({ t: 'w', from: this.me, k: m.k.slice(0, 12), d: m.d, to: m.to });
+        break;
+      case 'emote':
+        if (Number.isInteger(m.k) && m.k >= 0 && m.k < 12) this.bcast({ t: 'emote', id: this.me, k: m.k });
         break;
       case 'chat': {
         const text = clean(m.text, 80);
@@ -1415,6 +1421,7 @@ export class SupaNet {
     this.suddenSet = new Set();
     this.sudden = false;
     this.matchLeft = null;
+    if (this.cfg.dod) this.cfg.seed = withRoll(DOD_SEED, Math.random().toString(36).slice(2, 8)); // (a new map, new tasks and new rooms every round)
     this.started = true;
     this.winning = false;
     this.paused = false;
@@ -1493,6 +1500,7 @@ export class SupaNet {
       if (cfg.dod && !this.started) {
         if (m.dodTasks !== undefined) cfg.dodTasks = cleanEsc(m.dodTasks, 1, 20, 6);
         if (m.dodLives !== undefined) cfg.dodLives = cleanEsc(m.dodLives, 0, 3, 1);
+        for (const k of ['dodFlash', 'dodSmoke', 'dodLight']) if (m[k] !== undefined) cfg[k] = cleanEsc(m[k], 0, 3, 0);
         if (typeof m.dodKiller === 'string' && (m.dodKiller === 'random' || m.dodKiller === 'ai' || this.members.has(m.dodKiller))) cfg.dodKiller = m.dodKiller;
       }
       if (cfg.mode === 'free' && typeof m.elem === 'boolean' && m.elem !== !!cfg.elem) {
@@ -1702,7 +1710,7 @@ export class SupaNet {
   dodMsg() {
     const d = this.dod;
     if (!d) return null;
-    return { t: 'dod', k: d.killer, ph: d.ph, tot: d.tot, done: [...d.done], ch: d.ch, lives: Math.max(0, Number(this.cfg.dodLives) || 0), p: [...d.p].map(([id, v]) => [id, v.st, v.rv, Math.round(v.bx), Math.round(v.by)]) };
+    return { t: 'dod', k: d.killer, ph: d.ph, tot: d.tot, done: [...d.done], ch: d.ch, lives: Math.max(0, Number(this.cfg.dodLives) || 0), si: [Number(this.cfg.dodFlash) || 0, Number(this.cfg.dodSmoke) || 0, Number(this.cfg.dodLight) || 0], p: [...d.p].map(([id, v]) => [id, v.st, v.rv, Math.round(v.bx), Math.round(v.by), v.hp ?? 2]) };
   }
 
   sendDod() {
@@ -1713,19 +1721,23 @@ export class SupaNet {
   // a Do or Die round needs a Werebear and a survivor: two players, or one player and the computer Werebear
   dodReady() {
     const n = this.humans().filter((h) => !h.ai).length;
-    return n >= 2 || (n >= 1 && this.cfg.dodKiller === 'ai');
+    const ai = [...this.members.values()].some((m) => m.ai); // (a computer player in a seat counts as the second player: it is the Werebear)
+    return n >= 2 || (n >= 1 && (ai || this.cfg.dodKiller === 'ai'));
   }
 
   // the round begins: one of the players is the Werebear (or the computer is)
   startDod() {
     const humans = this.humans().filter((h) => !h.ai);
+    const ais = [...this.members.values()].filter((m) => m.ai);
     const want = this.cfg.dodKiller;
     let killer;
-    if (want === 'ai' || humans.length < 2) killer = 'bot';
+    if (want === 'ai') killer = 'bot';
     else if (want !== 'random' && humans.some((h) => h.id === want)) killer = want;
-    else killer = humans[Math.floor(Math.random() * humans.length)].id;
-    const survivors = humans.filter((h) => h.id !== killer);
-    this.dod = { killer, ph: 'tasks', tot: Math.max(1, Number(this.cfg.dodTasks) || 6), done: new Set(), ch: -1, p: new Map(survivors.map((h) => [h.id, { st: 'alive', rv: 0, bx: 0, by: 0 }])) };
+    else if (humans.length >= 2) killer = humans[Math.floor(Math.random() * humans.length)].id;
+    else killer = ais.length && humans.length && Math.random() < 0.5 ? humans[0].id : 'bot'; // (one player and a computer seat: either of them can be the Werebear)
+    let survivors = humans.filter((h) => h.id !== killer);
+    if (!survivors.length && killer !== 'bot') survivors = ais; // (the player is the Werebear: the computer players are the survivors)
+    this.dod = { killer, ph: 'tasks', tot: Math.max(1, Number(this.cfg.dodTasks) || 6), done: new Set(), ch: -1, p: new Map(survivors.map((h) => [h.id, { st: 'alive', rv: 0, bx: 0, by: 0, hp: 2 }])) };
     this.sendDod();
     for (const ms of [1500, 4000]) setTimeout(() => this.dod && this.started && this.sendDod(), ms); // (in case it got lost on the way)
   }
@@ -1736,8 +1748,11 @@ export class SupaNet {
     if (!d || !this.started) return;
     if (m.op === 'sync') return this.sendDod(); // (a player who has not heard the state yet asks for it again)
     if (this.winning) return;
+    // the host's game plays the computer survivors: it speaks for them
+    const aiOp = (m.op === 'aitask' || m.op === 'aiout') && from === this.hostId && this.members.get(String(m.id))?.ai;
+    if (aiOp) from = String(m.id);
     const me = d.p.get(from);
-    if (m.op === 'task') {
+    if (m.op === 'task' || m.op === 'aitask') {
       if (!me || me.st === 'dead' || d.ph !== 'tasks' || !(m.i >= 0 && m.i < d.tot) || d.done.has(m.i)) return;
       d.done.add(m.i);
       if (d.done.size >= d.tot) {
@@ -1748,6 +1763,15 @@ export class SupaNet {
     } else if (m.op === 'kill') {
       const t = d.p.get(String(m.id));
       if ((from !== d.killer && !(d.killer === 'bot' && from === this.hostId)) || !t || t.st !== 'alive') return;
+      // a survivor takes two hits: the first one only wounds (and a second swing right behind it does not count)
+      const now = Date.now();
+      if (t.until && now < t.until) return;
+      t.hp = (t.hp ?? 2) - 1;
+      if (t.hp > 0) {
+        t.until = now + 1800;
+        this.sendDod();
+        return;
+      }
       t.st = 'dead';
       t.bx = Number.isFinite(m.x) ? m.x : 0;
       t.by = Number.isFinite(m.y) ? m.y : 0;
@@ -1757,9 +1781,11 @@ export class SupaNet {
       const t = d.p.get(String(m.id));
       if (!me || me.st !== 'alive' || !t || t.st !== 'dead' || t.rv >= (Number(this.cfg.dodLives) || 0)) return;
       t.st = 'alive';
+      t.hp = 2;
+      t.until = 0;
       t.rv++;
       this.sendDod();
-    } else if (m.op === 'out') {
+    } else if (m.op === 'out' || m.op === 'aiout') {
       if (!me || me.st !== 'alive' || d.ph !== 'extract') return;
       me.st = 'out';
       this.sendDod();
@@ -1785,7 +1811,7 @@ export class SupaNet {
     const outN = d ? [...d.p.values()].filter((v) => v.st === 'out').length : 0;
     this.out({ t: 'win', dod: true, who, killer: d?.killer ?? null, outN, total: d ? d.p.size : 0, id: null, name: '' });
     clearTimeout(this.timers.back);
-    this.timers.back = setTimeout(() => this.returnToLobby(), CELEBRATE_MS + 2000);
+    this.timers.back = setTimeout(() => this.returnToLobby(), 45000); // (the end scene has a button: the first to press it takes everybody back)
   }
 
   // The Beach Ball match: two teams, a ball and two goals, on a beach pitch.

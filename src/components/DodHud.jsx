@@ -67,6 +67,7 @@ export default function DodHud({ hud, game }) {
           <b>{d.ph === 'extract' ? '🚁 Tasks done: reach the chopper!' : `🔧 Tasks ${d.done} / ${d.tot}`}</b>
         </div>
         {d.alert && <div className="dod-alert">{d.alert}</div>}
+        {d.news && <div className="dod-news">{d.news}</div>}
       </div>
 
       <div className="dod-log panel small">
@@ -75,12 +76,24 @@ export default function DodHud({ hud, game }) {
           {d.killer && <li className="k">🐻 {d.killer} <small>Werebear</small></li>}
           {d.players.map((p) => (
             <li key={p.id} className={`${p.st} ${p.me ? 'me' : ''}`}>
-              {ST[p.st]} {p.name}
+              {ST[p.st]} {p.name}{p.st === 'alive' && <span className="dod-hp">{p.hp >= 2 ? ' ❤❤' : ' ❤'}</span>}
               {p.st === 'dead' && <small>{p.rv < d.lives ? 'can be revived' : 'lost'}</small>}
               {p.me && <small>you</small>}
             </li>
           ))}
         </ul>
+        {!killer && d.tot > 0 && (
+          <div className="dod-tasks">
+            <b>Tasks</b>
+            {d.tasks.map((t) => (
+              <button key={t.i} type="button" disabled={t.done} className={`${t.done ? 'done' : ''} ${t.guiding ? 'on' : ''}`} onClick={() => dod?.guide(t.i)} title={t.done ? 'Done' : 'Click: a glittering trail shows you the way'}>
+                <span>{t.done ? '✅' : t.icon}</span>
+                <i>{t.name}{t.indoor ? ' 🏠' : ''}</i>
+                {!t.done && <em>{t.guiding ? '✨' : '➜'}</em>}
+              </button>
+            ))}
+          </div>
+        )}
         {!killer && d.role !== 'wait' && <small className="dod-lives">Revives left for you: {d.myLeft}</small>}
       </div>
 
@@ -99,7 +112,7 @@ export default function DodHud({ hud, game }) {
           <Slot n={1} icon="🧭" label="Compass: hold it to see where the chopper is" sel={d.sel === 1} onPick={pick} />
           {!killer && (
             <>
-              <Slot n={2} icon="🔦" label={`Flashlight upgrade level ${d.light}/3`} count={`Lv ${d.light}`} sel={d.sel === 2} onPick={pick} />
+              <Slot n={2} icon="🔦" label={`Flashlight upgrade level ${d.light}/3: a wider glow`} count={`Lv ${d.light}`} sel={d.sel === 2} onPick={pick} />
               <Slot n={3} icon="💥" label="Flashbang: blinds the Werebear (Q)" count={`×${d.items.flash}`} sel={d.sel === 3} dim={d.items.flash <= 0 || d.itemCd > 0} hot="Q" onPick={(n) => { pick(n); press('KeyQ'); }} />
               <Slot n={4} icon="💨" label="Smoke grenade: you vanish for a moment (E)" count={`×${d.items.smoke}`} sel={d.sel === 4} dim={d.items.smoke <= 0 || d.itemCd > 0} hot="E" onPick={(n) => { pick(n); press('KeyE'); }} />
             </>
@@ -121,6 +134,8 @@ export default function DodHud({ hud, game }) {
         )}
       </div>
 
+      {d.taskDone && <div className="dod-taskdone"><b>✅ TASK COMPLETE</b><small>{d.done} / {d.tot}</small></div>}
+      {d.nearKiller && <div className="dod-near">🐻 THE KILLER IS NEARBY!</div>}
       {d.stun && <div className="dod-stun">💫 Stunned!</div>}
       {d.role === 'ghost' && <div className="dod-ghost">{d.myLeft > 0 ? 'Wait here: a survivor can bring you back. You can see everything.' : 'You are out for good. You can still watch everything.'}</div>}
       {d.reveal && (
@@ -132,7 +147,7 @@ export default function DodHud({ hud, game }) {
           </div>
         </div>
       )}
-      {dod?.task && <DodTasks task={dod.task} onDone={() => dod.finishTask(true)} onClose={() => dod.finishTask(false)} />}
+      {dod?.task && <DodTasks task={dod.task} info={{ done: d.done, total: d.tot }} onDone={() => dod.finishTask(true)} onClose={() => dod.finishTask(false)} />}
     </>
   );
 }

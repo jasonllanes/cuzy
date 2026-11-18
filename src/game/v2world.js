@@ -446,6 +446,30 @@ function scatter(world, chunk, cx, cy) {
 }
 
 // one prop as chunk objects: scenery you walk around, containers you open, buildings you can walk into
+// Do or Die: the nearest building you can walk into to a point (px): { id, x, y (its foot), w, h }, or null. It rolls the same places the world does.
+export function dodHouseNear(world, x, y, maxD = 260) {
+  world.dodHouseCache ||= new Map();
+  const key = `${Math.round(x / 4)},${Math.round(y / 4)},${maxD}`;
+  if (world.dodHouseCache.has(key)) return world.dodHouseCache.get(key);
+  const ci0 = Math.floor(x / 16 / CELL);
+  const cj0 = Math.floor(y / 16 / CELL);
+  let best = null;
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const P = place(world, ci0 + i, cj0 + j);
+      if (!P || !P.kind.enter) continue;
+      const [s, tx, ty, extra] = fill(P)[0] || [];
+      if (!s || !extra?.enter) continue;
+      const bx = Math.round(tx * 16);
+      const by = Math.round(ty * 16);
+      const d = Math.hypot(bx - x, by - y);
+      if (d < maxD && (!best || d < best.d)) best = { d, id: `v2:${P.ci},${P.cj}:1`, x: bx, y: by, w: s.w, h: s.h };
+    }
+  }
+  world.dodHouseCache.set(key, best);
+  return best;
+}
+
 // Do or Die: only the foot of a prop blocks you, so you can walk behind a house, a billboard or the top of a pole
 function dodFootprint(p, s) {
   if (!s || p.solid === false || isFlat(p.name, s.w, s.h)) return null;
@@ -483,7 +507,7 @@ export function addProp(world, chunk, s, x, y, id, extra) {
   if (extra?.enter) {
     chunk.objects.push({ kind: 'tree', vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, x, y });
     // the way in: stand at the door and press Space
-    chunk.objects.push({ kind: 'bdoor', inter: 'building', id: `bd${id}`, vid: id, label: `Space · go inside (${extra.name})`, b: { id, type: extra.enter, name: extra.name, x, y }, x, y: y - 1 });
+    chunk.objects.push({ kind: 'bdoor', inter: 'building', id: `bd${id}`, vid: id, label: `Space · go inside (${extra.name})`, b: { id, type: extra.enter, name: extra.name, x, y }, x, y: y - 1, ...(world.dod ? { pad: Math.min(90, Math.round(s.w * 0.4)) } : {}) });
     if (rect) chunk.rects.push({ vid: id, ...rect });
     return;
   }

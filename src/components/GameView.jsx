@@ -12,6 +12,8 @@ import OpeningScene from './OpeningScene';
 import EvacScene from './EvacScene';
 import AirPlanOverlay from './AirPlanOverlay';
 import DodHud from './DodHud';
+import EmotePanel from './EmotePanel';
+import DodEndScene from './DodEndScene';
 import ElementHud from './ElementHud';
 import { AIR_SUPPORT } from '../game/upgrades';
 import TravelScene from './TravelScene';
@@ -352,6 +354,9 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     session ? [{ id: session.you, name: profile.name, hero: profile.hero }, ...session.players] : [],
   );
   const [chatOpen, setChatOpen] = useState(false);
+  const [emoteOpen, setEmoteOpen] = useState(false); // the emote picker (Tab)
+  const emoteRef = useRef(false);
+  emoteRef.current = emoteOpen;
   const [chatLog, setChatLog] = useState([]);
   const chatRef = useRef(false);
   const [scores, setScores] = useState(() => session?.scores || []);
@@ -619,6 +624,16 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         setChatOpen(true);
         return;
       }
+      if (emoteRef.current) {
+        // with the emote picker open the number keys pick an emote
+        const ix = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'].indexOf(e.code);
+        if (ix >= 0) {
+          e.preventDefault();
+          gameRef.current?.emote(ix);
+          setEmoteOpen(false);
+          return;
+        }
+      }
       const digit = /^Digit([1-9])$/.exec(e.code);
       if (digit && !modal && !gameRef.current?.elem && !gameRef.current?.dod) {
         setSelected(Number(digit[1]) - 1);
@@ -643,7 +658,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       } else if (e.code === 'KeyX' && !e.repeat && !modal && survival) {
         gameRef.current?.useSupply('stam');
       } else if (e.code === 'Tab') {
-        // Tab switches weapon: the next gun in Survival, the next sword in the Free Roam
+        // Tab opens the emotes (and closes them again)
+        e.preventDefault();
+        if (!e.repeat && !modal && !gameRef.current?.dead) setEmoteOpen((o) => !o);
+      } else if (e.code === 'KeyC') {
+        // C switches weapon: the next gun in Survival, the next sword in the Free Roam
         e.preventDefault();
         if (!e.repeat && !modal) gameRef.current?.switchWeapon();
       } else if (e.code === 'KeyB' || e.code === 'KeyU') {
@@ -657,7 +676,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       } else if (e.code === 'KeyP' && !e.repeat && (!modal || (pausedRef.current && !session))) {
         pauseRef.current();
       } else if (e.code === 'Escape') {
-        if (confirmRef.current) setConfirm(null);
+        if (emoteRef.current) setEmoteOpen(false);
+        else if (confirmRef.current) setConfirm(null);
         else if (escExtra.current?.()) { /* closed a small pop-up */ }
         else if (aboutRef.current) setAboutOpen(false);
         else if (roomSetRef.current) setRoomSetOpen(false);
@@ -722,7 +742,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     </button>
   );
   return (
-    <div className={`game ${hud.dod ? 'dodmode' : ''} ${mobile ? 'mobile' : ''} ${mobile && hudOff ? 'hud-off' : ''} ${mobile && topFold ? 'top-folded' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
+    <div className={`game ${hud.dod ? 'dodmode' : ''} ${hud.dod?.inside ? 'dod-inside' : ''} ${hud.dod?.role === 'killer' ? 'dod-killer' : ''} ${mobile ? 'mobile' : ''} ${mobile && hudOff ? 'hud-off' : ''} ${mobile && topFold ? 'top-folded' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
       <div className="game-canvas">
         <canvas ref={canvasRef} />
       </div>
@@ -900,6 +920,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <>
         {!mobile && !hud.escape && !hud.dod && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
         {mobile && <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat</button>}
+        <button className="btn small-btn" onClick={() => setEmoteOpen((o) => !o)} title="Emotes: pick a reaction that floats over your head (Tab)">😀 Emote <kbd>Tab</kbd></button>
         {(session ? isHost : true) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
         <button className="btn small-btn" onClick={() => setBestiaryOpen(true)} title="Every creature in the game, so you can tell what is attacking you">👹 Creatures</button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu <kbd>Esc</kbd></button>
@@ -913,7 +934,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} onSupply={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
-      {!mobile && <div className="hud hud-help">{hud.dod ? (hud.dod.role === 'killer' ? <>WASD move · Click strike · Q hook · E trap · R Killer Eye · F open doors and bushes</> : <>WASD move · Shift sprint · F tasks / revive / crates (hold) · Q flashbang · E smoke · follow the compass once the chopper comes</>) : hud.elem ? <>WASD move · Click bolt · Right-click dash · 1 block · 2 / 3 element skills · 4 ultimate · hold Space to recharge mana · E skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
+      {!mobile && <div className="hud hud-help">{hud.dod ? (hud.dod.role === 'killer' ? <>WASD move · Click strike · Q hook · E trap · R Killer Eye · F open doors and bushes</> : <>WASD move · Shift sprint · F tasks / revive / crates (hold) · Q flashbang · E smoke · follow the compass once the chopper comes</>) : hud.elem ? <>WASD move · Click bolt · Right-click dash · 1 block · 2 / 3 element skills · 4 ultimate · hold Space to recharge mana · E skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · C switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · C weapon · B buy · M map</>}</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -974,7 +995,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {!waves && hud.weapons && (
           <button className="skill weapon-skill" onMouseDown={(e) => e.preventDefault()} onClick={() => gameRef.current?.switchWeapon()} title={`${weaponById(hud.weapons.equipped).name}: press to switch swords (Tab)`}>
             <span className="wicon sm" style={{ backgroundImage: `url(${import.meta.env.BASE_URL}assets/${weaponIconFile(weaponById(hud.weapons.equipped))}.png)` }} />
-            <kbd>Tab</kbd>
+            <kbd>C</kbd>
           </button>
         )}
       </div>}
@@ -1188,6 +1209,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       )}
       {hud.elem && <ElementHud hud={hud} game={gameRef.current} home={homeBtn} />}
       {hud.dod && <DodHud hud={hud} game={gameRef.current} />}
+      {emoteOpen && <EmotePanel onPick={(i) => { gameRef.current?.emote(i); setEmoteOpen(false); }} onClose={() => setEmoteOpen(false)} />}
+      {hud.dod?.end && <DodEndScene assets={assets} mode={hud.dod.end.mode} heroes={hud.dod.end.heroes} role={hud.dod.end.role} onContinue={() => (session ? net.send({ t: 'tolobby' }) : onExit())} />}
       {!hud.elem && !hud.dod && <Hotbar
         slots={inventory}
         selected={selected}

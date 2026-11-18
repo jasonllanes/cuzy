@@ -75,7 +75,7 @@ function WavesGuide() {
       <div><b>♥ Drops</b> Monsters drop hearts that heal you, coins and throwable items. Right click throws without limit, but each throw drains the throw meter.</div>
       <div><b>👹 Monster levels</b> Each monster has a level from 1 to 10, shown as a coloured number (green common up to gold legendary). Higher levels are bigger and tougher, and show up in later waves. Bosses glow red.</div>
       <div><b>🪙 Buy ({k('B')})</b> Spend coins on base health, endurance, melee damage, throw damage and a bigger lantern. Hire a <b>Thrower, Guard or Sharpshooter</b> to help; upgrading the base makes room for more.</div>
-      <div><b>💬 Chat</b> {k('Enter')} chats with everyone online. {k('Tab')} switches weapon where you have more than one.</div>
+      <div><b>💬 Chat</b> {k('Enter')} chats with everyone online. {k('C')} switches weapon where you have more than one. {k('Tab')} opens the emotes: pick a reaction and it floats over your head for everyone to see.</div>
     </div>
   );
 }

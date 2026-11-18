@@ -4,6 +4,7 @@ import { ITEMS, LOOT_APOC, RARITIES, isConsumable, rarityOf, rollLoot, sellPrice
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
 import { DodSystem } from './dod';
+import { EMOTES, EMOTE_TIME } from './emotes';
 import { ElementSystem } from './elements';
 import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
@@ -32,7 +33,7 @@ const bossText = (ev) => {
 const bossNames = (ev) => (ev.list?.length ? ev.list.map(([name]) => name).join(' and ') : 'Colossus');
 const PEER_COLORS = ['#7cc5f2', '#f2b05e', '#b49cf2', '#7fd48f', '#f28fb0', '#e6d35a', '#5fd0c4', '#e98a5b', '#9aa7f0', '#c4d86a'];
 import { addItem, emptyInventory, moveSlot, removeFromSlot, sanitize } from './inventory';
-import { DOOR, ROOM, SPOTS, designFor, drawRoom, roomBlocked, spotsOf } from './interior';
+import { DOOR, ROOM, SPOTS, designFor, dodDesign, drawRoom, roomBlocked, spotsOf } from './interior';
 import { EFFECTS, WEAPONS, emptyWeapons, sanitizeWeapons, weaponById, weaponIconFile, weaponRarity } from './weapons';
 import { hash2, hashString } from './rng';
 import { renderChunk } from './render';
@@ -4486,13 +4487,8 @@ export class Game {
       return;
     }
     if (this.dod && m.t === 'win' && m.dod) {
-      const mineKiller = this.dod.isKiller;
-      const survivorsWon = m.who === 'survivors';
-      const won = mineKiller ? !survivorsWon : survivorsWon && !this.dod.ghost || (survivorsWon && this.dod.out);
       this.streaks.reset();
-      sfx.play(won ? 'win' : 'wave');
-      this.celebrate('dod', won ? 'You' : 'Nobody', 7.5, survivorsWon ? `${m.outN} of ${m.total} survivors escaped on the chopper.` : mineKiller ? 'Nobody got away.' : 'The Werebear got everyone.');
-      if (this.celeb) this.celeb.title = survivorsWon ? (mineKiller ? '🚁 They escaped…' : '🚁 The survivors escaped!') : mineKiller ? '🐻 You got them all!' : '💀 The Werebear won';
+      this.dod.finish(m);
       return;
     }
     if (m.t === 'peer_join') {
@@ -4681,6 +4677,13 @@ export class Game {
     } else if (m.t === 'chat') {
       const r = this.remotes.get(m.id);
       if (r) r.bubble = { text: m.text, t: 0 };
+    } else if (m.t === 'emote') {
+      const r = this.remotes.get(m.id);
+      const em = EMOTES[m.k];
+      if (r && em) {
+        r.emote = { k: m.k, t: 0 };
+        if (!this.dod || this.dod.canSee(r)) this.pfx.spawn(em.fx, r.x, r.y - 24, { scale: em.k, seed: 1 + Math.floor(Math.random() * 50) });
+      }
     } else if (m.t === 'fx' && m.kind === 'swing') {
       const r = this.remotes.get(m.id);
       if (r) r.swing = { t: 0, a: m.a, w: m.w, lv: r.lv };
@@ -4749,6 +4752,7 @@ export class Game {
       r.animT += dt;
       if (r.pet) PetSystem.lerpRemote(r.pet, dt);
       if (r.bubble && (r.bubble.t += dt) > 5) r.bubble = null;
+      if (r.emote && (r.emote.t += dt) > EMOTE_TIME) r.emote = null;
       if (r.swing && (r.swing.t += dt) > 0.24) r.swing = null;
       if (r.stunT > 0) r.stunT -= dt;
       if (r.gunFx && (r.gunFx.t += dt) > 0.7) r.gunFx = null;
@@ -4756,6 +4760,52 @@ export class Game {
       if (r.shield > 0) r.shield -= dt;
     }
     if (this.myBubble && (this.myBubble.t += dt) > 5) this.myBubble = null;
+    if (this.myEmote && (this.myEmote.t += dt) > EMOTE_TIME) this.myEmote = null;
+  }
+
+  // an emote: a bubble over my head (and a pixelfx burst), for everybody in the room to see
+  emote(i) {
+    const em = EMOTES[i];
+    if (!em || this.dead || this.spectating || this.t - (this.lastEmoteAt ?? -9) < 1) return;
+    this.lastEmoteAt = this.t;
+    this.myEmote = { k: i, t: 0 };
+    this.pfx.spawn(em.fx, this.player.x, this.player.y - 24, { scale: em.k, seed: 1 + Math.floor(Math.random() * 50) });
+    this.mp?.net.send({ t: 'emote', k: i });
+  }
+
+  // the emote bubble itself: it pops in, floats a little and fades out
+  drawEmote(emote, sx, sy) {
+    const { ctx, zoom } = this;
+    const em = EMOTES[emote.k];
+    if (!em) return;
+    const pop = emote.t < 0.25 ? 1 + 0.35 * Math.sin((emote.t / 0.25) * Math.PI) : 1;
+    const fade = emote.t > EMOTE_TIME - 0.6 ? Math.max(0, (EMOTE_TIME - emote.t) / 0.6) : 1;
+    const px = zoom * 8;
+    const bob = Math.sin(emote.t * 4) * zoom * 0.8 - Math.min(1, emote.t * 3) * zoom * 2;
+    const w = px * 1.7;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.translate(sx, sy + bob);
+    ctx.scale(pop, pop);
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = 'rgba(91,70,54,0.85)';
+    ctx.lineWidth = Math.max(1, zoom * 0.5);
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -w / 2, w, w, px * 0.5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath(); // (the little tail of the bubble)
+    ctx.moveTo(-px * 0.25, w / 2 - 1);
+    ctx.lineTo(0, w / 2 + px * 0.4);
+    ctx.lineTo(px * 0.25, w / 2 - 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = `${px}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+    ctx.fillText(em.e, 0, px * 0.06);
+    ctx.restore();
   }
 
   sendChat(text) {
@@ -5856,7 +5906,7 @@ export class Game {
         this.dismount();
         this.onToast?.('You left your ride at the door.');
       }
-      this.inside = { out: { x: b.x, y: b.y + 14 }, sleepCd: 0, b, design: designFor(b) };
+      this.inside = { out: { x: b.x, y: b.y + 14 }, sleepCd: 0, b, design: this.dod ? dodDesign(this.dod.roomSeed(b), b.type) : designFor(b) };
       this.player.x = ROOM.w / 2;
       this.player.y = ROOM.h - 28;
       this.player.dir = 'up';
@@ -6002,7 +6052,9 @@ export class Game {
     if (!best && p.y > 140 && p.x > DOOR.x0 - 10 && p.x < DOOR.x1 + 10) best = { inter: 'door', x: ROOM.w / 2, y: ROOM.h - 20, label: `${this.actKey()} · go outside` };
     this.prompt = best;
     if (this.interactPressed && best && !this.fade) {
-      if (best.inter === 'chest' && this.inside.b) {
+      if (this.dod && /^chest\d+$/.test(best.inter)) {
+        this.dod.openIndoor(Number(best.inter.slice(5)));
+      } else if (best.inter === 'chest' && this.inside.b) {
         const bn = String(this.inside.b.name || '');
         const o = { id: `bi${this.inside.b.id}`, x: best.x, y: best.y, rich: true, lootKind: this.inside.b.type === 'shop' ? 'atm' : this.inside.b.type === 'kiosk' ? 'food' : 'supply', escKind: this.inside.b.type === 'civic' ? (/clinic/i.test(bn) ? 'clinic' : /station/i.test(bn) ? 'station' : 'civic') : this.inside.b.type };
         if (this.looted(o)) this.onToast?.('The chest is empty. It fills up again in a few days.');
@@ -6284,10 +6336,11 @@ export class Game {
       storageOpen: this.storageOpen,
       weather: this.weather?.kind,
       design: this.inside?.design,
+      chestOpen: this.dod ? (i) => this.dod.indoorOpened(i) : null,
       meY: p.y,
       drawMe: () => {
         ctx.globalAlpha = 1;
-        if (this.dod?.isKiller) this.dod.drawKiller(ctx, p.x, p.y, { moving: p.moving, dir: p.dir, swing: this.dod.swingT });
+        if (this.dod?.isKiller) this.dod.drawKiller(ctx, p.x, p.y, { moving: p.moving, dir: this.dod.facing(), swing: this.dod.swingT });
         else this.drawHeroAt(ctx, this.hero, p.dir, p.moving, this.animT, p.x, p.y);
       },
     });
@@ -6757,6 +6810,8 @@ export class Game {
             if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.sx, o.sy, o.sw, o.sh, o.ox, o.oy, o.sw, o.sh);
           } else if (o.hidden && !this.pets.sees(o)) {
             // (a hidden chest: nobody sees it without a pigeon)
+          } else if (this.dod && o.kind === 'chest' && !this.dod.lit(o.x, o.y) && !(this.dod.isKiller && this.dod.eyeT > 0)) {
+            // (Do or Die: a chest is only seen inside your glow)
           } else if (!(o.inter === 'forage' && this.collected.has(o.id))) {
             drawList.push(o);
           }
@@ -6795,7 +6850,7 @@ export class Game {
       switch (o.kind) {
         case 'tree':
           // (an animated prop plays its frames: o.anim = { frames, fps })
-          if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.anim ? (Math.floor(this.t * o.anim.fps + o.x) % o.anim.frames) * o.sw : o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
+          if (img[o.sheet]) ctx.drawImage(img[o.sheet], o.anim ? (this.world.dod ? 0 : Math.floor(this.t * o.anim.fps + o.x) % o.anim.frames) * o.sw : o.sx, o.sy, o.sw, o.sh, Math.round(o.x - o.sw / 2), o.y - o.sh, o.sw, o.sh);
           break;
         case 'pitchwall': {
           // the rope fence of the beach pitch: pale posts and a rope on a low plank wall
@@ -7010,12 +7065,17 @@ export class Game {
             break;
           }
           if (this.dod?.isKiller) {
-            this.dod.drawKiller(ctx, this.player.x, this.player.y, { moving: this.player.moving, dir: this.player.dir, swing: this.dod.swingT });
+            this.dod.drawKiller(ctx, this.player.x, this.player.y, { moving: this.player.moving, dir: this.dod.facing(), swing: this.dod.swingT });
             break;
           }
           if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
           ctx.globalAlpha = this.cutscene ? 0.6 : this.combat.inBush && this.combat.hidden ? 0.45 : this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
+          if (this.dod && this.dod.stunT > 0 && Math.sin(this.t * 16) > -0.2) {
+            ctx.shadowColor = '#ff1f33';
+            ctx.shadowBlur = 12;
+          }
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
+          ctx.shadowBlur = 0;
           ctx.globalAlpha = 1;
           if (this.stunnedT > 0) this.combat.drawStun(ctx, this.player.x, this.player.y - 26, '#ffe36b');
           if (this.levelFx) this.drawLevelFx(ctx);
@@ -7031,8 +7091,20 @@ export class Game {
           // riding: the animal under them, and they sit a little higher
           if (o.r.mt === 'boat') this.drawBoatSprite(ctx, o.r.x, o.r.y, o.r.dir, o.r.animT);
           else if (o.r.mt && o.r.mt !== 'boatp') this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
-          if (this.dod?.isKillerId(o.r.id)) this.dod.drawKiller(ctx, o.r.x, o.r.y, { moving: o.r.moving, dir: o.r.dir, swing: o.r.dodSwing || 0 });
-          else this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
+          if (this.dod?.isKillerId(o.r.id)) this.dod.drawKiller(ctx, o.r.x, o.r.y, { moving: o.r.moving, dir: o.r.dodSwing > 0 && o.r.dodSwingDir ? o.r.dodSwingDir : o.r.dir, swing: o.r.dodSwing || 0 });
+          else {
+            const red = this.dod && o.r.dodStun > 0 && Math.sin(this.t * 16) > -0.2;
+            if (red) {
+              ctx.save();
+              ctx.shadowColor = '#ff1f33';
+              ctx.shadowBlur = 12;
+            }
+            this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
+            if (red) {
+              ctx.globalCompositeOperation = 'source-atop';
+              ctx.restore();
+            }
+          }
           if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, { ...o.r, y: o.r.y - lift, teamColor: this.teamCount ? this.peerColor(o.r) : null });
           if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y - lift, o.r.shield);
           if (o.r.stunT > 0) this.combat.drawStun(ctx, o.r.x, o.r.y - lift - 26, '#ffe36b'); // (stunned: stars over their head)
@@ -7450,6 +7522,7 @@ export class Game {
     const [sx, sy] = this.toScreen(this.player.x, this.player.y - this.rideLift() - tagHeight(this.hero), camX, camY);
     this.pill(this.name, sx, sy, this.zoom * 4.5, '#5b4636', 'rgba(255,248,235,0.88)');
     if (this.myBubble) this.pill(this.myBubble.text, sx, sy - this.zoom * 9, this.zoom * 4.2, '#5b4636', '#fff');
+    if (this.myEmote) this.drawEmote(this.myEmote, sx, sy - this.zoom * (this.myBubble ? 20 : 12));
   }
 
   // Draws a hero; anyone standing in water sinks in a little, with ripples around the feet
@@ -7515,6 +7588,7 @@ export class Game {
         const next = this.duelMarks().includes(String(r.id)); // (in the next duel: a red name and a sword)
         this.pill(next ? `⚔️ ${r.name}` : r.name, sx, sy, zoom * 4.5, '#fff', next ? '#d6293e' : this.peerColor(r));
         if (r.bubble) this.pill(r.bubble.text, sx, sy - zoom * 9, zoom * 4.2, '#5b4636', '#fff');
+        if (r.emote) this.drawEmote(r.emote, sx, sy - zoom * (r.bubble ? 20 : 12));
         continue;
       }
       // a small arrow on the screen edge pointing at the friend
@@ -7699,7 +7773,24 @@ export class Game {
     };
     if (!this.demo && this.combat) {
       for (const b of this.bots?.list || []) if (Number.isFinite(b.x)) circle(b.x, b.y, '#f2a33c');
-      for (const o of this.remotes.values()) if (!o.hidden) circle(o.x, o.y, o.bot || o.ai ? '#f2a33c' : '#2f8cf0');
+      if (this.dod) {
+        // Do or Die: the Werebear's map shows the chopper, and the survivors while his Killer Eye is open
+        if (this.chopper) circle(this.chopper.x, this.chopper.y, '#ffd36b');
+        if (!this.dod.isKiller && !this.dod.ghost) {
+          // a survivor's map: the tasks that are left (yellow, the ones in houses too) and the other survivors
+          if (this.dod.ph === 'tasks') for (let i = 0; i < this.dod.tot; i++) if (!this.dod.done.has(i)) { const t = this.dod.taskTarget(i); circle(t.x, t.y, '#ffd36b'); }
+          for (const [id, v] of this.dod.players) { const r = this.remotes.get(id); if (v.st === 'alive' && r && id !== this.dod.me) circle(r.x, r.y, '#3fae5c'); }
+        }
+        if (this.dod.isKiller) for (const sp of this.dod.sprung) circle(sp.x, sp.y, Math.sin(this.t * 10) > 0 ? '#ff3c46' : '#ffd0d0');
+        if (this.dod.isKiller && this.dod.eyeT > 0) {
+          for (const [id, v] of this.dod.players) {
+            if (v.st === 'out') continue;
+            const r = this.remotes.get(id);
+            if (v.st === 'dead') circle(v.bx, v.by, '#b0b0b0');
+            else if (r) circle(r.x, r.y, '#ff3c46');
+          }
+        }
+      } else for (const o of this.remotes.values()) if (!o.hidden) circle(o.x, o.y, o.bot || o.ai ? '#f2a33c' : '#2f8cf0');
     }
 
     // portals to other realms, as little coloured diamonds

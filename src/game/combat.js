@@ -2076,7 +2076,7 @@ export class Combat {
 
     if (!this.g.wave && !this.g.inside) {
       // skeletons roam the free world only (and never come into your house, or follow you underground)
-      if (!this.g.dungeon && !this.g.elem) {
+      if (!this.g.dungeon && !this.g.elem && !this.g.dod) {
         this.updateSpawns(dt);
         this.updateCamps(dt);
         this.updateDens(dt);
@@ -2227,7 +2227,7 @@ export class Combat {
         if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
       }
     }
-    if (!this.g.dungeon && !this.g.elem) this.updateBossZones(dt);
+    if (!this.g.dungeon && !this.g.elem && !this.g.dod) this.updateBossZones(dt);
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
     if (this.wildQ?.length) this.wilds.push(...this.wildQ.splice(0));
     this.updateWildShots(dt);

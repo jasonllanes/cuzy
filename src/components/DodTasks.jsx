@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { TASK_NAMES } from '../game/dod';
+import { TASK_ICON, TASK_NAMES } from '../game/dod';
 
 // The tasks of Do or Die: small games in a window (like the ones in Among Us). Finish one and it counts for everybody.
 // Each game gets a seed so the same station always makes the same puzzle. Esc closes the window (the task stays undone).
@@ -115,31 +115,37 @@ function MathLock({ seed, onDone }) {
 function Colors({ seed, onDone }) {
   const rnd = useMemo(() => rngOf(seed), [seed]);
   const seq = useMemo(() => Array.from({ length: 5 }, () => Math.floor(rnd() * 4)), [rnd]);
-  const [shown, setShown] = useState(0); // how many of the sequence are lit so far (while it plays)
+  const [shown, setShown] = useState(0); // how many of the sequence are in this round
   const [lit, setLit] = useState(-1);
+  const [mark, setMark] = useState(null); // { c, ok }: the pad I just pressed, green when right and red when wrong
   const [pos, setPos] = useState(0);
   const [playing, setPlaying] = useState(true);
-  const [bad, setBad] = useState(false);
+  const [msg, setMsg] = useState('');
   const round = useRef(2); // the sequence grows: 2, 3, 4, 5
-  const play = (n) => {
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const later = (fn, ms) => setTimeout(() => alive.current && fn(), ms);
+  const play = (n, note = '') => {
     setPlaying(true);
     setPos(0);
+    setMsg(note);
+    setShown(n);
     let k = 0;
     const step = () => {
       if (k >= n) {
         setLit(-1);
         setPlaying(false);
+        setMsg('Your turn');
         return;
       }
       setLit(seq[k]);
-      setTimeout(() => {
+      later(() => {
         setLit(-1);
         k++;
-        setTimeout(step, 220);
+        later(step, 220);
       }, 520);
     };
-    setTimeout(step, 500);
-    setShown(n);
+    later(step, 700);
   };
   useEffect(() => {
     play(round.current);
@@ -147,28 +153,37 @@ function Colors({ seed, onDone }) {
   }, []);
   const tap = (c) => {
     if (playing) return;
-    setLit(c);
-    setTimeout(() => setLit(-1), 160);
-    if (c !== seq[pos]) {
-      setBad(true);
-      setTimeout(() => setBad(false), 400);
-      play(round.current);
+    const ok = c === seq[pos];
+    setMark({ c, ok });
+    later(() => setMark(null), 380);
+    if (!ok) {
+      // wrong: it goes back to the start of this round and shows it again
+      setPlaying(true);
+      setMsg('❌ Wrong! Watch again…');
+      later(() => play(round.current), 900);
       return;
     }
     if (pos + 1 === shown) {
-      if (shown === 5) onDone();
-      else {
+      setPlaying(true);
+      if (shown === 5) {
+        setMsg('✅ Correct!');
+        later(onDone, 500);
+      } else {
+        setMsg('✅ Correct! A longer one…');
         round.current = shown + 1;
-        play(round.current);
+        later(() => play(round.current), 900);
       }
     } else setPos(pos + 1);
   };
   const pads = ['#e8506a', '#3f8cf0', '#f2c230', '#3fae5c'];
   return (
     <div className="dt-colors">
-      <p>{playing ? 'Watch the lights…' : `Repeat them (${shown}/5)`}</p>
-      <div className={`dt-simon ${bad ? 'bad' : ''}`}>
-        {pads.map((c, i) => <button key={c} type="button" style={{ background: c, opacity: lit === i ? 1 : 0.45, transform: lit === i ? 'scale(1.06)' : 'none' }} onClick={() => tap(i)} />)}
+      <p>{playing && !msg ? 'Watch the lights…' : msg || 'Watch the lights…'} <small>({pos}/{shown} · round {shown - 1}/4)</small></p>
+      <div className="dt-simon">
+        {pads.map((c, i) => {
+          const m = mark?.c === i ? (mark.ok ? 'ok' : 'bad') : '';
+          return <button key={c} type="button" className={m} style={{ background: m === 'ok' ? '#3fae5c' : m === 'bad' ? '#d6293e' : c, opacity: lit === i || m ? 1 : 0.45, transform: lit === i || m ? 'scale(1.06)' : 'none' }} onClick={() => tap(i)} />;
+        })}
       </div>
     </div>
   );
@@ -370,7 +385,7 @@ function Engine({ seed, onDone }) {
 
 const GAMES = { wires: Wires, math: MathLock, colors: Colors, ricochet: Ricochet, switches: Switches, engine: Engine };
 
-export default function DodTasks({ task, onDone, onClose }) {
+export default function DodTasks({ task, info = { done: 0, total: 0 }, onDone, onClose }) {
   useEffect(() => {
     const key = (e) => {
       if (e.code === 'Escape') {
@@ -387,11 +402,13 @@ export default function DodTasks({ task, onDone, onClose }) {
     <div className="dt-overlay" onMouseDown={(e) => e.stopPropagation()}>
       <div className="dt-card panel">
         <header>
-          <b>{TASK_NAMES[task.type]}</b>
-          <button type="button" className="btn small-btn" onClick={onClose} aria-label="Close">✕</button>
+          <span className="dt-ico">{TASK_ICON[task.type]}</span>
+          <div className="dt-head"><b>{TASK_NAMES[task.type]}</b><small>Task {task.i + 1} · {info.done} of {info.total} done</small></div>
+          <button type="button" className="dt-x" onClick={onClose} aria-label="Close" title="Close (Esc)">✕</button>
         </header>
-        <Game key={task.i} seed={task.seed} onDone={() => onDone()} />
-        <small className="dt-note">You stand still while you work. The Werebear can still find you.</small>
+        <div className="dt-bar"><i style={{ width: `${info.total ? (info.done / info.total) * 100 : 0}%` }} /></div>
+        <div className="dt-body"><Game key={task.i} seed={task.seed} onDone={() => onDone()} /></div>
+        <small className="dt-note">🤫 You stand still while you work. If the Werebear comes close, the window shuts.</small>
       </div>
     </div>
   );

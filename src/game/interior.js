@@ -169,9 +169,9 @@ const sky = (hour, weather) => {
 };
 
 // the whole room. The hero is drawn in between the furniture so walking behind the table looks right.
-export function drawRoom(g, { img, t, hour, weather, storageOpen, drawMe, meY, design }) {
+export function drawRoom(g, { img, t, hour, weather, storageOpen, drawMe, meY, design, chestOpen }) {
   if (design && DESIGNS[design]) {
-    drawDesign(g, design, { img, t, hour, weather, drawMe, meY, storageOpen });
+    drawDesign(g, design, { img, t, hour, weather, drawMe, meY, storageOpen, chestOpen });
     return;
   }
   backdrop ||= paintBackdrop(img);
@@ -345,6 +345,7 @@ export function designFor(b) {
 
 // the chest's solid box and the spot you stand on to open it
 const chestSolid = (c) => ({ x: c.x - 1, y: c.y + 2, w: 34, h: 16 });
+const chestsOf = (D) => D.chests || [D.chest];
 
 // the boxes the hero cannot walk through, one per piece of standing furniture (feet-level), and the chest
 const solidCache = new Map();
@@ -352,7 +353,7 @@ function solidsOf(name) {
   let s = solidCache.get(name);
   if (s) return s;
   const D = DESIGNS[name];
-  s = [chestSolid(D.chest)];
+  s = chestsOf(D).map(chestSolid);
   for (const [p, x, y, solid] of D.stuff) {
     if (solid === false) continue;
     const w = Math.round(PIECES[p][3] * 0.86);
@@ -367,6 +368,12 @@ export function spotsOf(name) {
   const D = DESIGNS[name];
   if (!D) return SPOTS;
   const out = { chest: { x: D.chest.x + 16, y: D.chest.y + 30, label: 'Space · open the chest' } };
+  if (D.chests) {
+    delete out.chest;
+    D.chests.forEach((c, i) => {
+      out[`chest${i}`] = { x: c.x + 16, y: c.y + 30, label: `F · open the ${RARITY_NAME[c.rar] || 'wooden'} chest` };
+    });
+  }
   if (D.bed) out.bed = { x: D.bed.x, y: D.bed.y, label: 'Space · rest in bed' };
   return out;
 }
@@ -417,7 +424,7 @@ function paintDesign(img, name) {
   return g.canvas;
 }
 
-function drawDesign(g, name, { img, t, hour, weather, drawMe, meY, storageOpen }) {
+function drawDesign(g, name, { img, t, hour, weather, drawMe, meY, storageOpen, chestOpen }) {
   const D = DESIGNS[name];
   let back = designBackdrops.get(name);
   if (!back) {
@@ -446,16 +453,121 @@ function drawDesign(g, name, { img, t, hour, weather, drawMe, meY, storageOpen }
     g.fill();
   }
   const things = D.stuff.map(([p, x, y]) => ({ y, draw: () => putFeet(g, img, p, x, y, !/^(fire2|lamp)/.test(p)) }));
-  const ch = D.chest;
-  things.push({
-    y: ch.y + 18,
-    draw: () => {
-      g.fillStyle = 'rgba(60,40,30,0.25)';
-      g.fillRect(ch.x - 2, ch.y + 14, 36, 4);
-      g.drawImage(img.chest, 0, storageOpen ? 16 : 0, 32, 16, ch.x, ch.y, 32, 16);
-    },
+  chestsOf(D).forEach((ch, i) => {
+    things.push({
+      y: ch.y + 18,
+      draw: () => {
+        const open = D.chests ? !!chestOpen?.(i) : storageOpen;
+        g.fillStyle = 'rgba(60,40,30,0.25)';
+        g.fillRect(ch.x - 2, ch.y + 14, 36, 4);
+        if (ch.rar && !open) {
+          // a better chest glows in the colour of its rarity
+          const col = RARITY_GLOW[ch.rar];
+          const pulse = 0.5 + 0.5 * Math.sin(t * 3 + i);
+          const gr = g.createRadialGradient(ch.x + 16, ch.y + 8, 2, ch.x + 16, ch.y + 8, 26);
+          gr.addColorStop(0, `rgba(${col},${0.25 + 0.25 * pulse})`);
+          gr.addColorStop(1, `rgba(${col},0)`);
+          g.fillStyle = gr;
+          g.fillRect(ch.x - 12, ch.y - 18, 56, 52);
+        }
+        g.drawImage(img.chest, 0, open ? 16 : 0, 32, 16, ch.x, ch.y, 32, 16);
+        if (ch.rar && !open) {
+          g.fillStyle = `rgb(${RARITY_GLOW[ch.rar]})`;
+          g.fillRect(ch.x + 14, ch.y + 7, 4, 3); // (a clasp in its colour)
+        }
+      },
+    });
   });
   things.push({ y: meY, draw: drawMe });
   things.sort((a, b) => a.y - b.y);
   for (const th of things) th.draw();
+}
+
+// ---------------------------------------------------------------- Do or Die: a different room for every building, every round
+export const RARITY_NAME = { common: 'wooden', rare: 'silver', epic: 'purple', legendary: 'golden' };
+const RARITY_GLOW = { common: '220,200,160', rare: '90,170,255', epic: '190,110,255', legendary: '255,205,70' };
+const BACK_ROW = ['bookshelf1', 'bookshelf2', 'wine1', 'wine2', 'wine3', 'fridge1', 'fridge2', 'fridge3', 'foodShelf', 'wardrobe1', 'wardrobe2', 'wardrobeBig', 'dresserMirA', 'dresserMirB', 'kitchenWhite', 'cabKitchen', 'shelf'];
+const MID = ['sofaGrey', 'sofaGrey2', 'sofaBrown', 'benchLong', 'tableBig', 'tableLight', 'stool', 'plantTall', 'plantPot', 'lampRed', 'lampBlue', 'bed', 'palm'];
+const RUGS = [['rugBlueV', 42, 62], ['rugRedV', 42, 62], ['rugGreenL', 28, 28], ['rugGreenS', 24, 18]];
+
+function rngFrom(seed) {
+  let s = (seed >>> 0) % 2147483646 + 1;
+  return () => {
+    s = (s * 48271) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+// builds (once) a random room for this seed and returns its design name; `type` is the kind of building
+export function dodDesign(seed, type) {
+  const name = `dod${(seed >>> 0).toString(36)}`;
+  if (DESIGNS[name]) return name;
+  const r = rngFrom(seed);
+  const pick = (l) => l[Math.floor(r() * l.length)];
+  const wOf = (p) => PIECES[p][3];
+  const stuff = [];
+  const feet = []; // boxes in the way: [x0, y0, x1, y1]
+  const free = (x0, y0, x1, y1) => !feet.some((b) => x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1]);
+  feet.push([86, 132, 154, 178]); // the doorway stays clear
+  // the back row, against the wall
+  let x = 14 + Math.floor(r() * 10);
+  while (x < 200) {
+    if (r() < 0.12) {
+      x += 18 + Math.floor(r() * 24);
+      continue;
+    }
+    const p = pick(BACK_ROW);
+    const w = wOf(p);
+    if (x + w > 232) break;
+    stuff.push([p, x + w / 2, 66]);
+    feet.push([x - 2, 52, x + w + 2, 74]);
+    x += w + 2 + Math.floor(r() * 10);
+  }
+  // furniture on the floor
+  const n = 3 + Math.floor(r() * 4);
+  for (let k = 0; k < n; k++) {
+    for (let tries = 0; tries < 16; tries++) {
+      const p = pick(MID);
+      const w = wOf(p);
+      const px = 20 + w / 2 + Math.floor(r() * (200 - w));
+      const py = 100 + Math.floor(r() * 54);
+      if (free(px - w / 2 - 2, py - 18, px + w / 2 + 2, py + 3)) {
+        stuff.push([p, px, py]);
+        feet.push([px - w / 2 - 2, py - 18, px + w / 2 + 2, py + 3]);
+        break;
+      }
+    }
+  }
+  // the chests: two to five, of different rarities, each with room to stand below it
+  const chests = [];
+  const want = 2 + Math.floor(r() * 4);
+  for (let tries = 0; tries < 80 && chests.length < want; tries++) {
+    const cx = 16 + Math.floor(r() * 190);
+    const cy = 76 + Math.floor(r() * 62);
+    if (!free(cx - 4, cy - 2, cx + 36, cy + 40)) continue;
+    const q = r();
+    chests.push({ x: cx, y: cy, rar: q < 0.5 ? 'common' : q < 0.8 ? 'rare' : q < 0.95 ? 'epic' : 'legendary' });
+    feet.push([cx - 4, cy - 2, cx + 36, cy + 40]);
+  }
+  if (!chests.length) chests.push({ x: 196, y: 76, rar: 'common' });
+  const windows = [];
+  const walls = [];
+  for (let wx = 30; wx < 200; wx += 52 + Math.floor(r() * 30)) {
+    if (r() < 0.6) {
+      windows.push([wx, 14, 26, 22]);
+      walls.push(['windowWhite', wx, 14]);
+    } else walls.push([pick(['picFish', 'picSky']), wx, 16]);
+  }
+  const rug = pick(RUGS);
+  DESIGNS[name] = {
+    floor: pick(Object.keys(FLOORS)),
+    wall: Math.floor(r() * WALL_Y.length),
+    windows,
+    chest: chests[0],
+    chests,
+    walls,
+    rugs: r() < 0.8 ? [[rug[0], 50 + Math.floor(r() * 100), 86 + Math.floor(r() * 30)]] : [],
+    stuff,
+  };
+  return name;
 }

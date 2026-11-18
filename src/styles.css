@@ -2373,7 +2373,7 @@ kbd { display: inline-block; min-width: 34px; text-align: center; padding: 1px 5
 .air-plan { cursor: crosshair; }
 
 /* ---- Do or Die ---- */
-.dodmode .minimap, .dodmode .zoom-box, .dodmode .coin-row, .dodmode .hud-left, .dodmode .tp-home-btn, .dodmode .hotbar, .dodmode .supply-bar, .dodmode .weather-chip { display: none !important; }
+.dodmode .zoom-box, .dodmode .coin-row, .dodmode .hud-left, .dodmode .tp-home-btn, .dodmode .hotbar, .dodmode .supply-bar, .dodmode .weather-chip { display: none !important; }
 .dod-top { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 60; display: grid; gap: 5px; justify-items: center; min-width: min(420px, 90vw); padding: 8px 14px; pointer-events: none; }
 .dod-role { font: 800 0.95rem var(--pixel); }
 .dod-bar { position: relative; width: 100%; height: 22px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); overflow: hidden; border: 2px solid rgba(0, 0, 0, 0.35); }
@@ -2455,3 +2455,91 @@ kbd { display: inline-block; min-width: 34px; text-align: center; padding: 1px 5
 .dod-reveal small { font: 700 1rem var(--pixel); opacity: 0.8; letter-spacing: 0.2em; text-transform: uppercase; }
 .dod-reveal p { max-width: 520px; margin: 8px auto 0; font-size: 0.95rem; opacity: 0.9; padding: 0 16px; }
 @keyframes dod-reveal { 0% { opacity: 0; } 12% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+
+.dod-need { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: center; text-align: center; background: rgba(255, 190, 80, 0.16); border: 2px solid #ffb347; color: #ffe2b0; }
+.dod-need b { color: #ffd37a; }
+
+/* indoors the bottom of the room is where you stand: keep the HUD off it */
+.dodmode .status-pill { display: none; }
+.dod-inside .dod-inv { opacity: 0.3; transition: opacity 0.15s; }
+.dod-inside .dod-inv:hover { opacity: 1; }
+
+/* the Werebear has a map (his Killer Eye marks the survivors on it) */
+.dodmode .minimap { display: block !important; }
+
+/* the Host / Computer tag sits over the top edge of a seat: give it room above and put it in front */
+.wait-grid { padding-top: 14px; overflow: visible; }
+.waiting-card .wait-grid { margin-top: 0; }
+.wait-slot { overflow: visible; }
+.wait-badge { z-index: 4; top: -11px; }
+
+/* the empty seat is dimmed, but its pop-up menu must not be: dim the seat's own contents instead and keep the menu solid */
+.wait-slot.empty { opacity: 1; }
+.wait-slot.empty > .seat-btn { opacity: 0.65; }
+.wait-slot.empty:hover > .seat-btn { opacity: 1; }
+.seat-menu { opacity: 1; background: #2b2941; border-color: #8a7fc4; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55); z-index: 20; }
+.seat-menu .btn { opacity: 1; cursor: pointer; background: #4f8f62; color: #fff; border-color: #2f6b45; box-shadow: 0 3px 0 #1f4a30; }
+.seat-menu .btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
+.seat-menu .btn:disabled { background: #3a3757; color: #8f88aa; cursor: not-allowed; box-shadow: none; }
+
+.dod-hp { font-size: 0.7rem; letter-spacing: -1px; }
+
+.dod-news { font: 800 0.8rem var(--pixel); color: #2f8a4a; }
+.dod-taskdone { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); z-index: 90; display: grid; justify-items: center; gap: 2px; padding: 12px 26px; border-radius: 18px; background: rgba(20, 60, 36, 0.88); border: 3px solid #7dffa0; box-shadow: 0 0 40px rgba(125, 255, 160, 0.6); color: #eaffef; animation: dod-pop 2.4s ease-out forwards; pointer-events: none; }
+.dod-taskdone b { font: 800 1.5rem var(--pixel); text-shadow: 0 3px 0 #0b2a16; }
+@keyframes dod-pop { 0% { opacity: 0; transform: translateX(-50%) scale(0.6); } 12% { opacity: 1; transform: translateX(-50%) scale(1.08); } 20% { transform: translateX(-50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-14px); } }
+
+.dod-log { max-height: calc(100vh - 230px); overflow-y: auto; }
+.dod-tasks { display: grid; gap: 3px; margin-top: 8px; padding-top: 6px; border-top: 1px dashed rgba(127, 127, 127, 0.5); }
+.dod-tasks b { font-size: 0.8rem; }
+.dod-tasks button { pointer-events: auto; display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; padding: 3px 6px; border-radius: 8px; border: 1.5px solid rgba(127, 127, 127, 0.35); background: rgba(255, 255, 255, 0.5); font: inherit; font-size: 0.74rem; cursor: pointer; }
+.dod-tasks button:hover:not(:disabled) { background: #fff3c4; border-color: #e0b13a; }
+.dod-tasks button i { flex: 1; font-style: normal; }
+.dod-tasks button.done { opacity: 0.55; text-decoration: line-through; cursor: default; }
+.dod-tasks button.on { background: #ffe9a0; border-color: #e0b13a; }
+
+/* ---- emotes ---- */
+.emote-panel { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); z-index: 95; padding: 26px 14px 12px; display: grid; gap: 8px; justify-items: center; background: rgba(255, 249, 238, 0.95); border: 3px solid var(--wood); border-radius: 18px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); animation: emote-in 0.14s ease-out; }
+@keyframes emote-in { from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.94); } }
+.emote-title { font: 800 0.8rem var(--pixel); color: var(--ink); }
+.emote-title kbd { font-size: 0.6rem; margin-left: 4px; }
+.emote-x { position: absolute; top: 5px; right: 6px; width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 50%; border: 2px solid var(--wood); background: #fff; color: var(--ink-soft); font-size: 0.7rem; cursor: pointer; }
+.emote-x:hover { background: #ffe0e0; color: #b22; }
+.emote-grid { display: grid; grid-template-columns: repeat(6, 52px); gap: 6px; }
+.emote-btn { position: relative; width: 52px; height: 52px; display: grid; place-items: center; padding: 0; border-radius: 12px; border: 2px solid var(--wood); background: #fff3df; font-size: 1.7rem; cursor: pointer; transition: transform 0.08s, background 0.08s; }
+.emote-btn:hover { transform: translateY(-2px) scale(1.08); background: #fff; border-color: #e8506a; }
+.emote-btn small { position: absolute; left: 3px; bottom: 1px; font: 700 0.55rem var(--pixel); color: var(--ink-soft); }
+@media (max-width: 560px) { .emote-grid { grid-template-columns: repeat(4, 52px); } }
+
+.dt-simon button.ok { box-shadow: 0 0 22px 4px #7dffa0; border-color: #fff; }
+.dt-simon button.bad { box-shadow: 0 0 22px 4px #ff5a6a; border-color: #fff; animation: dt-shake 0.3s; }
+.dt-colors p small { opacity: 0.6; }
+
+.dod-near { position: fixed; left: 50%; top: 34%; transform: translateX(-50%); z-index: 150; padding: 10px 24px; border-radius: 14px; background: rgba(120, 10, 20, 0.92); border: 3px solid #ff5a6a; color: #fff; font: 800 1.5rem var(--pixel); text-shadow: 0 3px 0 #000; box-shadow: 0 0 40px rgba(255, 40, 60, 0.7); animation: dod-blink 0.4s infinite alternate; pointer-events: none; }
+
+/* ---- the task windows, second look: dark glass like the menu ---- */
+.dt-overlay { background: radial-gradient(ellipse at center, rgba(8, 8, 22, 0.55), rgba(0, 0, 0, 0.78)); backdrop-filter: blur(3px); }
+.dt-card { width: min(420px, 94vw); padding: 0 0 12px; gap: 0; overflow: hidden; color: #f3e9dc; background: linear-gradient(160deg, rgba(58, 54, 94, 0.97), rgba(22, 19, 44, 0.98)); border: 1.5px solid rgba(255, 255, 255, 0.22); border-radius: 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2); animation: emote-in 0.16s ease-out; }
+.dt-card header { padding: 12px 14px; gap: 10px; justify-content: flex-start; background: rgba(0, 0, 0, 0.22); }
+.dt-ico { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; font-size: 1.5rem; background: linear-gradient(160deg, #ffb36b, #e8506a); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); flex: none; }
+.dt-head { display: grid; gap: 1px; text-align: left; flex: 1; }
+.dt-head b { font: 800 1rem var(--pixel); color: #ffd9a6; }
+.dt-head small { opacity: 0.7; font-size: 0.7rem; }
+.dt-x { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: #fff; cursor: pointer; font-size: 0.8rem; }
+.dt-x:hover { background: #d6293e; border-color: #fff; }
+.dt-bar { height: 5px; background: rgba(0, 0, 0, 0.35); }
+.dt-bar i { display: block; height: 100%; background: linear-gradient(90deg, #3fae5c, #9be36b); transition: width 0.4s; }
+.dt-body { display: grid; justify-items: center; gap: 8px; padding: 14px 16px 4px; text-align: center; }
+.dt-card p { color: #d8cfe6; }
+.dt-note { opacity: 0.55; font-size: 0.68rem; padding: 6px 14px 0; text-align: center; }
+.dt-sum { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.dt-pad button, .dt-grid button { box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); transition: transform 0.08s; }
+.dt-pad button:active, .dt-grid button:active { transform: translateY(2px); box-shadow: none; }
+.dt-pad button:hover { background: #fff; }
+.dt-ricochet canvas { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.dt-gauge { box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5); }
+
+/* every task game is centred in its window */
+.dt-body > div { display: grid; justify-items: center; gap: 8px; width: 100%; }
+.dt-gauge { margin: 0 auto; }
+.dt-body canvas, .dt-body svg { margin: 0 auto; max-width: 100%; }
