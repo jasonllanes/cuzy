@@ -15,12 +15,12 @@ export const MAX_AIR = 30; // aircraft in the sky at once (the real limit is per
 const AIRP = {
   gunship: { rx: 130, ry: 80, spd: 0.55, fire: 0.09, dmg: 1.3, range: 240, dur: 60 },
   // (the drones do not circle: they fly out to the nearest zombie within `chase` of the shelter at speed `fly`, hover at a good shooting distance, and come home when none are left)
-  drone: { fire: 0.22, dmg: 0.8, range: 150, dur: 45, chase: 290, fly: 95 },
-  helix: { fire: 0.13, dmg: 1.0, range: 195, dur: 60, chase: 370, fly: 130 },
+  drone: { fire: 0.28, dmg: 1.1, range: 165, dur: 45, chase: 290, fly: 95 }, // the scout drone is a rifle: single bullets
+  helix: { fire: 0.1, dmg: 0.9, range: 200, dur: 60, chase: 370, fly: 130, laser: true }, // the helix is a laser: a beam that goes through everything on its line and stays on its target until it falls
 };
 export const AIR_DUR = { drone: 45, helix: 60 }; // (how long a drone stays: its landing starts near the end)
 export const AIR_CODES = ['', 'carpet', 'gunship', 'drone', 'helix']; // (how an aircraft's kind travels in the room's snapshots)
-export const MAX_AIR_PER_WAVE = 3; // how many carpet bombings, and how many gunships, EACH player may call in a wave (or a batch, in Endless)
+export const MAX_AIR_PER_WAVE = 2; // how many carpet bombings, and how many gunships, EACH player may call in a wave (or a batch, in Endless)
 export const POWER_SLOW_TIME = 8; // seconds the Slow-mo power-up lasts
 export const BARRICADE_COST = 4; // a Barricade Box from the shop
 export const REPAIR_COST = 2; // per destroyed barricade planted back
@@ -1133,7 +1133,7 @@ export class WaveSim {
 
   // 'carpet': a helicopter sweeps across the whole map and drops bombs along its path. 'gunship': a chopper circles the shelter
   // for a minute, firing its machine gun at the zombies. They can be bought any time, as many as you like (a few at once is plenty).
-  // Each player may call 3 carpet bombings and 3 gunships per wave (their own counts: a team of two can call 6 of each).
+  // Each player may call 2 carpet bombings and 2 gunships per wave (their own counts: a team of two can call 6 of each).
   // `route` (carpet only): { a0, a1 } are the angles (radians, around the shelter) where the bomber comes in and where it flies out.
   callAir(kind, who = null, route = null) {
     const id = String(who ?? this.g.mp?.you ?? 'me');
@@ -1215,7 +1215,34 @@ export class WaveSim {
       a.y += (dy / dist) * step;
       a.ang = Math.atan2(dy, dx);
     }
-    if (target && a.fireT <= 0) {
+    a.bx = 0;
+    a.by = 0;
+    if (target && P.laser) {
+      // the laser: a steady beam through the target and on past it, hurting every zombie on the line
+      const tx = target.x;
+      const ty = target.y - 8;
+      const td = Math.hypot(tx - a.x, ty - a.y) || 1;
+      if (td <= P.range + 10) {
+        const ux = (tx - a.x) / td;
+        const uy = (ty - a.y) / td;
+        const L = Math.min(P.range + 10, td + 50);
+        a.firing = true;
+        a.bx = a.x + ux * L;
+        a.by = a.y + uy * L;
+        if (a.fireT <= 0) {
+          a.fireT = P.fire;
+          for (const m of this.monsters) {
+            if (m.state === 'dead') continue;
+            const sc = MONSTERS[m.type].scale || 1;
+            const px = m.x - a.x;
+            const py = m.y - 8 * sc - a.y;
+            const along = px * ux + py * uy;
+            if (along < 0 || along > L) continue;
+            if (Math.abs(px * uy - py * ux) <= 7 * sc + 3) this.hitMonster(m.id, P.dmg, a.x, a.y, 0, false, 'ally');
+          }
+        }
+      }
+    } else if (target && a.fireT <= 0) {
       const td = Math.hypot(target.x - a.x, target.y - 8 - a.y);
       if (td <= P.range + 10) {
         a.firing = true;
@@ -1354,7 +1381,7 @@ export class WaveSim {
       bl: this.baseLevel,
       sl: this.lightLevel || 0,
       ml: this.mendLevel || 0,
-      ar: this.airs.map((a) => [Math.max(1, AIR_CODES.indexOf(a.kind)), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10, a.skin || 0]),
+      ar: this.airs.map((a) => [Math.max(1, AIR_CODES.indexOf(a.kind)), Math.round(a.x * 10) / 10, Math.round(a.y * 10) / 10, Math.round(a.ang * 100) / 100, a.firing ? 1 : 0, Math.round(a.t * 10) / 10, a.skin || 0, Math.round(a.bx || 0), Math.round(a.by || 0)]),
       ab: (this.airBombs || []).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.fall * 100) / 100, b.R]),
       au: this.airUsed || 0,
       abp: this.airBy,
@@ -1506,9 +1533,9 @@ export class WaveMirror {
     this.mendLevel = s.ml || 0;
     const sky = Array.isArray(s.ar) && Array.isArray(s.ar[0]) ? s.ar : [];
     this.airs.length = Math.min(this.airs.length, sky.length);
-    sky.forEach(([k, x, y, ang, firing, tt, skin], i) => {
+    sky.forEach(([k, x, y, ang, firing, tt, skin, bx, by], i) => {
       if (!this.airs[i]) this.airs[i] = { x, y };
-      Object.assign(this.airs[i], { kind: AIR_CODES[k] || 'gunship', tx: x, ty: y, ang, firing: !!firing, t: tt || 0, skin: skin || 0 });
+      Object.assign(this.airs[i], { kind: AIR_CODES[k] || 'gunship', tx: x, ty: y, ang, firing: !!firing, t: tt || 0, skin: skin || 0, bx: bx || 0, by: by || 0 });
     });
     this.airBombs = (s.ab || []).map(([x, y, fall, R]) => ({ x, y, fall, R }));
     this.airUsed = s.au || 0;

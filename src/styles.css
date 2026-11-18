@@ -1,3 +1,11 @@
+/* digits and number punctuation in a clear, heavy font (a subset of Nunito, OFL licence) */
+@font-face {
+  font-family: 'Cuzy Digits';
+  src: url('./assets/fonts/nunito-800.woff2') format('woff2');
+  font-weight: 400 900;
+  font-display: swap;
+  unicode-range: U+0025, U+002B-003A, U+00D7;
+}
 :root {
   --cream: #fff6e5;
   --paper: #fffaf0;
@@ -11,7 +19,7 @@
   --wood-dark: #c9a273;
   --ink: #5b4636;
   --ink-soft: #8d735f;
-  --pixel: 'Pixelify Sans', 'Courier New', monospace;
+  --pixel: 'Cuzy Digits', 'Pixelify Sans', 'Courier New', monospace; /* (the numbers come from a clearer font: 6 8 9 and 2 5 were hard to tell apart in the pixel one) */
   --body: 'Nunito', system-ui, sans-serif;
 }
 
@@ -2325,3 +2333,125 @@ kbd { display: inline-block; min-width: 34px; text-align: center; padding: 1px 5
 .hotbar button, .hotbar .slot { border-radius: 12px; }
 .overlay > .panel { backdrop-filter: blur(10px); border-radius: 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
 .overlay { background: rgba(10, 8, 24, 0.55); backdrop-filter: blur(3px); }
+
+/* ---- leaderboard ---- */
+.lb-page { gap: 10px; }
+.lb-title { font-size: 1.05rem; color: #ffb36b; display: flex; align-items: center; gap: 6px; }
+.lb-list { gap: 6px; counter-reset: lb; }
+.lb-row { grid-template-columns: 46px 1fr auto; padding: 8px 12px; border-radius: 14px; }
+.lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-rank { font-size: 1.05rem; text-align: center; }
+.lb-score { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.menu-card .lb-row { background: linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04)); border: 1.5px solid rgba(255, 255, 255, 0.14); color: var(--ink); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25); transition: transform 0.1s, border-color 0.1s; }
+.menu-card .lb-row:hover { transform: translateX(3px); border-color: rgba(255, 190, 120, 0.6); }
+.menu-card .lb-row .lb-name { color: #f6eefc; }
+.menu-card .lb-row .lb-rank { color: var(--ink-soft); }
+.menu-card .lb-row .lb-score { color: #ffd9a6; background: rgba(0, 0, 0, 0.28); padding: 2px 9px; border-radius: 999px; }
+.menu-card .lb-row.top1 { background: linear-gradient(160deg, rgba(255, 204, 80, 0.38), rgba(255, 150, 40, 0.14)); border-color: rgba(255, 210, 100, 0.85); box-shadow: 0 0 18px rgba(255, 190, 60, 0.3); }
+.menu-card .lb-row.top2 { background: linear-gradient(160deg, rgba(205, 215, 235, 0.3), rgba(160, 175, 205, 0.1)); border-color: rgba(220, 228, 245, 0.7); }
+.menu-card .lb-row.top3 { background: linear-gradient(160deg, rgba(220, 150, 95, 0.32), rgba(170, 100, 55, 0.1)); border-color: rgba(230, 160, 105, 0.7); }
+.menu-card .lb-row.mine { background: linear-gradient(160deg, rgba(95, 174, 122, 0.45), rgba(47, 107, 69, 0.3)); border-color: #7be39b; box-shadow: 0 0 0 2px rgba(123, 227, 155, 0.4); }
+.menu-card .lb-row.mine::after { content: ''; }
+.menu-card .lb-pick .seg, .menu-card .lb-page .seg { border-radius: 14px; background: rgba(0, 0, 0, 0.25); border-color: rgba(255, 255, 255, 0.16); }
+.menu-card .lb-pick select { background: rgba(0, 0, 0, 0.3); color: var(--ink); border: 1.5px solid rgba(255, 255, 255, 0.2); border-radius: 12px; }
+.menu-card .lb-page .hint { text-align: center; padding: 14px 0; }
+.lb-card { border-radius: 22px; }
+
+/* bars sit above the hint line; the home button shows its hotkey */
+.elem-bar { bottom: 40px; }
+.hotbar { bottom: 40px; }
+.tp-home-btn kbd { position: absolute; right: 3px; top: 2px; font: 700 9px var(--pixel); background: rgba(0, 0, 0, 0.55); color: #fff; border-radius: 4px; padding: 0 4px; line-height: 13px; }
+.elem-bar .tp-home-btn kbd { background: rgba(255, 255, 255, 0.2); }
+
+/* the teleport-home icon sits in the row of skills (right of the hotbar); the whole row clears the hint line */
+.skills .tp-home-btn { position: static; flex: none; width: 58px; height: 58px; }
+@media (min-width: 1001px) { .skills, .supply-bar { bottom: 40px; } }
+.hot-title { display: none; } /* (the hint line at the bottom already says it, and it overlapped the weapon name) */
+
+.air-plan-time { width: min(300px, 70vw); height: 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.2); overflow: hidden; }
+.air-plan-time i { display: block; height: 100%; background: linear-gradient(90deg, #ff5a6a, #ffb36b); }
+.air-plan { cursor: crosshair; }
+
+/* ---- Do or Die ---- */
+.dodmode .minimap, .dodmode .zoom-box, .dodmode .coin-row, .dodmode .hud-left, .dodmode .tp-home-btn, .dodmode .hotbar, .dodmode .supply-bar, .dodmode .weather-chip { display: none !important; }
+.dod-top { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 60; display: grid; gap: 5px; justify-items: center; min-width: min(420px, 90vw); padding: 8px 14px; pointer-events: none; }
+.dod-role { font: 800 0.95rem var(--pixel); }
+.dod-bar { position: relative; width: 100%; height: 22px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); overflow: hidden; border: 2px solid rgba(0, 0, 0, 0.35); }
+.dod-bar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #3fae5c, #9be36b); transition: width 0.4s; }
+.dod-bar b { position: absolute; inset: 0; display: grid; place-items: center; font: 800 0.78rem var(--pixel); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.dod-alert { font: 800 0.85rem var(--pixel); color: #d6293e; animation: dod-blink 0.8s infinite alternate; }
+@keyframes dod-blink { from { opacity: 0.55; } to { opacity: 1; } }
+.dod-log { position: fixed; left: 10px; top: 96px; z-index: 60; min-width: 170px; padding: 8px 12px; pointer-events: none; }
+.dod-log ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 3px; font-size: 0.82rem; }
+.dod-log li small { margin-left: 6px; opacity: 0.7; }
+.dod-log li.dead { color: #b0344a; } .dod-log li.out { color: #2f8a4a; } .dod-log li.k { color: #a8321f; font-weight: 800; }
+.dod-lives { display: block; margin-top: 4px; opacity: 0.8; }
+.dod-compass { position: fixed; left: 14px; bottom: 54px; z-index: 60; width: 86px; height: 86px; border-radius: 50%; display: grid; place-items: center; background: rgba(15, 18, 34, 0.78); border: 3px solid rgba(255, 255, 255, 0.55); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); color: #fff; }
+.dod-compass b { position: absolute; top: 3px; font: 800 0.7rem var(--pixel); opacity: 0.8; }
+.dod-compass small { position: absolute; bottom: 7px; font: 700 0.62rem var(--pixel); opacity: 0.9; }
+.dod-needle { position: absolute; inset: 8px; display: grid; place-items: start center; }
+.dod-needle i { width: 6px; height: 36px; margin-top: 4px; background: linear-gradient(#ff5a6a 50%, #aab 50%); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.dod-needle.spin { animation: dod-spin 1.2s linear infinite; }
+@keyframes dod-spin { to { transform: rotate(360deg); } }
+.dod-hold { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 60; min-width: 220px; padding: 8px 14px; display: grid; gap: 4px; text-align: center; }
+.dod-hold div { height: 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); overflow: hidden; }
+.dod-hold i { display: block; height: 100%; background: linear-gradient(90deg, #7dffa0, #3fae5c); }
+.dod-bottom { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 60; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
+.dod-skill { position: relative; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 14px; background: rgba(15, 18, 34, 0.78); border: 2px solid rgba(255, 255, 255, 0.35); color: #fff; font-size: 1.1rem; backdrop-filter: blur(6px); }
+.dod-skill b { font: 700 0.72rem var(--pixel); }
+.dod-skill kbd { font: 700 0.62rem var(--pixel); background: rgba(255, 255, 255, 0.2); border-radius: 5px; padding: 1px 6px; }
+.dod-skill em { position: absolute; top: -8px; right: -6px; font: 800 0.65rem var(--pixel); background: #d6293e; border-radius: 999px; padding: 0 6px; font-style: normal; }
+.dod-skill.cd { opacity: 0.5; }
+.dod-skill.on { border-color: #ff5a6a; box-shadow: 0 0 14px #ff5a6a; }
+.dod-stun { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); z-index: 70; font: 800 1.6rem var(--pixel); color: #ffe36b; text-shadow: 0 2px 6px #000; }
+.dod-ghost { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); z-index: 60; padding: 8px 16px; border-radius: 14px; background: rgba(40, 20, 70, 0.8); color: #e8dcff; font: 700 0.85rem var(--pixel); text-align: center; max-width: 90vw; }
+/* the task windows */
+.dt-overlay { position: fixed; inset: 0; z-index: 140; display: grid; place-items: center; background: rgba(5, 6, 16, 0.55); }
+.dt-card { width: min(380px, 94vw); padding: 14px 16px; display: grid; gap: 8px; justify-items: center; text-align: center; }
+.dt-card header { width: 100%; display: flex; align-items: center; justify-content: space-between; font: 800 1rem var(--pixel); }
+.dt-card p { margin: 0; font-size: 0.82rem; }
+.dt-note { opacity: 0.6; font-size: 0.7rem; }
+.dt-wires svg.bad { animation: dt-shake 0.3s; }
+@keyframes dt-shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+.dt-sum { font: 800 1.8rem var(--pixel); padding: 6px 14px; border-radius: 12px; background: rgba(0, 0, 0, 0.12); }
+.dt-sum.bad { animation: dt-shake 0.3s; color: #d6293e; }
+.dt-pad { display: grid; grid-template-columns: repeat(3, 56px); gap: 6px; }
+.dt-pad button, .dt-grid button { height: 46px; border-radius: 10px; border: 2px solid var(--wood); background: #fff3df; font: 800 1.1rem var(--pixel); cursor: pointer; }
+.dt-pad button.go { background: #9bd9a8; }
+.dt-simon { display: grid; grid-template-columns: repeat(2, 96px); gap: 10px; }
+.dt-simon button { height: 96px; border-radius: 18px; border: 3px solid rgba(0, 0, 0, 0.35); cursor: pointer; transition: opacity 0.1s, transform 0.1s; }
+.dt-simon.bad { animation: dt-shake 0.3s; }
+.dt-ricochet canvas { border-radius: 10px; cursor: crosshair; max-width: 100%; }
+.dt-grid { display: grid; grid-template-columns: repeat(3, 70px); gap: 8px; }
+.dt-grid button { height: 70px; font-size: 1.6rem; background: #2a2f45; }
+.dt-grid button.on { background: #ffe9a0; }
+.dt-gauge { position: relative; width: 300px; height: 28px; border-radius: 999px; background: #2a2f45; overflow: hidden; border: 2px solid rgba(0, 0, 0, 0.4); }
+.dt-gauge .zone { position: absolute; top: 0; bottom: 0; background: #3fae5c; }
+.dt-gauge .needle { position: absolute; top: 0; bottom: 0; width: 5px; background: #fff; transform: translateX(-2px); }
+.dt-gauge.ok { box-shadow: 0 0 14px #7dffa0; } .dt-gauge.bad { box-shadow: 0 0 14px #ff5a6a; }
+
+.dod-skill { pointer-events: auto; cursor: pointer; font-family: inherit; }
+
+/* ---- Do or Die, second pass: clear of the room pill, an inventory, a proper compass, the role card ---- */
+.dod-top { top: 56px; }
+.dod-log { top: 150px; }
+.dod-inv { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 60; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.dod-slots { display: flex; gap: 8px; padding: 8px 10px; border-radius: 18px; background: rgba(255, 249, 238, 0.86); border: 2px solid rgba(255, 255, 255, 0.7); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px); }
+.dod-slot { position: relative; width: 58px; height: 58px; display: grid; place-items: center; border-radius: 12px; border: 3px solid var(--wood); background: #fff3df; font-size: 1.7rem; cursor: pointer; padding: 0; }
+.dod-slot i { position: absolute; left: 4px; top: 1px; font: 700 0.62rem var(--pixel); color: var(--ink-soft); font-style: normal; }
+.dod-slot em { position: absolute; right: 4px; bottom: 1px; font: 800 0.72rem var(--pixel); font-style: normal; color: var(--ink); }
+.dod-slot kbd { position: absolute; right: 3px; top: 2px; font: 700 0.55rem var(--pixel); background: rgba(0, 0, 0, 0.55); color: #fff; border-radius: 4px; padding: 0 4px; }
+.dod-slot.sel { border-color: #e8506a; box-shadow: 0 0 0 3px rgba(232, 80, 106, 0.35); background: #fff; }
+.dod-slot.dim { opacity: 0.5; }
+.dod-skills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.dod-cpanel { position: fixed; left: 50%; bottom: 210px; transform: translateX(-50%); z-index: 61; padding: 10px 14px; display: grid; justify-items: center; gap: 4px; background: rgba(15, 18, 34, 0.9); color: #fff; border: 2px solid #d9c9a0; pointer-events: none; }
+.dod-cinfo { display: grid; justify-items: center; }
+.dod-cinfo b { font: 800 0.9rem var(--pixel); }
+.dod-cinfo small { opacity: 0.8; }
+.dod-spin { animation: dod-spin 1.2s linear infinite; transform-origin: 0 0; }
+.dod-reveal { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; text-align: center; color: #fff; background: radial-gradient(ellipse at center, rgba(10, 8, 24, 0.55), rgba(0, 0, 0, 0.9)); animation: dod-reveal 5.5s ease-out forwards; pointer-events: none; }
+.dod-reveal h1 { margin: 6px 0; font: 800 clamp(2rem, 7vw, 4.2rem) var(--pixel); letter-spacing: 0.05em; text-shadow: 0 4px 0 #000, 0 0 30px rgba(255, 80, 80, 0.7); }
+.dod-reveal.survivor h1 { text-shadow: 0 4px 0 #000, 0 0 30px rgba(255, 220, 120, 0.8); }
+.dod-reveal small { font: 700 1rem var(--pixel); opacity: 0.8; letter-spacing: 0.2em; text-transform: uppercase; }
+.dod-reveal p { max-width: 520px; margin: 8px auto 0; font-size: 0.95rem; opacity: 0.9; padding: 0 16px; }
+@keyframes dod-reveal { 0% { opacity: 0; } 12% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }

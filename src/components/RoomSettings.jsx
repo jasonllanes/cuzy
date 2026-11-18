@@ -32,9 +32,9 @@ export function Switch({ label, hint, on, disabled, onChange }) {
 }
 
 // A group of settings that can be folded away (what it holds, in short, shows while it is folded)
-function Section({ icon, title, note, open = true, children }) {
+function Section({ icon, title, note, children }) {
   return (
-    <details className="set-section" open={open}>
+    <details className="set-section">
       <summary><span className="set-sec-title">{icon} {title}</span>{note && <small>{note}</small>}</summary>
       <div className="set-grid">{children}</div>
     </details>
@@ -43,8 +43,8 @@ function Section({ icon, title, note, open = true, children }) {
 
 // The host's room rules. Everyone can see them; only the host can change them. Most apply at once, even in the middle of a round.
 // the game modes a host can switch between in the room: each one is a patch the room applies in one go (it sets the map, teams and rules for it)
-const GAME_KINDS = [['free', '🌻 Free Roam'], ['survival', '🧟 Survival'], ['beach', '🏖️ Beach Ball'], ['rumble', '🌴 Beach Rumble'], ['escape', '🚁 Escape'], ['elements', '🌀 Elements'], ['duel', '🏛️ Duel']];
-const OFF = { escape: false, duel: false, soccer: false, elem: false };
+const GAME_KINDS = [['free', '🌻 Free Roam'], ['survival', '🧟 Survival'], ['beach', '🏖️ Beach Ball'], ['escape', '🚁 Escape'], ['elements', '🌀 Elements'], ['dod', '🐻 Do or Die']];
+const OFF = { escape: false, duel: false, soccer: false, elem: false, dod: false };
 const MODE_PATCH = {
   free: { mode: 'free', ...OFF },
   survival: { mode: 'survival' },
@@ -52,6 +52,7 @@ const MODE_PATCH = {
   rumble: { mode: 'free', ...OFF, soccer: true, rumble: true },
   escape: { mode: 'free', ...OFF, escape: true },
   elements: { mode: 'free', ...OFF, elem: true },
+  dod: { mode: 'free', ...OFF, dod: true },
   duel: { mode: 'free', ...OFF, duel: true },
 };
 
@@ -71,7 +72,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
   const pair = fighters.length === 2 ? fighters : humans.slice(0, 2).map((p) => p.id);
   const pick = room.duelPick || 'pick';
   const duelLocked = !editable || (duel ? room.started : !!room.duelLive); // (a duel round is set up before it starts; the timed duels can be changed between duels)
-  const kind = room.elem ? 'elements' : duel ? 'duel' : soccer ? (room.rumble ? 'rumble' : 'beach') : escape ? 'escape' : free ? 'free' : 'survival';
+  const kind = room.dod ? 'dod' : room.elem ? 'elements' : duel ? 'duel' : soccer ? 'beach' : escape ? 'escape' : free ? 'free' : 'survival';
   const oneVsOne = duels === 'timed' || (duel && !room.teams);
   const fightNote = [room.teams ? `${room.teams} teams` : 'free for all', room.pvp || duel ? 'player damage' : 'no damage'].join(' · ');
   const duelNote = duels === 'round' ? `Colosseum round${bet ? ' · 🎲 bets' : ''}` : duels === 'timed' ? `every ${every} min${bet ? ' · 🎲 bets' : ''}` : 'off';
@@ -92,8 +93,8 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         <div className="set-row">
           <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Opens the map page, with a preview. Everyone in the room gets the new world.'}</small></div>
           {(() => {
-            const fixed = duel || soccer || escape || !!room.elem;
-            const cur = duel ? '🏛️ Colosseum' : soccer ? (room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch') : escape ? '🚁 Escape Zone' : room.elem ? '🌀 Elemental Lands' : (() => { const m = (free ? FREE_MAPS : SURVIVAL_MAPS).find((x) => x.id === mapIdOf(room.seed, room.mode)); return m ? `${m.icon} ${m.name}` : 'Custom world'; })();
+            const fixed = duel || soccer || escape || !!room.elem || !!room.dod;
+            const cur = duel ? '🏛️ Colosseum' : soccer ? (room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch') : escape ? '🚁 Escape Zone' : room.dod ? '🐻 Do or Die city' : room.elem ? '🌀 Elemental Lands' : (() => { const m = (free ? FREE_MAPS : SURVIVAL_MAPS).find((x) => x.id === mapIdOf(room.seed, room.mode)); return m ? `${m.icon} ${m.name}` : 'Custom world'; })();
             return (
               <div className="map-now">
                 <b>{cur}</b>
@@ -142,6 +143,14 @@ export default function RoomSettings({ room, count, editable, onChange, players 
             </select>
           </div>
           <div className="set-row">
+            <div className="set-label"><b>Time of day</b><small>{room.tod === 'day' ? 'Daylight: no need to buy lamps.' : room.tod === 'night' ? 'Night: buy light for the shelter.' : 'Whatever the map says.'}</small></div>
+            <select value={room.tod || 'map'} disabled={!editable} onChange={(e) => onChange({ tod: e.target.value })}>
+              <option value="map">🗺️ Map decides</option>
+              <option value="day">☀️ Day</option>
+              <option value="night">🌙 Night</option>
+            </select>
+          </div>
+          <div className="set-row">
             <div className="set-label"><b>Next wave</b><small>{WAVE_START.find(([id]) => id === (room.waveStart || 'timer'))?.[2]}</small></div>
             <select value={room.waveStart || 'timer'} disabled={!editable} onChange={(e) => onChange({ waveStart: e.target.value })}>
               {WAVE_START.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
@@ -157,6 +166,32 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         <Switch label="Allow cheats?" hint="Chat commands like -gold 100 or -level 5 (press Enter for the list)" on={!!room.allowCheats} disabled={!editable} onChange={(v) => onChange({ allowCheats: v })} />
         <Switch label="Kill streaks on monsters" hint={room.streakMonsters ? 'Monster kills count towards streaks too' : 'Off: only killing a player starts a streak'} on={!!room.streakMonsters} disabled={!editable} onChange={(v) => onChange({ streakMonsters: v })} />
       </Section>
+
+      {free && !!room.dod && (
+        <Section icon="🐻" title="Do or Die" note={`${room.dodTasks ?? 6} tasks · ${room.dodLives ?? 1} revive${(room.dodLives ?? 1) === 1 ? '' : 's'}`}>
+          <div className="set-row">
+            <div className="set-label"><b>Number of tasks</b><small>The survivors share one list of tasks, so even one player could do them all.</small></div>
+            <select value={room.dodTasks ?? 6} disabled={locked} onChange={(e) => onChange({ dodTasks: Number(e.target.value) })}>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <div className="set-label"><b>Who is the Werebear</b><small>Random, one of the players, or the computer (then one player can play alone).</small></div>
+            <select value={room.dodKiller || 'random'} disabled={locked} onChange={(e) => onChange({ dodKiller: e.target.value })}>
+              <option value="random">🎲 Random</option>
+              <option value="ai">🤖 The computer</option>
+              {players.filter((p) => !p.ai).map((p) => <option key={p.id} value={p.id}>🐻 {p.name}</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <div className="set-label"><b>Revives</b><small>How many times a fallen survivor can be brought back (0: caught means gone).</small></div>
+            <select value={room.dodLives ?? 1} disabled={locked} onChange={(e) => onChange({ dodLives: Number(e.target.value) })}>
+              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <p className="hint">A round needs 2 players, or 1 player with the computer Werebear.</p>
+        </Section>
+      )}
 
       {free && (
         <Section icon="🚁" title="Escape" note={escape ? `chopper in ${room.escapeMins || 10} min · waits ${room.extractMins || 5}` : 'off'}>

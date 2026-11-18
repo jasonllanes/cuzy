@@ -12,6 +12,18 @@ const HOLD = 1.3; // how long a finished line stays up
 const TAIL = 0.8; // quiet moment before the scene ends
 
 function script(kind, name, fight) {
+  if (kind === 'dod') {
+    return {
+      bot: '📻 A crackling radio',
+      tones: ['radio', 'alarm', 'safe', 'alarm'],
+      lines: [
+        `Listen up, ${name}. The city went dark tonight.`,
+        'There is something out in the fog. It hunts by the light you carry.',
+        'Finish the tasks together, then run for the chopper when it comes.',
+        'Do or die. Good luck out there.',
+      ],
+    };
+  }
   if (kind === 'survival') {
     return {
       bot: '📻 The radio',

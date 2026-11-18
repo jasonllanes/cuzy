@@ -3,6 +3,7 @@ import { PETS, PetSystem } from './pets';
 import { ITEMS, LOOT_APOC, RARITIES, isConsumable, rarityOf, rollLoot, sellPrice, sellValue, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
+import { DodSystem } from './dod';
 import { ElementSystem } from './elements';
 import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
@@ -172,7 +173,7 @@ export class Game {
     this.teamCount = this.mp ? session.room.teams || 0 : 0;
     // the Beach Ball match: goals of each team, the clock, and the goal target
     // the Escape zone: loot, zombies and a chopper (the clock is the host's)
-    this.escape = !!(world.escape && this.mp);
+    this.escape = !!(world.escape && !world.dod && this.mp);
     this.escapeState = this.escape ? { phase: session.room.escPhase || 'wait', left: session.room.escLeft ?? (session.room.escapeMins || 10) * 60, out: (session.room.escOut || []).map(String) } : null;
     this.bullets = 0; // the pouch of bullets (looted: there is no shop in the Escape zone)
     this.boarded = false; // you are on the chopper
@@ -287,11 +288,14 @@ export class Game {
       spawn = { x: tx * T + 8, y: ty * T + 12 };
     }
     this.player = { x: spawn.x, y: spawn.y, dir: 'down', moving: false };
+    this.tod = ['day', 'night'].includes(session?.room?.tod) ? session.room.tod : 'map'; // the host can make a Survival run day or night (map = what the map says)
+    const startDay = this.tod === 'day' ? true : this.tod === 'night' ? false : !!world.mapInfo?.day;
+    const startStorm = this.tod === 'map' && !!world.mapInfo?.bossStorm;
     const hourParam = Number(new URLSearchParams(window.location.search).get('hour'));
     this.hour = demo ? 10 : Number.isFinite(saved?.hour) ? saved.hour : 8;
     if (!demo && hourParam > 0) this.hour = hourParam;
-    else if (this.wave && this.theme === 'apoc') this.hour = world.mapInfo?.day || world.mapInfo?.bossStorm ? SURVIVAL_DAY_HOUR : SURVIVAL_HOUR; // Survival is night (the sunny maps start in daylight)
-    this.nightK = world.apoc && !world.mapInfo?.day && !world.mapInfo?.bossStorm ? 1 : 0; // how dark Survival is right now: 1 at night, 0 in daylight (a storm map goes dark when a boss is out)
+    else if (this.wave && this.theme === 'apoc') this.hour = startDay || startStorm ? SURVIVAL_DAY_HOUR : SURVIVAL_HOUR; // Survival is night (the sunny maps start in daylight)
+    this.nightK = world.apoc && !startDay && !startStorm ? 1 : 0; // how dark Survival is right now: 1 at night, 0 in daylight (a storm map goes dark when a boss is out)
     this.day = saved?.day || 1;
     this.inventory = sanitize(saved?.inventory);
     // coins live in a purse, not in the backpack (older saves had them as items: move them over)
@@ -345,6 +349,7 @@ export class Game {
     this.collected = new Set(saved?.collected || []);
     this.combat = demo ? null : new Combat(this, assets.img, saved?.kills || 0);
     this.elem = !demo && this.world.elem ? new ElementSystem(this, saved?.elem) : null; // the Elemental Lands: an element and its skills
+    this.dod = !demo && this.world.dod && (this.mp || new URLSearchParams(window.location.search).has('dod')) ? new DodSystem(this, session?.room?.dodState || null) : null; // Do or Die: a Werebear, tasks, fog and a chopper
     if (saved?.guns && this.combat) {
       // the guns you own, their upgrades and the one in your hands
       this.combat.owned = { pistol: true, ...saved.guns.owned };
@@ -398,6 +403,10 @@ export class Game {
         this.zoomBy(1);
       } else if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
         this.zoomBy(-1);
+      } else if (this.dod && this.dod.key(e)) {
+        e.preventDefault(); // (Do or Die: its own keys)
+      } else if (this.dod && e.code === 'Space') {
+        e.preventDefault(); // (no dash here)
       } else if (e.code === 'KeyF') {
         // pick up, open and enter; Space is the dash in every mode
         e.preventDefault();
@@ -434,6 +443,7 @@ export class Game {
     this.onKeyUp = (e) => {
       if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault();
       if (CONTROL_KEYS[e.code]) this.keys.delete(CONTROL_KEYS[e.code]);
+      if (this.dod) this.dod.keyUp(e);
       if (e.code === 'KeyF') {
         this.spaceDown = false;
         this.spaceLock = false;
@@ -479,6 +489,10 @@ export class Game {
         if (!this.dead) this.elem.cast('dash'); // Elements: right click is the dash
         return;
       }
+      if (this.dod) {
+        if (e.button === 0 && !this.dead) this.dod.click(); // the Werebear strikes (nothing else is thrown or swung here)
+        return;
+      }
       this.mouseHeld[e.button] = true;
       if (e.button === 0 && !this.dead) {
         if (this.wave && this.inventory[this.selectedSlot]?.id === 'barricade') {
@@ -521,7 +535,7 @@ export class Game {
   // into the room) or to the shelter (Survival) by itself while the story is told. Returns false when there is nothing to show
   // (a game that is being resumed, for one).
   startCutscene() {
-    if (this.demo || this.cutscene || this.dead || this.resumed || this.world.arena) return false; // (the colosseum has no house to walk to)
+    if (this.demo || this.cutscene || this.dead || this.resumed || this.world.arena || this.world.dod) return false; // (the colosseum has no house to walk to, and Do or Die starts at once)
     const p = this.player;
     const apoc = this.world.apoc;
     if (this.inside) this.exitHouse(true);
@@ -4097,7 +4111,28 @@ export class Game {
       ctx.ellipse(Math.round(air.x), Math.round(air.y + 3), Math.max(5, w * 0.36), 2.4, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.drawImage(sheet, f * d.w, 0, d.w, d.h, Math.round(air.x - w / 2), Math.round(air.y - alt - h / 2), w, h);
-      if (air.firing && Math.sin(this.t * 60) > -0.2) {
+      if (air.kind === 'helix' && air.firing && air.bx) {
+        // the laser: a steady beam from the drone's belly through its target and a little way past it
+        const mx = air.x;
+        const my = air.y - alt + h / 2;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(255, 70, 90, 0.28)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(mx, my);
+        ctx.lineTo(air.bx, air.by);
+        ctx.stroke();
+        ctx.strokeStyle = '#ff5a6a';
+        ctx.lineWidth = 2.4;
+        ctx.stroke();
+        ctx.strokeStyle = '#fff4f4';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255, 120, 140, 0.8)';
+        ctx.beginPath();
+        ctx.arc(air.bx, air.by, 2.5 + Math.sin(this.t * 40), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (air.firing && Math.sin(this.t * 60) > -0.2) {
         ctx.fillStyle = '#ffe9a0';
         ctx.fillRect(Math.round(air.x) - 1, Math.round(air.y - alt + h / 2 - 1), 3, 3);
       }
@@ -4445,6 +4480,21 @@ export class Game {
   }
 
   onNetMessage(m) {
+    if (this.dod && (m.t === 'dod' || m.t === 'dodfx')) {
+      this.dod.onNet(m);
+      this.emitHud();
+      return;
+    }
+    if (this.dod && m.t === 'win' && m.dod) {
+      const mineKiller = this.dod.isKiller;
+      const survivorsWon = m.who === 'survivors';
+      const won = mineKiller ? !survivorsWon : survivorsWon && !this.dod.ghost || (survivorsWon && this.dod.out);
+      this.streaks.reset();
+      sfx.play(won ? 'win' : 'wave');
+      this.celebrate('dod', won ? 'You' : 'Nobody', 7.5, survivorsWon ? `${m.outN} of ${m.total} survivors escaped on the chopper.` : mineKiller ? 'Nobody got away.' : 'The Werebear got everyone.');
+      if (this.celeb) this.celeb.title = survivorsWon ? (mineKiller ? '🚁 They escaped…' : '🚁 The survivors escaped!') : mineKiller ? '🐻 You got them all!' : '💀 The Werebear won';
+      return;
+    }
     if (m.t === 'peer_join') {
       // a newcomer cannot have seen the mines and traps already laid: tell them where mine are
       for (const mn of this.combat?.mines || []) this.mp?.net.send({ t: 'fx', kind: 'mine', lid: mn.id, x: Math.round(mn.x), y: Math.round(mn.y), k: mn.kind });
@@ -4471,6 +4521,7 @@ export class Game {
         this.bots?.setDifficulty?.(m.room.difficulty);
       }
       this.wave?.setStartMode(m.room.waveStart); // ...and what starts the next wave
+      this.setTod(m.room.tod); // ...and whether it is day or night
       if (m.room.waves !== undefined) this.wave?.setWaves(m.room.waves); // ...and how many waves there are
       this.allowVisit = !!m.room.allowVisit;
       if (this.mp) this.mp.pvp = !!m.room.pvp; // the host can switch player damage on or off mid-round
@@ -4682,7 +4733,7 @@ export class Game {
     if (this.mp.sendT <= 0) {
       this.mp.sendT = 0.07;
       const at = this.inside ? this.inside.out : p; // indoors you are not in the world: friends just stop seeing you
-      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating || !!this.dead, mt: this.mount?.type || (this.boat ? 'boat' : this.boatPass ? 'boatp' : ''), pet: this.pets.netState() });
+      this.mp.net.send({ t: 'state', x: at.x, y: at.y, dir: p.dir, moving: p.moving, hp: this.combat.hp, mhp: this.combat.maxHp, lv: this.level, hidden: this.combat.hidden || this.spectating || !!this.dead || !!this.dod?.stateHidden(), mt: this.mount?.type || (this.boat ? 'boat' : this.boatPass ? 'boatp' : ''), pet: this.pets.netState() });
     }
     const k = 1 - Math.exp(-dt * 12);
     for (const r of this.remotes.values()) {
@@ -4899,7 +4950,7 @@ export class Game {
         else this.seatUpdate(dt);
       }
       if (this.boatPass) this.passengerUpdate(dt);
-      const still = (this.dead && this.duelActive()) || this.celeb || this.fade || !!this.seat || !!this.boatPass || !!this.elem?.charging; // (downed: you drift about as a ghost until you are back on your feet, except in a duel)
+      const still = (this.dead && this.duelActive()) || this.celeb || this.fade || !!this.seat || !!this.boatPass || !!this.elem?.charging || (this.dod && this.dod.speedMul() === 0); // (downed: you drift about as a ghost until you are back on your feet, except in a duel)
       let dx = still ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
       let dy = still ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
       const dashing = !!this.combat.dash; // the dash moves the hero itself
@@ -4947,7 +4998,7 @@ export class Game {
         if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
       }
       const ride = this.boat ? 1.4 : this.pets.pet?.rid ? 1.3 : this.mount ? (this.mount.type === 'chicken' ? 1.35 : 1.15) : 1; // a chicken hurries, a cow ambles along
-      const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1) * (this.cutscene ? 0.5 : 1) * (this.elem?.speedMul() || 1); // (a stroll in the story)
+      const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1) * (this.cutscene ? 0.5 : 1) * (this.elem?.speedMul() || 1) * (this.dod ? this.dod.speedMul() : 1); // (a stroll in the story)
       this.animT += dt * (this.sprinting ? 1.7 : 1);
       if (p.moving && !dashing) {
         if (dx && dy) {
@@ -5029,6 +5080,7 @@ export class Game {
       this.updateWallHold(dt);
       this.combat.update(dt);
       this.elem?.update(dt);
+      this.dod?.update(dt);
       this.trackHurt(dt);
       if (!this.balls && !this.demo && this.home) this.balls = new Balls(this);
       this.balls?.update(dt);
@@ -5089,8 +5141,7 @@ export class Game {
       if (this.wave && this.world.apoc) {
         this.updateNightK(dt);
         this.updateDawn(dt);
-        const info = this.world.mapInfo;
-        if (info?.day || info?.bossStorm) this.hour = SURVIVAL_DAY_HOUR + 11 * this.nightK; // a sunny map: noon, going dark when the storm comes
+        if (this.mapDay() || this.mapStorm()) this.hour = SURVIVAL_DAY_HOUR + 11 * this.nightK; // a sunny map: noon, going dark when the storm comes
         else this.hour = (SURVIVAL_HOUR + this.dawn * 10.5) % 24; // Survival is always night, until the dawn: 11 PM slowly turns into 9:30 AM
       }
       this.hudTimer -= dt;
@@ -5148,11 +5199,12 @@ export class Game {
       wave: this.wave?.hudState() || null,
       airPlan: this.airPlan ? this.airPlanView() : null,
       elem: this.elem ? this.elem.hud() : null,
+      dod: this.dod ? this.dod.hud() : null,
       travel: this.travelling ? { vehicle: this.travelling.vehicle, dest: this.travelling.dest, destName: this.travelling.destName, left: Math.max(0, this.travelling.dur - this.travelling.t), dur: this.travelling.dur, wave: this.travelling.wave } : null,
       fight: this.bots?.scoreboard() || null,
       duel: this.duelHud(),
       upg: this.upgrades,
-      dayMap: !!this.world.mapInfo?.day,
+      dayMap: this.mapDay(),
       stats: this.statsHud(),
       supplies: { ...this.supplies },
       consumables: { ...this.consumables },
@@ -5202,6 +5254,15 @@ export class Game {
   }
 
   updateInteraction() {
+    // a portal: walk up into it from below (left, right and behind it you just walk past)
+    if (!this.dead && !this.portaling && !this.dod && this.player.moving && this.player.dir === 'up' && !this.inside && !this.dungeon && !this.world.escape) {
+      for (const s of this.world.portalList()) {
+        if (Math.abs(this.player.x - s.x) < 11 && this.player.y > s.y - 12 && this.player.y < s.y + 2) {
+          this.usePortal(s);
+          break;
+        }
+      }
+    }
     if (this.dead) {
       // a ghost cannot open chests, pick things up or use anything
       this.prompt = null;
@@ -5279,6 +5340,15 @@ export class Game {
 
   // A chest or fridge pops open and the loot flies out onto the ground around it: walk over the pieces to pick them up
   burstChest(o) {
+    if (this.dod) {
+      // Do or Die: what a chest or a car holds is a flashbang, a smoke grenade or a flashlight upgrade
+      this.collected.add(o.id);
+      this.treasures++;
+      sfx.play('chest');
+      this.dod.openWorldChest(o);
+      this.combat.addFloater({ x: o.x, y: o.y - 22, text: 'Clack!', color: '#ffb347', t: 0 });
+      return;
+    }
     // the guardian's own chest stays sealed while it still stands
     if (o.boss && o.gear && this.dungeon && this.combat.wilds.some((w) => w.guardian && w.state !== 'dead')) {
       sfx.play('nope');
@@ -5327,7 +5397,7 @@ export class Game {
   gearLoot(o) {
     const rank = (o.skin ?? 0) & 3;
     if (!o.boss && hash2(o.x, o.y, this.world.seed + 777) > 0.45) return; // (the guardian's and a fallen boss's chests always hold one)
-    const wid = this.pickWeapon(rank);
+    const wid = this.elem ? null : this.pickWeapon(rank); // (no weapons in the Elemental Lands: coins instead)
     if (!wid) {
       this.combat.drops.push({ x: o.x, y: o.y - 4, z: 8, vx: 10, vy: 6, vz: 120, fly: true, burst: true, id: 'coin', qty: 20 + rank * 10, age: 0, ins: !!this.inside });
       return;
@@ -5400,11 +5470,31 @@ export class Game {
   }
 
   // The sunny maps: daylight all the time. The storm map is sunny too, until a boss is out: then the sky goes black and thunder rolls in.
+  // day or night in Survival: the room's choice (tod) wins; otherwise the map decides
+  mapDay() {
+    return this.tod === 'day' ? true : this.tod === 'night' ? false : !!this.world.mapInfo?.day;
+  }
+
+  mapStorm() {
+    return this.tod === 'map' && !!this.world.mapInfo?.bossStorm;
+  }
+
+  // the host changed it: the light follows at once (night falls, or the sun is let in)
+  setTod(v) {
+    const t = ['day', 'night'].includes(v) ? v : 'map';
+    if (t === this.tod) return;
+    this.tod = t;
+    if (!this.wave || !this.world.apoc) return;
+    if (!this.mapDay() && !this.mapStorm()) {
+      this.nightK = 1;
+      this.weatherT = 0;
+    }
+  }
+
   updateNightK(dt) {
-    const info = this.world.mapInfo;
-    if (!info || !(info.day || info.bossStorm)) return;
+    if (!(this.mapDay() || this.mapStorm())) return;
     let target = 0;
-    if (info.bossStorm) target = this.wave.monsters.some((m) => m.state !== 'dead' && MONSTERS[m.type].boss) ? 1 : 0;
+    if (this.mapStorm()) target = this.wave.monsters.some((m) => m.state !== 'dead' && MONSTERS[m.type].boss) ? 1 : 0;
     const before = this.nightK;
     this.nightK = target > this.nightK ? Math.min(target, this.nightK + dt / 3) : Math.max(target, this.nightK - dt / 8);
     if ((before > 0.15) !== (this.nightK > 0.15)) this.weatherT = 0; // the weather follows
@@ -5415,7 +5505,7 @@ export class Game {
   updateDawn(dt) {
     const w = this.wave;
     if (!w || this.dawn >= 1) return;
-    if (this.world.mapInfo?.day || this.world.mapInfo?.bossStorm) return; // (it is day already)
+    if (this.mapDay() || this.mapStorm()) return; // (it is day already)
     if (this.dawn === 0) {
       this.dawnT -= dt;
       if (this.dawnT > 0) return; // (looked at four times a second)
@@ -6197,7 +6287,8 @@ export class Game {
       meY: p.y,
       drawMe: () => {
         ctx.globalAlpha = 1;
-        this.drawHeroAt(ctx, this.hero, p.dir, p.moving, this.animT, p.x, p.y);
+        if (this.dod?.isKiller) this.dod.drawKiller(ctx, p.x, p.y, { moving: p.moving, dir: p.dir, swing: this.dod.swingT });
+        else this.drawHeroAt(ctx, this.hero, p.dir, p.moving, this.animT, p.x, p.y);
       },
     });
     for (const d of this.combat.drops) if (d.ins) this.combat.drawDrop(ctx, d, this.t);
@@ -6618,6 +6709,7 @@ export class Game {
 
     if (this.inside) {
       this.drawInterior();
+      this.dod?.drawInside(ctx);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       this.drawNameTag(camX, camY);
       if (this.prompt && !this.cutscene) this.drawPrompt(this.prompt, camX, camY);
@@ -6681,7 +6773,7 @@ export class Game {
       this.balls?.collect(drawList);
       this.crowd?.collect(drawList);
       for (const r of this.remotes.values()) {
-        if (r.hidden) continue;
+        if (this.dod ? !this.dod.canSee(r) : r.hidden) continue;
         drawList.push({ kind: 'remote', r, y: r.y });
         if (r.pet) drawList.push({ kind: 'rpet', p: r.pet, y: r.pet.y - (r.pet.rid ? 1 : 0) });
       }
@@ -6913,6 +7005,14 @@ export class Game {
             this.drawGhost(ctx, this.player.x, this.player.y, this.player.dir);
             break;
           }
+          if (this.dod?.ghost) {
+            this.drawGhost(ctx, this.player.x, this.player.y, this.player.dir);
+            break;
+          }
+          if (this.dod?.isKiller) {
+            this.dod.drawKiller(ctx, this.player.x, this.player.y, { moving: this.player.moving, dir: this.player.dir, swing: this.dod.swingT });
+            break;
+          }
           if (this.teamCount) this.drawTeamRing(ctx, this.player.x, this.player.y, this.myTeam());
           ctx.globalAlpha = this.cutscene ? 0.6 : this.combat.inBush && this.combat.hidden ? 0.45 : this.combat.invisT > 0 && this.combat.hidden ? 0.3 : this.combat.invuln > 0 && !this.combat.god && Math.floor(this.t * 14) % 2 ? 0.4 : 1; // (god mode is always "invulnerable", so it should not blink)
           this.drawHeroAt(ctx, this.hero, this.player.dir, this.player.moving && !this.mount, this.animT, this.player.x, this.player.y - this.rideLift());
@@ -6931,7 +7031,8 @@ export class Game {
           // riding: the animal under them, and they sit a little higher
           if (o.r.mt === 'boat') this.drawBoatSprite(ctx, o.r.x, o.r.y, o.r.dir, o.r.animT);
           else if (o.r.mt && o.r.mt !== 'boatp') this.drawAnimal({ type: o.r.mt, x: o.r.x, y: o.r.y, dir: o.r.dir, moving: o.r.moving, phase: o.r.animT * 2, variant: o.r.variant, timer: 0 });
-          this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
+          if (this.dod?.isKillerId(o.r.id)) this.dod.drawKiller(ctx, o.r.x, o.r.y, { moving: o.r.moving, dir: o.r.dir, swing: o.r.dodSwing || 0 });
+          else this.drawHeroAt(ctx, o.r.hero, o.r.dir, o.r.moving && !o.r.mt, o.r.animT, o.r.x, o.r.y - lift);
           if (this.fight && o.r.hp > 0) this.drawHealthBar(ctx, { ...o.r, y: o.r.y - lift, teamColor: this.teamCount ? this.peerColor(o.r) : null });
           if (o.r.shield > 0) this.combat.drawShield(ctx, o.r.x, o.r.y - lift, o.r.shield);
           if (o.r.stunT > 0) this.combat.drawStun(ctx, o.r.x, o.r.y - lift - 26, '#ffe36b'); // (stunned: stars over their head)
@@ -6984,12 +7085,14 @@ export class Game {
     if (this.reviveFxs.length) this.drawReviveFxs(ctx);
     if (this.wave) this.drawWaveExtras(ctx);
     this.elem?.draw(ctx, this.t);
+    this.dod?.draw(ctx, this.t);
     this.pfx.drawWorld(ctx, { x0: camX, y0: camY, x1: camX + this.viewW, y1: camY + this.viewH });
     this.drawCloudShadows(camX, camY);
 
     // screen-space overlay
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawDaylight(camX, camY);
+    this.dod?.drawFog(ctx, camX, camY);
     this.drawLurkers(camX, camY);
     this.drawMotes();
     this.drawPrecip();
@@ -7405,7 +7508,7 @@ export class Game {
     if (!this.mp && !this.bots) return;
     const { ctx, canvas, zoom } = this;
     for (const r of this.remotes.values()) {
-      if (r.hidden) continue; // tucked away indoors
+      if (this.dod ? !this.dod.canSee(r) : r.hidden) continue; // tucked away indoors (and in Do or Die: out of your light)
       const [sx, sy] = this.toScreen(r.x, r.y - this.remoteLift(r) - tagHeight(r.hero), camX, camY);
       const off = sx < 0 || sy < 0 || sx > canvas.width || sy > canvas.height;
       if (!off) {

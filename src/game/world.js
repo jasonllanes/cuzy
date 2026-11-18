@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { isArenaSeed, isElemSeed, stripElem, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, isTravelSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble, stripTravel } from './maps';
+import { isArenaSeed, isDodSeed, stripDod, isElemSeed, stripElem, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, isTravelSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble, stripTravel } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -79,9 +79,10 @@ export class World {
     this.arena = theme !== 'apoc' && !waves && (isArenaSeed(seedStr) || this.pitch); // the Duel colosseum (a whole world of it); the pitch is built the same way
     this.hasArena = theme !== 'apoc' && !waves; // (Free Roam worlds have the Colosseum far off too, where the duels of a running round are fought)
     this.ac = this.arena ? { x: 0, y: 0 } : { x: ARENA_ZONE, y: ARENA_ZONE }; // its middle, in tiles
-    this.escape = theme !== 'apoc' && !waves && isEscapeSeed(seedStr);
+    this.dod = theme !== 'apoc' && !waves && isDodSeed(seedStr); // Do or Die: the Escape city, with a killer, tasks and a chopper that comes when they are done
+    this.escape = theme !== 'apoc' && !waves && (isEscapeSeed(seedStr) || this.dod);
     this.elem = theme !== 'apoc' && !waves && isElemSeed(seedStr); // the Elemental Lands: no weapons, an element and its skills // the Escape zone: loot, zombies and a chopper
-    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(stripElem(stripTravel(seedStr)))))))));
+    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(stripDod(stripElem(stripTravel(seedStr))))))))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
     this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape || this.elem); // Free Roam V2: the same world with the Modern Exteriors props on top
@@ -416,6 +417,7 @@ export class World {
     const y = by * 2;
     const f = this.forest(x + 1, y + 1);
     let p = 0.02 + 0.55 * smoothstep(0.5, 0.66, f);
+    if (this.dod) p = this.dodLane(x, y) ? 0 : 0.45 + 0.2 * smoothstep(0.45, 0.7, f); // Do or Die: a thick wood, cut by winding lanes
     if (hash2(bx, by, this.seed + 11) < p) {
       let ok = !this.isCleared(x, y);
       for (let j = 0; j < 2 && ok; j++) {
@@ -433,6 +435,16 @@ export class World {
     }
     this.treeCache.set(key, tree);
     return tree;
+  }
+
+  // Do or Die: the lanes through the woods (a few families of winding paths that cross, and a clearing round the start)
+  dodLane(x, y) {
+    if (Math.hypot(x, y) < 16) return true;
+    const s = this.seed % 97;
+    const a = Math.abs(Math.sin(x * 0.045 + Math.sin(y * 0.021 + s) * 2.2));
+    const b = Math.abs(Math.sin(y * 0.05 + Math.sin(x * 0.023 + s * 0.7) * 2.0));
+    const c = Math.abs(Math.sin((x + y) * 0.031 + Math.sin((x - y) * 0.017 + s * 0.3) * 1.8));
+    return Math.min(a, b) < 0.16 || c < 0.11;
   }
 
   // Wrecks, containers and other junk, on the same 2x2 grid the trees use
@@ -985,7 +997,7 @@ export class World {
     const out = [];
     if (this.arena || this.chunkInArena(cx, cy)) return out;
     if (zoneOf(cx, cy)) return out; // none underground
-    if (this.apoc) return out; // no friendly farm animals in the apocalypse
+    if (this.apoc || this.dod) return out; // no friendly farm animals in the apocalypse (nor in Do or Die)
     if (hash2(cx, cy, this.seed + 51) > 0.45) return out;
     const n = 1 + Math.floor(hash2(cx, cy, this.seed + 52) * 3);
     const cow = hash2(cx, cy, this.seed + 53) < 0.3;
@@ -1233,6 +1245,26 @@ export class World {
     return this._chop;
   }
 
+  // Do or Die: an open spot (px) for something that every player has to agree on (a task, a chest, the chopper). `n` and `salt` pick it:
+  // the same call gives the same spot on every computer. It lies between rMin and rMax tiles from the middle of the map.
+  dodSpot(n, salt = 0, rMin = 12, rMax = 70) {
+    this._dodSpots ||= new Map();
+    const key = `${salt}:${n}`;
+    if (this._dodSpots.has(key)) return this._dodSpots.get(key);
+    const s = this.seed + 31000 + salt * 97;
+    let spot = null;
+    for (let k = 0; k < 60 && !spot; k++) {
+      const ang = hash2(n * 13 + k, salt, s) * Math.PI * 2;
+      const dist = rMin + hash2(n * 7 + k * 3, salt + 5, s + 1) * (rMax - rMin);
+      const tx = Math.round(Math.cos(ang) * dist);
+      const ty = Math.round(Math.sin(ang) * dist);
+      if (this.isOpenMeadow(tx, ty) && !this.isCleared(tx, ty) && !this.isBlocked(tx * T - 14, ty * T - 12, 28, 22)) spot = { x: tx * T + 8, y: ty * T + 12 };
+    }
+    spot ||= { x: Math.round(Math.cos(n) * rMin * T), y: Math.round(Math.sin(n) * rMin * T) };
+    this._dodSpots.set(key, spot);
+    return spot;
+  }
+
   // A hidden chest, rarely: it cannot be seen (or opened) unless a pet pigeon is close. It holds a lot, and always a weapon.
   addVault(chunk, cx, cy) {
     const s = this.seed;
@@ -1247,7 +1279,7 @@ export class World {
   // Portal doors (Free Roam): a haunted swirling door stands in a few places, and each one leads to the next one round the ring.
   // The site of the portal in a chunk, or null (the same for everybody: it only depends on the seed)
   portalSite(cx, cy) {
-    if (this.apoc || this.waveMode || this.arena || this.escape || this.pitch) return null;
+    if (this.apoc || this.waveMode || this.arena || this.escape || this.dod || this.pitch) return null; // (no portals in Do or Die)
     this.portalCache ||= new Map();
     const key = `${cx},${cy}`;
     if (this.portalCache.has(key)) return this.portalCache.get(key);
@@ -1284,7 +1316,7 @@ export class World {
     const s = this.portalSite(cx, cy);
     if (!s) return;
     chunk.objects.push({ kind: 'portal', inter: 'portal', id: s.id, label: 'F · step through the portal', x: s.x, y: s.y, iy: s.y - 6, pad: 12 });
-    chunk.rects.push({ x: s.x - 14, y: s.y - 8, w: 28, h: 9 }); // (the door's own wall: you step into it with F)
+    // (nothing blocks you: walk round it, behind it, or up into it from below)
   }
 
   addSeesaw(chunk, cx, cy) {

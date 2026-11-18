@@ -107,13 +107,13 @@ export default function UpgradePanel({ hud, game, onClose, inventory = [], survi
 
         {tab === 'air' && survival && (
           <div className="recruit-note">
-            <b>✈️ Air support</b> (every player can call 3 of each kind per wave: they are counted for you, not for the whole team)
-            <p className="sell-empty">You called this wave: 💣 {hud.wave?.airMine?.carpet ?? 0} · 🚁 {hud.wave?.airMine?.gunship ?? 0} · 🛸 {hud.wave?.airMine?.drone ?? 0} · 🚁 Helix {hud.wave?.airMine?.helix ?? 0} (of {hud.wave?.airMax ?? 3} each){hud.wave?.air > 0 ? ` · ${hud.wave.air} in the sky right now` : ''}</p>
+            <b>✈️ Air support</b> (every player can call 2 of each kind per wave: they are counted for you, not for the whole team)
+            <p className="sell-empty">You called this wave: 💣 {hud.wave?.airMine?.carpet ?? 0} · 🚁 {hud.wave?.airMine?.gunship ?? 0} · 🛸 {hud.wave?.airMine?.drone ?? 0} · 🚁 Helix {hud.wave?.airMine?.helix ?? 0} (of {hud.wave?.airMax ?? 2} each){hud.wave?.air > 0 ? ` · ${hud.wave.air} in the sky right now` : ''}</p>
             <div className="recruit-list">
               {Object.entries(AIR_SUPPORT).map(([kind, a]) => (
                 <div key={kind} className="recruit-chip hire rar rar-epic">
                   <span><b>{a.icon} {a.name}</b><small>{a.blurb}</small></span>
-                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airMine?.[kind] ?? 0) >= (hud.wave?.airMax ?? 3)} onClick={() => (kind === 'carpet' ? (game.startAirPlan(), onClose()) : game.buyAir(kind))}>{kind === 'carpet' ? '🧭 Plan the run · ' : ''}🪙 {a.cost}</button>
+                  <button className="btn go small-btn" disabled={hud.coins < a.cost || (hud.wave?.airMine?.[kind] ?? 0) >= (hud.wave?.airMax ?? 2)} onClick={() => (kind === 'carpet' ? (game.startAirPlan(), onClose()) : game.buyAir(kind))}>{kind === 'carpet' ? '🧭 ' : ''}🪙 {a.cost}</button>
                 </div>
               ))}
             </div>

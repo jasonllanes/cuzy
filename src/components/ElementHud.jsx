@@ -204,6 +204,20 @@ export function ElementPicker({ onPick, current }) {
 export default function ElementHud({ hud, game, home }) {
   const e = hud.elem;
   const [changing, setChanging] = useState(false);
+  const closeRef = useRef(null);
+  closeRef.current = () => {
+    if (changing && e?.el) { setChanging(false); return true; }
+    if (e?.panel) { el?.togglePanel(); return true; }
+    return false;
+  };
+  // Esc closes the skills window or the element picker (and then never opens the pause menu)
+  useEffect(() => {
+    const onKey = (ev) => {
+      if (ev.code === 'Escape' && closeRef.current?.()) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
   useEffect(() => {
     if (!e?.panel) setChanging(false);
   }, [e?.panel]);
@@ -251,7 +265,7 @@ export default function ElementHud({ hud, game, home }) {
                 <kbd>{s.key}</kbd>
                 <SkillIcon name={s.ico} size={30} />
                 <b>{s.name}</b>
-                <small>{s.lv > 0 ? `Lv ${s.lv}` : s.locked ? `🔒 Lv ${s.needLv}` : 'learn (E)'}</small>
+                <small>{s.lv > 0 ? `Lv ${s.lv}` : `🔒 Lv ${s.needLv}`}</small>
                 {s.cd > 0 && <i style={{ height: `${cdp}%` }} />}
               </button>
             );
@@ -268,15 +282,14 @@ export default function ElementHud({ hud, game, home }) {
         <div className="elem-pick" role="dialog" aria-label="Upgrade your skills" onMouseDown={(ev) => ev.target === ev.currentTarget && el?.togglePanel()}>
           <div className="elem-pick-wrap">
             <div className="elem-pick-card panel" style={{ '--ec': e.color }}>
-              <h2>{e.icon} {e.name} skills <small>⭐ {e.points} point{e.points === 1 ? '' : 's'} to spend · you get one every level</small></h2>
+              <h2>{e.icon} {e.name} skills <small>⭐ {e.points} point{e.points === 1 ? '' : 's'} to spend · skills 1, 2, 3 and the ultimate unlock at levels 1 to 4 · points make them stronger · every level adds HP and mana</small></h2>
               <div className="elem-up">
                 {e.skills.filter((s) => s.k !== 'shoot' && s.k !== 'dash').map((s) => (
                   <div key={s.k} className="elem-up-row">
                     <span className="elem-up-ico"><SkillIcon name={s.ico} size={36} /><kbd>{s.key}</kbd></span>
                     <div><b>{s.name}</b> <small>Lv {s.lv}/{s.max}</small><br /><small className="muted">{s.desc}</small></div>
                     <span className="elem-up-btn">
-                      <button type="button" className="btn small-btn ghost" title="Take a level back and get the point again" disabled={s.lv <= 0} onClick={() => el?.downgrade(s.k)}>−</button>
-                      <button type="button" className="btn small-btn" disabled={e.points < 1 || s.lv >= s.max || s.locked} onClick={() => el?.upgrade(s.k)}>{s.locked ? `🔒 Lv ${s.needLv}` : s.lv >= s.max ? 'Max' : s.lv < 1 ? 'Learn' : '+ Upgrade'}</button>
+                      <button type="button" className="btn small-btn" disabled={e.points < 1 || s.lv >= s.max || s.locked} onClick={() => el?.upgrade(s.k)}>{s.locked ? `🔒 Lv ${s.needLv}` : s.lv >= s.max ? 'Max' : '+ Upgrade'}</button>
                     </span>
                   </div>
                 ))}
@@ -285,7 +298,6 @@ export default function ElementHud({ hud, game, home }) {
                     <span className="elem-up-ico"><SkillIcon name={PASS_ICONS[k]} size={36} /><kbd>{p.icon}</kbd></span>
                     <div><b>{p.name}</b> <small>Lv {e.pass[k]}/{p.max}</small><br /><small className="muted">{p.desc}</small></div>
                     <span className="elem-up-btn">
-                      <button type="button" className="btn small-btn ghost" title="Take a level back and get the point again" disabled={e.pass[k] < 1} onClick={() => el?.downgrade(k)}>−</button>
                       <button type="button" className="btn small-btn" disabled={e.points < 1 || e.pass[k] >= p.max} onClick={() => el?.upgrade(k)}>{e.pass[k] >= p.max ? 'Max' : '+ Upgrade'}</button>
                     </span>
                   </div>

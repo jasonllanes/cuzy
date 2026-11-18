@@ -403,6 +403,9 @@ const SCATTER = [
   ['vehicles', /^Car_(Left|Right|Up|Down)_\d+$/, 3],
 ];
 const SCATTER_TOTAL = SCATTER.reduce((n, e) => n + e[2], 0);
+// Do or Die: the same, with billboards and more cars about
+const SCATTER_DOD = [...SCATTER, ['props', /^Billboard_\d$/, 9], ['vehicles', /^Car_(Left|Right|Up|Down)_\d+$/, 8]];
+const SCATTER_DOD_TOTAL = SCATTER_DOD.reduce((n, e) => n + e[2], 0);
 // on a Halloween map the meadows hold tombstones, pumpkins, candles and dead trees instead
 const SCATTER_HW = [
   ['graveyard', GRAVES, 14],
@@ -424,11 +427,11 @@ function scatter(world, chunk, cx, cy) {
       const y = by * 2;
       // more along the edge of a cottage's yard, a little over open meadow
       const near = world.isCleared(x - 5, y) || world.isCleared(x + 5, y) || world.isCleared(x, y - 5) || world.isCleared(x, y + 5);
-      if (hash2(bx, by, s + 9300) >= (world.hw ? (near ? 0.11 : 0.06) : near ? 0.085 : 0.03)) continue;
+      if (hash2(bx, by, s + 9300) >= (world.hw ? (near ? 0.11 : 0.06) : world.dod ? (near ? 0.13 : 0.06) : near ? 0.085 : 0.03)) continue;
       if (Math.hypot(x, y) < 10) continue; // the starting spot stays clear
       if (world.treeAt(bx, by) || world.isCleared(x, y) || world.type(x, y) !== 2 || world.type(x + 1, y + 1) !== 2 || world.elevation(x, y) < 0.46) continue;
-      const table = world.hw ? SCATTER_HW : SCATTER;
-      let pick = hash2(bx, by, s + 9301) * (world.hw ? SCATTER_HW_TOTAL : SCATTER_TOTAL);
+      const table = world.hw ? SCATTER_HW : world.dod ? SCATTER_DOD : SCATTER;
+      let pick = hash2(bx, by, s + 9301) * (world.hw ? SCATTER_HW_TOTAL : world.dod ? SCATTER_DOD_TOTAL : SCATTER_TOTAL);
       const entry = table.find((e) => (pick -= e[2]) <= 0) || table[0];
       const l = list(entry[0], entry[1]);
       if (!l.length) continue;
@@ -443,13 +446,32 @@ function scatter(world, chunk, cx, cy) {
 }
 
 // one prop as chunk objects: scenery you walk around, containers you open, buildings you can walk into
+// Do or Die: only the foot of a prop blocks you, so you can walk behind a house, a billboard or the top of a pole
+function dodFootprint(p, s) {
+  if (!s || p.solid === false || isFlat(p.name, s.w, s.h)) return null;
+  let bw = Math.max(6, Math.round(s.w * 0.8));
+  let bh = Math.min(10, Math.max(5, Math.round(s.h * 0.1)));
+  if (/(Tree|Bush|Hedge)/i.test(p.name)) {
+    bw = Math.min(10, s.w);
+    bh = 6;
+  } else if (/(Pole|Lamp|Sign|Post|Hydrant|Billboard)/i.test(p.name)) {
+    bw = Math.min(Billboardish.test(p.name) ? 26 : 8, s.w);
+    bh = 5;
+  } else if (s.w >= 100 && s.h >= 100) {
+    bw = s.w - 8;
+    bh = 12;
+  }
+  return { x: p.x - bw / 2, y: p.y - bh, w: bw, h: bh };
+}
+const Billboardish = /Billboard/i;
+
 export function addProp(world, chunk, s, x, y, id, extra) {
   const o = { theme: s.theme, name: s.name, x, y };
   if (s.anim) {
     // animated scenery: a prop whose frames are played (see ANIMS)
     const a = ANIMS[s.anim];
     chunk.objects.push({ kind: 'tree', vid: id, sheet: `v2anim/${s.anim}`, sx: 0, sy: 0, sw: a.fw, sh: a.fh, x, y, anim: { frames: a.frames, fps: a.fps } });
-    const rect = footprint(o, s);
+    const rect = world.dod ? dodFootprint(o, s) : footprint(o, s);
     if (rect) chunk.rects.push({ vid: id, ...rect });
     return;
   }
@@ -457,7 +479,7 @@ export function addProp(world, chunk, s, x, y, id, extra) {
     chunk.objects.push({ kind: 'tree', ground: true, vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, ox: Math.round(x - s.w / 2), oy: y - s.h, x: 0, y: 0 });
     return;
   }
-  const rect = footprint(o, s);
+  const rect = world.dod ? dodFootprint(o, s) : footprint(o, s);
   if (extra?.enter) {
     chunk.objects.push({ kind: 'tree', vid: id, sheet: `v2/${s.theme}`, sx: s.x, sy: s.y, sw: s.w, sh: s.h, x, y });
     // the way in: stand at the door and press Space

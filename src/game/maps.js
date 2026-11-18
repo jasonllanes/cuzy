@@ -52,6 +52,7 @@ export function mapNameOf(seed) {
   if (isArenaSeed(seed)) return 'Colosseum';
   if (isRumbleSeed(seed)) return 'Beach Rumble Pitch';
   if (isPitchSeed(seed)) return 'Beach Ball Pitch';
+  if (isDodSeed(seed)) return 'Do or Die';
   if (isEscapeSeed(seed)) return 'Escape Zone';
   if (isElemSeed(seed)) return 'Elemental Lands';
   const { base, map } = splitSeed(seed);
@@ -88,6 +89,10 @@ export const isElemSeed = (s) => /~elem$/.test(String(s));
 export const stripElem = (s) => String(s).replace(/~elem$/, '');
 // The Escape zone: an open world full of buildings to loot, zombies, and a chopper that arrives somewhere far away (Free Roam room with Escape on)
 export const ESCAPE_SEED = 'asphalt-358~esc';
+// Do or Die: a killer (the Werebear) hunts the survivors, who do shared tasks, then run for a chopper (a room game; the same city as the Escape zone)
+export const DOD_SEED = 'asphalt-358~dod';
+export const isDodSeed = (s) => /~dod$/.test(String(s));
+export const stripDod = (s) => String(s).replace(/~dod$/, '');
 export const isEscapeSeed = (s) => /~esc$/.test(String(s));
 export const stripEscape = (s) => String(s).replace(/~esc$/, '');
 

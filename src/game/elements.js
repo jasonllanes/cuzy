@@ -19,7 +19,7 @@ const seed = () => 1 + Math.floor(Math.random() * 50);
 export const SKILL_KEYS = ['shoot', 'dash', 'block', 'a', 'b', 'ult'];
 export const SKILL_LABEL = { shoot: 'L-Click', dash: 'R-Click', block: '1', a: '2', b: '3', ult: '4' };
 const MAX_LV = { shoot: 1, dash: 1, block: 5, a: 5, b: 5, ult: 3 };
-const NEED_CHAR_LV = { shoot: 1, dash: 1, block: 1, a: 1, b: 1, ult: 1 }; // the character level that lets you learn a skill
+const NEED_CHAR_LV = { shoot: 1, dash: 1, block: 1, a: 2, b: 3, ult: 4 }; // the character level at which a skill is yours (no points needed: points only make it stronger) // the character level that lets you learn a skill
 export const BASE = { shoot: { mana: 2, cd: 0.6 }, dash: { mana: 8, cd: 1.3 }, block: { mana: 12, cd: 5 }, a: { mana: 16, cd: 4.5 }, b: { mana: 24, cd: 8 }, ult: { mana: 70, cd: 40 } };
 export const PASSIVES = {
   pool: { name: 'Mana pool', icon: '🔷', desc: '+20 max mana', max: 8 },
@@ -169,7 +169,7 @@ export class ElementSystem {
   }
 
   maxMana() {
-    return 100 + 20 * (this.pass?.pool || 0);
+    return 100 + 8 * ((this.g?.level || 1) - 1) + 20 * (this.pass?.pool || 0);
   }
 
   points() {
@@ -178,7 +178,7 @@ export class ElementSystem {
 
   level(k) {
     if (k === 'shoot' || k === 'dash') return 1; // the two default skills: left and right click, always there
-    return this.lv[k] ?? 0;
+    return Math.max(this.lv[k] ?? 0, this.g.level >= NEED_CHAR_LV[k] ? 1 : 0);
   }
 
   // take one level back off a skill and get the point again (the three starting skills keep their first level, which was free)
@@ -270,6 +270,7 @@ export class ElementSystem {
       this.pointsGiven = level;
       this.g.onToast?.(`✨ +${gained} skill point${gained > 1 ? 's' : ''}: press E to upgrade your skills.`);
     }
+    this.g.combat.refreshMaxHp(true);
     this.mana = this.maxMana();
   }
 
@@ -366,7 +367,7 @@ export class ElementSystem {
     const g = this.g;
     if (g.dead || g.frozen || g.cutscene || g.paused || g.stunnedT > 0 || g.inside) return false;
     if (this.level(k) < 1 || g.level < NEED_CHAR_LV[k]) {
-      if (!quiet) g.onToast?.(`${this.def().skills[k].name}: learn it first (E).`);
+      if (!quiet) g.onToast?.(`${this.def().skills[k].name}: it unlocks at character level ${NEED_CHAR_LV[k]}.`);
       return false;
     }
     if ((this.cd[k] || 0) > 0) return false;
@@ -781,6 +782,12 @@ export class ElementSystem {
       g.pfx.spawn('holy/sunburst', p.x, p.y + 4, { scale: 0.45, seed: seed() });
       g.onToast?.('⭐ Power star! Full mana and 1.5x damage for 10 seconds, skills cost nothing.');
     }
+    else if (kind === 'xp') {
+      const n = 6 + g.level * 2;
+      g.addXp(n, true);
+      g.combat.addFloater({ x: p.x, y: p.y - 40, text: `+${n} XP`, color: '#9cf09c', t: 0 });
+      g.pfx.spawn('pickups/collect-burst', p.x, p.y - 4, { scale: 0.4 });
+    }
     sfx.play('pickup', 0.6);
   }
 
@@ -789,9 +796,11 @@ export class ElementSystem {
     g.pfx.spawn(Math.random() < 0.5 ? 'spawn/soul-rise' : 'spawn/dissolve-burn', w.x, w.y + 2, { scale: 0.4, seed: seed() });
     const drops = g.combat.drops;
     const r = Math.random();
-    const kind = r < 0.025 ? 'star' : r < 0.3 ? 'mana' : r < 0.4 ? 'heart' : null;
+    // the only things that fall here: a mana potion, a life pack, gold coins and an experience orb
+    const kind = r < 0.28 ? 'mana' : r < 0.38 ? 'heart' : null;
     if (kind) drops.push({ x: w.x, y: w.y - 2, id: kind, qty: 1, age: 0, ...(kind === 'heart' ? {} : { em: kind }) });
-    if (Math.random() < 0.3) drops.push({ x: w.x + rnd(-6, 6), y: w.y, id: 'gem', qty: 1, age: 0 });
+    if (Math.random() < 0.45) drops.push({ x: w.x + rnd(-6, 6), y: w.y, id: 'coin', qty: 1 + Math.floor(Math.random() * 3), age: 0 });
+    if (Math.random() < 0.3) drops.push({ x: w.x + rnd(-8, 8), y: w.y - 2, id: 'xp', qty: 1, age: 0, em: 'xp' });
   }
 
   onDie() {
@@ -819,6 +828,13 @@ export class ElementSystem {
   update(dt) {
     const g = this.g;
     this.updateTeles(dt);
+    // only a life pack, mana, gold and experience can lie on the ground here: anything else that turns up becomes coins
+    for (const d of g.combat.drops) {
+      if (d.em || d.id === 'coin' || d.id === 'heart' || d.id === 'hppack') continue;
+      d.id = 'coin';
+      d.qty = 3;
+      delete d.wid;
+    }
     if (!this.el) {
       g.paused = true; // (nothing moves until you have picked an element)
       return;

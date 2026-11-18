@@ -11,6 +11,7 @@ import IntroScene from './IntroScene';
 import OpeningScene from './OpeningScene';
 import EvacScene from './EvacScene';
 import AirPlanOverlay from './AirPlanOverlay';
+import DodHud from './DodHud';
 import ElementHud from './ElementHud';
 import { AIR_SUPPORT } from '../game/upgrades';
 import TravelScene from './TravelScene';
@@ -37,7 +38,7 @@ import TouchControls from './TouchControls';
 import { getControls, useControls } from '../game/controls';
 import { COMMANDS } from '../game/commands';
 import { hp100 } from '../game/stats';
-import { isElemSeed, isEscapeSeed, mapNameOf } from '../game/maps';
+import { isDodSeed, isElemSeed, isEscapeSeed, mapNameOf } from '../game/maps';
 import { weaponById, weaponIconFile } from '../game/weapons';
 import Guide from './Guide';
 import TrainingPanel from './TrainingPanel';
@@ -75,7 +76,12 @@ const KEYS_FREE = [
   [['W', 'A', 'S', 'D'], 'Move'], [['Shift'], 'Sprint'], [['L-Click'], 'Attack'], [['R-Click'], 'Throw'], [['Space'], 'Dash'], [['R'], 'Shield'],
   [['F'], 'Pick up / open'], [['Q'], 'Health'], [['E'], 'Stamina'], [['1-9'], 'Pick item'], [['B'], 'Shop'], [['M'], 'Map'],
 ];
-function KeyHints({ waves }) {
+const KEYS_ELEM = [
+  [['W', 'A', 'S', 'D'], 'Move'], [['Shift'], 'Sprint'], [['L-Click'], 'Shoot'], [['R-Click'], 'Dash'], [['1'], 'Block'], [['2', '3'], 'Element skills'],
+  [['4'], 'Ultimate'], [['Space'], 'Hold: recharge mana'], [['E'], 'Upgrade skills'], [['Q'], 'Health potion'], [['R'], 'Mana potion'], [['H'], 'Teleport home'],
+  [['F'], 'Pick up / open'], [['B'], 'Shop'], [['M'], 'Map'],
+];
+function KeyHints({ waves, elem = false }) {
   const [open, setOpen] = useState(() => {
     try {
       const saved = localStorage.getItem('cuzy-keyhints');
@@ -97,7 +103,7 @@ function KeyHints({ waves }) {
       <button type="button" className="key-hints-head" onClick={toggle} aria-expanded={open}>⌨️ Controls <span>{open ? '▴' : '▾'}</span></button>
       {open && (
         <ul>
-          {(waves ? KEYS_WAVES : KEYS_FREE).map(([keys, what]) => (
+          {(elem ? KEYS_ELEM : waves ? KEYS_WAVES : KEYS_FREE).map(([keys, what]) => (
             <li key={what}>
               <span className="kh-keys">{keys.map((k) => <kbd key={k}>{k}</kbd>)}</span>
               <span className="kh-what">{what}</span>
@@ -303,6 +309,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
   const [aboutOpen, setAboutOpen] = useState(false); // About and credits, from the in-game menu
   const aboutRef = useRef(false);
   aboutRef.current = aboutOpen;
+  const escExtra = useRef(null);
   const confirmRef = useRef(null);
   confirmRef.current = confirm;
   useEffect(() => {
@@ -466,13 +473,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     if (training) {
       game.cheats = true; // (God mode starts off, so lava, monsters and grenades can actually hurt you; switch it on in the training panel)
     }
-    game.frozen = introRef.current === 'wait' || openingRef.current; // (the world waits while the opening film plays)
+    game.frozen = introRef.current === 'wait' || openingRef.current || (!!game.dod && introRef.current === 'play'); // (the world waits while the opening film plays)
     game.start();
     // the story plays out on the real map: the hero walks to the door by itself (a resumed game has no story: straight in)
-    if (introRef.current === 'play' && !openingRef.current && !game.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0);
+    if (introRef.current === 'play' && !openingRef.current && !game.startCutscene() && !game.dod) setTimeout(() => finishIntroRef.current?.(), 0); // (Do or Die: its intro plays on its own, the world waiting)
     };
     // a V2 world draws sprites from the Modern Exteriors atlases: they are loaded before the game begins
-    if (isV2Seed(profile.seed) || isElemSeed(profile.seed) || isEscapeSeed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) || isElemSeed(profile.seed) || isEscapeSeed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
+    if (isV2Seed(profile.seed) || isElemSeed(profile.seed) || isEscapeSeed(profile.seed) || isDodSeed(profile.seed) || isHalloweenSeed(profile.seed) || survival) loadV2Images(assets.img, survival ? SURVIVAL_THEMES : isV2Seed(profile.seed) || isElemSeed(profile.seed) || isEscapeSeed(profile.seed) || isDodSeed(profile.seed) ? undefined : HALLOWEEN_THEMES).then(() => !dead && boot());
     else boot();
     return () => {
       dead = true;
@@ -492,6 +499,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     pausedRef.current = paused;
     guideRef.current = guideOpen || bestiaryOpen;
     upgRef.current = upgOpen || storeOpen || !!qty || roomSetOpen;
+    escExtra.current = () => {
+      // smaller pop-ups close first (Esc never opens the menu while one is up)
+      if (qty) { setQty(null); return true; }
+      if (supplyOpen) { setSupplyOpen(null); return true; }
+      if (onlineOpen) { setOnlineOpen(false); return true; }
+      return false;
+    };
     roomSetRef.current = roomSetOpen;
     storeRef.current = storeOpen;
     chatRef.current = chatOpen;
@@ -523,7 +537,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     const g = gameRef.current;
     if (g) {
       const wasFrozen = g.frozen;
-      g.frozen = intro === 'wait';
+      g.frozen = intro === 'wait' || (!!g.dod && intro === 'play');
       if (intro !== 'play') g.endCutscene();
       // the room's day clock starts when the scene ends, together for everyone
       if (wasFrozen && !g.frozen && g.mp) g.mp.clockAt = performance.now();
@@ -566,8 +580,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
     setOpening(false);
     const g = gameRef.current;
     if (g) {
-      g.frozen = introRef.current === 'wait';
-      if (introRef.current === 'play' && !g.startCutscene()) setTimeout(() => finishIntroRef.current?.(), 0); // (then the story at the shelter, as before)
+      g.frozen = introRef.current === 'wait' || (!!g.dod && introRef.current === 'play');
+      if (introRef.current === 'play' && !g.startCutscene() && !g.dod) setTimeout(() => finishIntroRef.current?.(), 0); // (then the story at the shelter, as before)
     }
   };
   const finishIntro = () => {
@@ -606,10 +620,11 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         return;
       }
       const digit = /^Digit([1-9])$/.exec(e.code);
-      if (digit && !modal && !gameRef.current?.elem) {
+      if (digit && !modal && !gameRef.current?.elem && !gameRef.current?.dod) {
         setSelected(Number(digit[1]) - 1);
         return;
       }
+      if (gameRef.current?.dod && ['KeyE', 'KeyQ', 'KeyX', 'KeyR', 'KeyK', 'KeyC', 'KeyB', 'KeyM', 'KeyG', 'KeyH', 'KeyT', 'KeyV', 'KeyZ'].includes(e.code)) return; // (Do or Die has its own keys)
       if (gameRef.current?.elem && ['KeyE', 'KeyQ', 'KeyX', 'KeyR', 'KeyK', 'KeyC'].includes(e.code)) return; // (the element's own skills)
       if ((!waves || survival) && e.code === 'KeyE' && !e.repeat && !modal) {
         gameRef.current?.useSupply('stam'); // E stamina, Q health
@@ -643,6 +658,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         pauseRef.current();
       } else if (e.code === 'Escape') {
         if (confirmRef.current) setConfirm(null);
+        else if (escExtra.current?.()) { /* closed a small pop-up */ }
         else if (aboutRef.current) setAboutOpen(false);
         else if (roomSetRef.current) setRoomSetOpen(false);
         else if (storeRef.current) setStoreOpen(false);
@@ -700,12 +716,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       title={`${waves ? 'Teleport to the base' : 'Teleport home'} (H): stand still for 2.5 seconds${hud.recallCd > 0 ? ` · ready in ${Math.ceil(hud.recallCd)}s` : ''}`}
     >
       <span>🏡</span>
+      <kbd>H</kbd>
       {hud.recallCd > 0 && <b>{Math.ceil(hud.recallCd)}</b>}
       <i className="recall-cd" style={{ height: `${Math.min(100, (hud.recallCd / RECALL_CD) * 100)}%` }} />
     </button>
   );
   return (
-    <div className={`game ${mobile ? 'mobile' : ''} ${mobile && hudOff ? 'hud-off' : ''} ${mobile && topFold ? 'top-folded' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
+    <div className={`game ${hud.dod ? 'dodmode' : ''} ${mobile ? 'mobile' : ''} ${mobile && hudOff ? 'hud-off' : ''} ${mobile && topFold ? 'top-folded' : ''} ${intro === 'play' ? 'cutscene' : ''}`}>
       <div className="game-canvas">
         <canvas ref={canvasRef} />
       </div>
@@ -777,7 +794,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <div className="hud-line">🗺️ <b>{mapNameOf(profile.seed)}</b></div>
           <div className="hud-line">📍 {hud.tx}, {hud.ty}</div>
           <div className="hud-line">{dayIcon(hud.hour)} Day {hud.day} · {formatClock(hud.hour)}</div>
-          <Meter icon="❤️" label="HP" value={hud.hp / hud.maxHp} tone="hp" text={`${Math.max(0, hp100(hud.hp))}/${hp100(hud.maxHp)}`} />
+          {!hud.elem && <Meter icon="❤️" label="HP" value={hud.hp / hud.maxHp} tone="hp" text={`${Math.max(0, hp100(hud.hp))}/${hp100(hud.maxHp)}`} />}
           <Meter icon="⭐" label={`Level ${hud.level || 1}`} value={(hud.xp || 0) / (hud.xpNeed || 40)} tone="xp" text={hud.maxLevel ? `Lv ${hud.level} MAX` : `Lv ${hud.level || 1} · ${hud.xpLeft ?? '?'} to go`} />
           <Meter icon="⚡" label="Stamina" value={hud.stamina} tone="stam" text={`${Math.round(hud.stamina * (hud.stats?.staminaTotal || 100))}/${hud.stats?.staminaTotal || 100}`} />
           {hud.mount && (
@@ -881,14 +898,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {mobile && <button className="btn small-btn" onClick={() => setHudMenuOpen((o) => !o)}>{hudMenuOpen ? '✕ Close' : '☰ More'}</button>}
         {(!mobile || hudMenuOpen) && (
           <>
-        {!mobile && !hud.escape && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
+        {!mobile && !hud.escape && !hud.dod && <button className="btn small-btn" onClick={() => setUpgOpen(true)}>🛒 Buy <kbd>B</kbd></button>}
         {mobile && <button className="btn small-btn" onClick={() => { setChatOpen(true); setHudMenuOpen(false); }}>💬 Chat</button>}
         {(session ? isHost : true) && <button className="btn small-btn" onClick={() => setRoomSetOpen(true)} title={session ? "Change the room's settings" : 'Change the rules of this game'}>⚙️ {session ? 'Room' : 'Rules'}</button>}
         <button className="btn small-btn" onClick={() => setBestiaryOpen(true)} title="Every creature in the game, so you can tell what is attacking you">👹 Creatures</button>
         <button className="btn small-btn" onClick={() => setPaused(true)}>☰ Menu <kbd>Esc</kbd></button>
           </>
         )}
-        {!mobile && <KeyHints waves={waves} />}
+        {!mobile && !hud.dod && <KeyHints waves={waves} elem={!!hud.elem} />}
       </div>
 
       <div className={`hud stamina ${hud.exhausted ? 'tired' : ''} ${hud.stamina < 0.995 ? 'show' : ''}`}>
@@ -896,13 +913,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} onSupply={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
-      {!mobile && <div className="hud hud-help">{hud.elem ? <>WASD move · Click bolt · Right-click dash · 1 block · 2 / 3 element skills · 4 ultimate · hold Space to recharge mana · E skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
+      {!mobile && <div className="hud hud-help">{hud.dod ? (hud.dod.role === 'killer' ? <>WASD move · Click strike · Q hook · E trap · R Killer Eye · F open doors and bushes</> : <>WASD move · Shift sprint · F tasks / revive / crates (hold) · Q flashbang · E smoke · follow the compass once the chopper comes</>) : hud.elem ? <>WASD move · Click bolt · Right-click dash · 1 block · 2 / 3 element skills · 4 ultimate · hold Space to recharge mana · E skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
         </div>
       )}
-      {!hud.elem && <div className={`hud skills left ${survival ? 'with-gun' : ''}`}>
+      {!hud.elem && !hud.dod && <div className={`hud skills left ${survival ? 'with-gun' : ''}`}>
         {(waves || hud.util === 'shield' || !hud.util) && (
         <button
           className={`skill ${hud.shieldT > 0 ? 'active' : ''} ${hud.shieldCd > 0 ? 'cooling' : 'ready'}`}
@@ -961,12 +978,13 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </button>
         )}
       </div>}
-      {!hud.elem && <div className="hud skills right">
+      {!hud.elem && !hud.dod && <div className="hud skills right">
         <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? (waves ? 'Press Space (hold it to charge) to dash' : 'Press Space (hold it to charge) or hold left click, then release, to use your sword skill') : 'Sword skill: Dash unlocks at level 6, Spiral Sword at level 8'}>
           <span className="skill-icon">{hud.activeSkill === 'grapple' ? '🪝' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? (waves ? 'hold click' : 'Space') : 'locked'}</small>
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'grapple' ? 1.5 : 1.2)) * 100)}%` }} />
         </div>
+        {homeBtn}
       </div>}
       {(waves || hud.gunSel) && (
         <div className={`hud throw-meter ${survival || hud.gunSel ? (hud.reloading ? 'locked' : '') : hud.tLocked ? 'locked' : ''}`}>
@@ -1061,7 +1079,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {(!waves || survival) && !hud.elem && <SupplyBar keys={['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
+      {(!waves || survival) && !hud.elem && !hud.dod && <SupplyBar keys={['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
       {supplyOpen && (!waves || survival) && <SupplyMenu kind={supplyOpen} hud={hud} game={gameRef.current} onClose={() => setSupplyOpen(null)} />}
       <CompassPanel compass={hud.compass} />
       {hud.escape && (
@@ -1169,7 +1187,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         </div>
       )}
       {hud.elem && <ElementHud hud={hud} game={gameRef.current} home={homeBtn} />}
-      {!hud.elem && <Hotbar
+      {hud.dod && <DodHud hud={hud} game={gameRef.current} />}
+      {!hud.elem && !hud.dod && <Hotbar
         slots={inventory}
         selected={selected}
         onSelect={setSelected}
@@ -1190,7 +1209,6 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <small>{GUNS[hud.gun].name}</small>
           </button>
         )}
-        {homeBtn}
       </Hotbar>}
       {hud.celeb && (
         <div key="round-flash" className="levelup-flash round-flash" aria-hidden="true">
@@ -1285,7 +1303,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
       {mapOpen && <MapPanel game={gameRef.current} onClose={() => setMapOpen(false)} />}
       {toast && <div className="toast panel small">✨ {toast}</div>}
       {opening && <OpeningScene assets={assets} hero={profile.hero} onDone={finishOpening} />}
-      {intro === 'play' && !opening && <IntroScene kind={survival ? 'survival' : mode === 'waves' ? 'waves' : 'free'} name={profile.name} hero={profile.hero} assets={assets} fight={pvp || Number(profile.bots) > 0} onDone={finishIntro} />}
+      {intro === 'play' && !opening && <IntroScene kind={isDodSeed(profile.seed) ? 'dod' : survival ? 'survival' : mode === 'waves' ? 'waves' : 'free'} name={profile.name} hero={profile.hero} assets={assets} fight={pvp || Number(profile.bots) > 0} onDone={finishIntro} />}
       {intro === 'wait' && (
         <div className="intro-wait" role="status">
           <div><span className="splash-dot" /> Gathering acorns…</div>

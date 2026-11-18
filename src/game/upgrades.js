@@ -135,4 +135,4 @@ export const THROW_SHOP = [
 export const BOAT_COST = 120;
 
 // The Resurrection Cross: if you fall while you carry one, it shatters and you rise again on the spot, with a few seconds of safety
-export const REVIVE = { cost: 150, cap: 3, safe: 5 };
+export const REVIVE = { cost: 150, cap: 2, safe: 5 };

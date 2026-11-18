@@ -27,6 +27,7 @@ const DROP_LOOP = {
   key: { id: 'pickups/key-glint', k: 0.4 },
   mana: { id: 'pickups/potion', k: 0.32, o: { palette: ['#06142a', '#0c2e5c', '#134f9e', '#1f7de0', '#4fb0ff', '#8fd4ff', '#cdeeff', '#ffffff'] } },
   star: { id: 'pickups/power-star', k: 0.34 },
+  xp: { id: 'pickups/xp-orb', k: 0.34 },
 };
 const BEAM_TIER = { rare: PAL.ice, epic: PAL.arcane, legendary: PAL.gold };
 import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
@@ -342,6 +343,7 @@ export class Combat {
   // Max health grows with the Max health upgrade (Free Roam only); `gain` hearts arrive full
   refreshMaxHp(fill = false, gain = 0) {
     this.maxHp = maxHearts(this.g.wave ? 0 : this.up('health'), this.g.level || 1);
+    if (this.g.elem) this.maxHp = ((100 + 12 * ((this.g.level || 1) - 1)) * 6) / 100; // Elements: every level adds 12 HP (and 8 mana)
     this.hp = fill ? this.maxHp : Math.min(this.maxHp, this.hp + gain);
   }
 
@@ -1557,7 +1559,7 @@ export class Combat {
   // crabs scuttle about on the beach now and then (up to three at a time) and pay in coins
   updateCrabs(dt) {
     this.crabT -= dt;
-    if (this.crabT > 0 || this.g.world.arena) return;
+    if (this.crabT > 0 || this.g.world.arena || this.g.dod) return;
     this.crabT = 5 + Math.random() * 6;
     if (this.wilds.filter((w) => w.type === 'crab' && w.state !== 'dead').length >= 3) return;
     const { world, player: p } = this.g;
@@ -1697,7 +1699,7 @@ export class Combat {
       const near = Math.max(0, 1 - d / b.R);
       const boss = MONSTERS[m.type]?.boss || m.nightBoss || m.miniBoss;
       const dmg = this.isNormalFoe(m) ? Math.max(13, m.hp) : boss ? Math.max(13, (m.max || m.hp) * (0.2 + 0.15 * near)) : 13;
-      this.hitMonster(m, dmg, b.x, b.y, boss ? 120 : 300 + 380 * near);
+      this.hitMonster(m, dmg, b.x, b.y, boss ? 120 : 300 + 380 * near, true);
     }
     for (const s of this.skeletons) {
       const d = Math.hypot(s.x - b.x, s.y - 8 - b.y);
@@ -2218,6 +2220,7 @@ export class Combat {
       const night = this.g.darkness();
       const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 2;
       if (this.g.escape) this.updateEscape(3 + Math.random() * 3);
+      else if (this.g.dod) { /* nothing wanders in Do or Die */ }
       else if (this.g.elem) this.updateElemSpawns();
       else {
         if (!this.g.dungeon && this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
@@ -3281,7 +3284,8 @@ export class Combat {
   // ---------- wave monsters ----------
 
   // Hit a Wave Defense monster. The host applies it; guests ask the host to.
-  hitMonster(m, dmg, fx, fy, kb = 110) {
+  hitMonster(m, dmg, fx, fy, kb = 110, blast = false) {
+    if (this.g.wave && this.g.world.apoc && !blast) kb = 0; // Survival: guns and melee never push a zombie back, only a grenade blast does
     this.g.comboHit?.();
     const sc = m.scale || MONSTERS[m.type].scale || 1;
     if (fx !== undefined && dmg < 8) this.g.pfx?.spawn('impacts/hit-spark', m.x, m.y - 6 * sc, { angle: Math.atan2(m.y - fy, m.x - fx), scale: 0.4, seed: 1 + Math.floor(Math.random() * 50) });
@@ -4122,7 +4126,7 @@ export class Combat {
     {
       const loop = DROP_LOOP[d.id];
       const tier = !d.wid && ITEMS[d.id] ? rarityOf(d.id) : d.wid ? weaponRarity(weaponById(d.wid)) : 'common';
-      if (BEAM_TIER[tier]) {
+      if (BEAM_TIER[tier] && !this.g.elem) {
         const beam = bakedLoop('pickups/loot-beam', { palette: BEAM_TIER[tier] }, 12);
         if (beam) drawBaked(ctx, beam, d.x, d.y + 2, t + d.x * 0.1, false, 0.8, 0.5);
       }
