@@ -11,7 +11,7 @@ import MusicButton from './MusicButton';
 import V2Sprite from './V2Sprite';
 import Avatar from './Avatar';
 import MapPreview from './MapPreview';
-import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
+import { ARENA_SEED, ELEM_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, FREE_MAPS, SURVIVAL_BASE, SURVIVAL_MAPS, isEndlessSeed, joinSeed, mapNameOf, splitSeed } from '../game/maps';
 
 const invitedCode = () => (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().slice(0, 8) || roomFromHash(); // (an invite link, or the address #/room/CODE)
 
@@ -81,6 +81,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     beach: { icon: '🏖️', name: 'Beach Ball', seed: PITCH_SEED, together: true, blurb: 'A cozy ball game: two teams, one beach ball, a goal at each end. Kick it by walking into it. 1v1 with two players.' },
     rumble: { icon: '🌴', name: 'Beach Rumble', seed: RUMBLE_SEED, together: true, blurb: 'The free for all version of Beach Ball: up to four teams on a pitch with four goals (left, right, top and bottom). Defend yours and score in the others: a goal counts for the team of whoever touched the ball last.' },
     escape: { icon: '🚁', name: 'Escape', seed: ESCAPE_SEED, together: false, blurb: 'Open world survival: loot buildings and cars for guns, grenades and a compass, fight the zombies, and reach the chopper that lands far away before it leaves. No shop.' },
+    elements: { icon: '🌀', name: 'Elements', seed: ELEM_SEED, together: false, blurb: 'Free Roam with no weapons: pick an element (earth, fire, ice, lightning, water, air, arcane or nature), level up and upgrade its skills, and fight the strange critters of the wild with dashes, shields, bolts and a mighty ultimate. Hold Space to recharge your mana.' },
     duel: { icon: '🏛️', name: 'Duel', seed: ARENA_SEED, together: true, blurb: 'A 1v1 in the Colosseum against the clock (everyone else watches, and can bet). Pick the fighters in the room.' },
   };
   const special = SPECIAL[gameType] || null;
@@ -204,7 +205,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
   const create = () =>
     run(
       net
-        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, duel: gameType === 'duel', soccer: gameType === 'beach' || gameType === 'rumble', rumble: gameType === 'rumble', escape: gameType === 'escape', player: { name: myName(), hero: activeHeroId } })
+        .create({ name: roomName.trim(), seed: fullSeed(), max, pvp: gameMode === 'free', mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: lateJoin, duel: gameType === 'duel', soccer: gameType === 'beach' || gameType === 'rumble', rumble: gameType === 'rumble', escape: gameType === 'escape', elem: gameType === 'elements', player: { name: myName(), hero: activeHeroId } })
         .then((joined) => {
           // a room server that was started before Wave Defense existed quietly makes an ordinary room
           if (gameMode !== 'free' && joined.room.mode !== gameMode) {
@@ -221,7 +222,7 @@ export default function MainMenu({ assets, initial, net, onBegin, onEnterRoom, o
     setError('');
     try {
       const surv = gameMode === 'survival';
-      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : special ? `${myName()}'s ${special.name.toLowerCase()}` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, duel: gameType === 'duel', soccer: gameType === 'beach' || gameType === 'rumble', rumble: gameType === 'rumble', escape: gameType === 'escape', allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
+      onEnterRoom(profile(), await net.create({ name: surv ? `${myName()}'s shelter` : special ? `${myName()}'s ${special.name.toLowerCase()}` : `${myName()}'s meadow`, seed: fullSeed(), max: surv ? 4 : 5, pvp: !surv, mode: gameMode, difficulty, waves: survWaves, winBy, allowLate: true, duel: gameType === 'duel', soccer: gameType === 'beach' || gameType === 'rumble', rumble: gameType === 'rumble', escape: gameType === 'escape', elem: gameType === 'elements', allowCheats: true, player: { name: myName(), hero: activeHeroId } }));
     } catch (err) {
       // no room available (offline, or the rooms table is not set up): say so, and play without one if asked again
       if (noRoomOk) {

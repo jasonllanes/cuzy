@@ -29,13 +29,16 @@ function describe(def) {
   if (def.kind === 'fly' || def.fly) bits.push('Flies, so walls and water do not stop it.');
   if (def.kind === 'shoot') bits.push(def.cast ? 'Casts a spell: a red circle appears where you stand, and it lands a moment later. Step out of it.' : def.arrow ? 'Shoots arrows (a thin brown line with a bright tip). Stay out of its line, or get close.' : 'Spits or shoots from a distance.');
   if (def.skill && SKILLS[def.skill]) bits.push(SKILLS[def.skill] + '.');
+  if (def.heals) bits.push('A healer: she stays back and heals the monsters around her (a third of their health every few seconds). Kill her first!');
+  if (def.pfx) bits.push(def.kind === 'shoot' ? 'Hangs back and spits bolts at you.' : def.kind === 'fly' ? 'Flies, so walls and the shelter ring do not stop it.' : 'Crawls up to the shelter and chews through the walls.');
   if (def.boss) bits.push('A boss: very tough, with red warnings before its big moves.');
   if (!bits.length) bits.push('Walks up to you and hits in melee.');
   return bits.join(' ');
 }
 
 const GROUPS = [
-  ['Free Roam: meadow and island monsters', (id, d) => !d.tiny && !d.apoc],
+  ['Free Roam: meadow and island monsters', (id, d) => !d.tiny && !d.apoc && !d.pfx],
+  ['Survival: creepy crawlies (they come with the later waves)', (id, d) => !!d.pfx],
   ['Free Roam: fighters, archers and casters (the Tiny RPG folk)', (id, d) => !!d.tiny],
   ['Survival: the zombies', (id, d) => !!d.apoc],
 ];

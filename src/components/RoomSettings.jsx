@@ -43,14 +43,15 @@ function Section({ icon, title, note, open = true, children }) {
 
 // The host's room rules. Everyone can see them; only the host can change them. Most apply at once, even in the middle of a round.
 // the game modes a host can switch between in the room: each one is a patch the room applies in one go (it sets the map, teams and rules for it)
-const GAME_KINDS = [['free', '🌻 Free Roam'], ['survival', '🧟 Survival'], ['beach', '🏖️ Beach Ball'], ['rumble', '🌴 Beach Rumble'], ['escape', '🚁 Escape'], ['duel', '🏛️ Duel']];
-const OFF = { escape: false, duel: false, soccer: false };
+const GAME_KINDS = [['free', '🌻 Free Roam'], ['survival', '🧟 Survival'], ['beach', '🏖️ Beach Ball'], ['rumble', '🌴 Beach Rumble'], ['escape', '🚁 Escape'], ['elements', '🌀 Elements'], ['duel', '🏛️ Duel']];
+const OFF = { escape: false, duel: false, soccer: false, elem: false };
 const MODE_PATCH = {
   free: { mode: 'free', ...OFF },
   survival: { mode: 'survival' },
   beach: { mode: 'free', ...OFF, soccer: true, rumble: false },
   rumble: { mode: 'free', ...OFF, soccer: true, rumble: true },
   escape: { mode: 'free', ...OFF, escape: true },
+  elements: { mode: 'free', ...OFF, elem: true },
   duel: { mode: 'free', ...OFF, duel: true },
 };
 
@@ -70,7 +71,7 @@ export default function RoomSettings({ room, count, editable, onChange, players 
   const pair = fighters.length === 2 ? fighters : humans.slice(0, 2).map((p) => p.id);
   const pick = room.duelPick || 'pick';
   const duelLocked = !editable || (duel ? room.started : !!room.duelLive); // (a duel round is set up before it starts; the timed duels can be changed between duels)
-  const kind = duel ? 'duel' : soccer ? (room.rumble ? 'rumble' : 'beach') : escape ? 'escape' : free ? 'free' : 'survival';
+  const kind = room.elem ? 'elements' : duel ? 'duel' : soccer ? (room.rumble ? 'rumble' : 'beach') : escape ? 'escape' : free ? 'free' : 'survival';
   const oneVsOne = duels === 'timed' || (duel && !room.teams);
   const fightNote = [room.teams ? `${room.teams} teams` : 'free for all', room.pvp || duel ? 'player damage' : 'no damage'].join(' · ');
   const duelNote = duels === 'round' ? `Colosseum round${bet ? ' · 🎲 bets' : ''}` : duels === 'timed' ? `every ${every} min${bet ? ' · 🎲 bets' : ''}` : 'off';
@@ -91,8 +92,8 @@ export default function RoomSettings({ room, count, editable, onChange, players 
         <div className="set-row">
           <div className="set-label"><b>Map</b><small>{room.started ? 'Fixed once the round has started' : 'Opens the map page, with a preview. Everyone in the room gets the new world.'}</small></div>
           {(() => {
-            const fixed = duel || soccer || escape;
-            const cur = duel ? '🏛️ Colosseum' : soccer ? (room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch') : escape ? '🚁 Escape Zone' : (() => { const m = (free ? FREE_MAPS : SURVIVAL_MAPS).find((x) => x.id === mapIdOf(room.seed, room.mode)); return m ? `${m.icon} ${m.name}` : 'Custom world'; })();
+            const fixed = duel || soccer || escape || !!room.elem;
+            const cur = duel ? '🏛️ Colosseum' : soccer ? (room.rumble ? '🏖️ Beach Rumble Pitch (4 goals)' : '🏖️ Beach Pitch') : escape ? '🚁 Escape Zone' : room.elem ? '🌀 Elemental Lands' : (() => { const m = (free ? FREE_MAPS : SURVIVAL_MAPS).find((x) => x.id === mapIdOf(room.seed, room.mode)); return m ? `${m.icon} ${m.name}` : 'Custom world'; })();
             return (
               <div className="map-now">
                 <b>{cur}</b>

@@ -3,6 +3,7 @@ import { PETS, PetSystem } from './pets';
 import { ITEMS, LOOT_APOC, RARITIES, isConsumable, rarityOf, rollLoot, sellPrice, sellValue, throwStats } from './items';
 import { SURVIVOR, ZOMBIE_FRAMES } from './apoc';
 import { Combat, GUNS, SHIELD_DUR } from './combat';
+import { ElementSystem } from './elements';
 import { Balls } from './balls';
 import { MONSTERS, MONSTER_RARITY, lvSize, lvXp } from './monsters';
 import { TINY } from './tiny';
@@ -254,7 +255,7 @@ export class Game {
     this.t = 0;
     this.pfx = new Pfx(); // pixelfx one-shots: damage numbers, bursts, spells
     this.pfx.preload(['ui/damage-number', 'ui/crit-number', 'ui/combo-counter', 'pickups/collect-burst', 'pickups/xp-orb']);
-    if (world.apoc) this.pfx.preload(['critters/slime', 'critters/snake', 'critters/frog', 'critters/wisp', 'critters/ghost', 'critters/flying-skull', 'critters/eyeball', 'critters/jellyfish', 'spawn/poof']);
+    if (world.apoc) this.pfx.preload(['holy/heal', 'critters/slime', 'critters/frog', 'critters/wisp', 'critters/ghost', 'critters/flying-skull', 'critters/eyeball', 'critters/jellyfish', 'spawn/poof']);
     this.pfx.preload(['ice/frost-nova', 'explosions/small-explosion', 'nature/acid-splash', 'lightning/lightning-strike', 'arcane/mana-burst', 'lightning/zap-hit', 'fire/flame-pillar', 'explosions/grenade', 'impacts/hit-spark', 'shadow/dark-explosion']);
     this.combo = null;
     this.airPlan = null; // set while you are planning a carpet bombing run on the game screen
@@ -343,6 +344,7 @@ export class Game {
     }
     this.collected = new Set(saved?.collected || []);
     this.combat = demo ? null : new Combat(this, assets.img, saved?.kills || 0);
+    this.elem = !demo && this.world.elem ? new ElementSystem(this, saved?.elem) : null; // the Elemental Lands: an element and its skills
     if (saved?.guns && this.combat) {
       // the guns you own, their upgrades and the one in your hands
       this.combat.owned = { pistol: true, ...saved.guns.owned };
@@ -407,6 +409,16 @@ export class Game {
           else if (this.mount) this.dismount();
           else if (!this.pets.tryRide()) this.interactPressed = true;
         }
+      } else if (e.code === 'Space' && this.elem) {
+        e.preventDefault();
+        if (!e.repeat && !this.dead) this.elem.spaceDown(); // Elements: tap = dash, hold = gather mana
+      } else if (this.elem && e.code === 'KeyC') {
+        e.preventDefault();
+        if (!e.repeat && !this.dead) this.elem.rechargeHold(true); // hold C: stand still and recharge mana
+      } else if (this.elem && !e.repeat && e.code === 'KeyK') {
+        this.elem.togglePanel();
+      } else if (this.elem && !e.repeat && !this.dead && this.elem.key(e.code)) {
+        e.preventDefault();
       } else if (e.code === 'Space') {
         e.preventDefault();
         if (!e.repeat && !this.dead) this.combat?.skillKeyDown(); // Space is the dash (hold it to charge) in every mode
@@ -430,12 +442,17 @@ export class Game {
         this.spaceLock = false;
         this.spaceHold = 0;
       }
-      if (e.code === 'Space') this.combat?.skillKeyUp();
+      if (e.code === 'KeyC') this.elem?.rechargeHold(false);
+      if (e.code === 'Space') {
+        if (this.elem) this.elem.spaceUp();
+        else this.combat?.skillKeyUp();
+      }
     };
     this.onBlur = () => {
       this.spaceDown = false;
       this.keys.clear();
       this.mouseHeld[0] = false;
+      this.elem?.rechargeHold(false);
       this.combat?.cancelHold();
     };
     // Wheel cycles the hotbar; hold Alt while scrolling to zoom instead
@@ -468,6 +485,10 @@ export class Game {
           // a barricade box in hand: press on a tile and keep holding, drag along a straight line to lay a whole row of walls; let go to build it
           const { x, y } = this.snapPlacement();
           this.wallHold = { x, y };
+          return;
+        }
+        if (this.elem) {
+          this.elem.cast('shoot'); // no weapons here: left click is your element's bolt
           return;
         }
         this.combat.holdStart(); // otherwise left click is your melee weapon: tap = swing (a staff, trident or sling: hold + release for its big move). The dash is on Space
@@ -632,6 +653,7 @@ export class Game {
           inside: !!this.inside && !this.inside.b,
           level: this.level,
           xp: this.xp,
+          elem: this.elem ? this.elem.save() : undefined,
           weapons: this.weapons,
           storage: this.storage,
           houseDrops: this.combat ? this.combat.drops.filter((d) => d.ins).slice(0, 60).map((d) => ({ id: d.id, qty: d.qty, x: d.x, y: d.y })) : [],
@@ -764,6 +786,7 @@ export class Game {
 
   // Out of hearts: wake up at your own front door, a little hungry but whole
   faint(message = 'You fainted… and woke up at home.') {
+    this.elem?.onRespawn();
     this.dead = null;
     this.dismount();
     sfx.play('respawn');
@@ -1200,6 +1223,7 @@ export class Game {
     if (up) {
       this.combat.refreshMaxHp(false, (HP_PER_LEVEL * up) / HP_PER_HEART);
       this.combat.hp = this.combat.maxHp;
+      this.elem?.onLevel(this.level);
       sfx.play('levelup');
       this.combat.addFloater({ x: this.player.x, y: this.player.y - 56, text: `LEVEL ${this.level}!`, color: '#ffd24a', t: 0 });
       this.levelUpFx(this.syncSkills(true));
@@ -2251,6 +2275,7 @@ export class Game {
     if (by?.kind === 'player' && this.remotes.get(by.id)?.bot) this.bots.credit(by.id, 'me');
     if (by?.kind === 'player' && !this.wave) this.dropCoinsOnDeath();
     sfx.play('death');
+    this.elem?.onDie();
     if (!this.duelActive()) this.streaks.died(this.myKey()); // (falling in a duel does not break a streak)
     if (this.mp && by?.kind !== 'player' && !this.duelActive()) this.mp.net.send({ t: 'fell' });
     this.push = null;
@@ -2378,6 +2403,13 @@ export class Game {
 
   onWaveEvent(ev) {
     const c = this.combat;
+    if (ev.type === 'mheal') {
+      // a Priestess heals the monsters near her: a soft green-gold light on each of them
+      this.pfx.spawn('holy/heal', ev.x, ev.y + 2, { scale: 0.5, seed: 1 + Math.floor(Math.random() * 50) });
+      for (const [hx, hy] of ev.pts || []) this.pfx.spawn('holy/heal', hx, hy + 2, { scale: 0.4, seed: 1 + Math.floor(Math.random() * 50) });
+      sfx.play('heal', 0.4);
+      return;
+    }
     if (ev.type === 'bspell') {
       // the Warlock spells land: a dark burst and a flash of mana in every red circle
       for (const [sx, sy] of ev.spots || []) {
@@ -2805,12 +2837,12 @@ export class Game {
       if (wood) this.spendWood(wood);
       this.weapons.owned[id] = true;
       this.weapons.equipped = id;
-      sfx.play('levelup');
+      sfx.play('upgrade');
       this.onToast?.(`⚔️ ${info.name} bought and equipped!`);
     } else if (kind === 'wequip') {
       if (!this.weapons.owned[id]) return;
       this.weapons.equipped = id;
-      sfx.play('buy');
+      sfx.play('equip');
       this.onToast?.(`⚔️ ${weaponById(id).name} equipped.`);
     } else if (kind === 'throw') {
       const info = THROW_SHOP.find((t) => t.item === id);
@@ -2952,7 +2984,7 @@ export class Game {
     }
     const next = have[(have.findIndex((w) => w.id === this.weapons.equipped) + 1) % have.length];
     this.weapons.equipped = next.id;
-    sfx.play('buy');
+    sfx.play('equip');
     this.onToast?.(`⚔️ ${next.name} equipped.`);
     this.emitHud();
   }
@@ -2969,7 +3001,7 @@ export class Game {
     if (!info) return;
     if (this.weapons.owned[id]) {
       this.weapons.equipped = id;
-      sfx.play('buy');
+      sfx.play('equip');
       this.onToast?.(`⚔️ ${info.name} equipped.`);
       return;
     }
@@ -2980,7 +3012,7 @@ export class Game {
     }
     this.weapons.owned[id] = true;
     this.weapons.equipped = id;
-    sfx.play('levelup');
+    sfx.play('upgrade');
     this.onToast?.(`⚔️ ${info.name} bought and equipped!`);
   }
 
@@ -3671,6 +3703,7 @@ export class Game {
   // A monster that is a pixelfx critter: its baked loop, mirrored to face the way it goes, with a health bar and level like the others
   drawPfxMonster(ctx, m, def) {
     const b = bakedLoop(def.pfx, def.pfxOpts || {}, 15);
+    const mid = Number(String(m.id).replace(/\D/g, '')) || 0; // (a wild monster's id is a string like w12)
     const x = Math.round(m.x);
     const y = Math.round(m.y);
     const dead = m.state === 'dead';
@@ -3682,9 +3715,9 @@ export class Game {
     ctx.ellipse(x, y, 7 * K * 1.6, 2.5, 0, 0, Math.PI * 2);
     ctx.fill();
     if (b) {
-      const bob = flyer ? Math.sin(m.anim * 4 + m.id) * 1.5 : 0;
+      const bob = flyer ? Math.sin(m.anim * 4 + mid) * 1.5 : 0;
       const alpha = dead ? Math.max(0, 1.2 - m.t * 2.4) : 1;
-      const at = m.anim + m.id * 0.37;
+      const at = m.anim + mid * 0.37;
       drawBaked(ctx, b, x, y - bob, at, m.face < 0, alpha, K);
       if (m.state === 'hurt' && !dead) {
         ctx.globalCompositeOperation = 'lighter';
@@ -4555,6 +4588,8 @@ export class Game {
       // the server sends everyone back to the waiting room once the cheering is over
       this.celebrate(m.id, m.name, 6.9, 'Back to the room in a moment…');
       if (m.team !== undefined && m.team !== null && this.celeb) this.celeb.team = m.team; // a team won: everyone on it shares the cheer
+    } else if (m.t === 'fx' && m.kind === 'pfx') {
+      if (typeof m.fid === 'string' && Number.isFinite(m.x) && Number.isFinite(m.y)) this.pfx.spawn(m.fid, m.x, m.y, { scale: Math.min(2, m.s || 1), angle: m.a || 0, seed: 1 + Math.floor(Math.random() * 50) });
     } else if (m.t === 'fx' && m.kind === 'shield') {
       const r = this.remotes.get(m.id);
       if (r) r.shield = SHIELD_DUR;
@@ -4847,7 +4882,7 @@ export class Game {
         else this.seatUpdate(dt);
       }
       if (this.boatPass) this.passengerUpdate(dt);
-      const still = (this.dead && this.duelActive()) || this.celeb || this.fade || !!this.seat || !!this.boatPass; // (downed: you drift about as a ghost until you are back on your feet, except in a duel)
+      const still = (this.dead && this.duelActive()) || this.celeb || this.fade || !!this.seat || !!this.boatPass || !!this.elem?.charging; // (downed: you drift about as a ghost until you are back on your feet, except in a duel)
       let dx = still ? 0 : (this.keys.has('right') ? 1 : 0) - (this.keys.has('left') ? 1 : 0);
       let dy = still ? 0 : (this.keys.has('down') ? 1 : 0) - (this.keys.has('up') ? 1 : 0);
       const dashing = !!this.combat.dash; // the dash moves the hero itself
@@ -4895,7 +4930,7 @@ export class Game {
         if (this.exhausted && this.stamina >= 0.3) this.exhausted = false;
       }
       const ride = this.boat ? 1.4 : this.pets.pet?.rid ? 1.3 : this.mount ? (this.mount.type === 'chicken' ? 1.35 : 1.15) : 1; // a chicken hurries, a cow ambles along
-      const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1) * (this.cutscene ? 0.5 : 1); // (a stroll in the story)
+      const speed = SPEED * ride * (this.sprinting ? SPRINT_MULT : 1) * (this.inWater ? WADE_SLOWDOWN : 1) * (this.cutscene ? 0.5 : 1) * (this.elem?.speedMul() || 1); // (a stroll in the story)
       this.animT += dt * (this.sprinting ? 1.7 : 1);
       if (p.moving && !dashing) {
         if (dx && dy) {
@@ -4976,6 +5011,7 @@ export class Game {
       if (this.reviveFlash > 0) this.reviveFlash = Math.max(0, this.reviveFlash - dt * 1.3);
       this.updateWallHold(dt);
       this.combat.update(dt);
+      this.elem?.update(dt);
       this.trackHurt(dt);
       if (!this.balls && !this.demo && this.home) this.balls = new Balls(this);
       this.balls?.update(dt);
@@ -5094,6 +5130,7 @@ export class Game {
       marks: this.duelMarks(),
       wave: this.wave?.hudState() || null,
       airPlan: this.airPlan ? this.airPlanView() : null,
+      elem: this.elem ? this.elem.hud() : null,
       travel: this.travelling ? { vehicle: this.travelling.vehicle, dest: this.travelling.dest, destName: this.travelling.destName, left: Math.max(0, this.travelling.dur - this.travelling.t), dur: this.travelling.dur, wave: this.travelling.wave } : null,
       fight: this.bots?.scoreboard() || null,
       duel: this.duelHud(),
@@ -6929,6 +6966,7 @@ export class Game {
     if (this.xpOrbs.length) this.drawXpOrbs(ctx);
     if (this.reviveFxs.length) this.drawReviveFxs(ctx);
     if (this.wave) this.drawWaveExtras(ctx);
+    this.elem?.draw(ctx, this.t);
     this.pfx.drawWorld(ctx, { x0: camX, y0: camY, x1: camX + this.viewW, y1: camY + this.viewH });
     this.drawCloudShadows(camX, camY);
 

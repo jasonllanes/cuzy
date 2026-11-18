@@ -66,6 +66,8 @@ Object.assign(MONSTERS, {
   sv_werebear_alpha: { name: 'Alpha Werebear', tiny: 'werebear', kind: 'walk', hp: 380, speed: 36, dmg: 5, sd: 16, scale: 2, kb: 0.05, boss: true, agile: true, reach: 28, swings: ['atk1', 'atk2', 'atk3'] },
   // a wizard that is a mini boss: it raises zombies, throws bolts and casts a spell on the ground (a red circle shows where, first)
   sv_warlock: { name: 'Zombie Warlock', tiny: 'wizard', kind: 'shoot', hp: 130, speed: 20, dmg: 3, sd: 4, range: 120, rate: 2.2, bolt: true, summon: 'z_small', scale: 1.5, boss: true, caster: true, mini: true, swings: ['atk1', 'atk2'] },
+  // the Priestess: she stays back and heals the other monsters near her (a third of their health, every few seconds): kill her first
+  sv_priestess: { name: 'Priestess', tiny: 'priest', kind: 'shoot', hp: 14, speed: 20, dmg: 1, sd: 1, range: 90, rate: 3, heals: true, swings: ['atk1'] },
   sv_werebear: { name: 'Werebear', tiny: 'werebear', kind: 'walk', hp: 170, speed: 20, dmg: 4, sd: 14, scale: 1.7, kb: 0.05, boss: true, reach: 24, swings: ['atk1', 'atk2', 'atk3'] },
 });
 
@@ -73,27 +75,29 @@ Object.assign(MONSTERS, {
 //   pfx: the effect that is the monster   pfxH: how tall it stands in pixels (for the health bar)   pfxOpts: its options (a palette...)
 Object.assign(MONSTERS, {
   fx_slime: { name: 'Toxic Slime', pfx: 'critters/slime', pfxH: 26, kind: 'walk', hp: 14, speed: 12, dmg: 2, sd: 4, kb: 0.4 },
-  fx_snake: { name: 'Viper', pfx: 'critters/snake', pfxH: 14, kind: 'walk', hp: 6, speed: 50, dmg: 1, sd: 2 },
   fx_frog: { name: 'Toad', pfx: 'critters/frog', pfxH: 20, kind: 'walk', hp: 9, speed: 30, dmg: 1, sd: 2 },
   fx_wisp: { name: 'Wisp', pfx: 'critters/wisp', pfxH: 30, kind: 'fly', hp: 5, speed: 54, dmg: 1, sd: 1 },
   fx_ghost: { name: 'Haunt', pfx: 'critters/ghost', pfxH: 34, kind: 'fly', hp: 12, speed: 24, dmg: 2, sd: 3 },
   fx_skull: { name: 'Flame Skull', pfx: 'critters/flying-skull', pfxH: 38, kind: 'fly', hp: 8, speed: 46, dmg: 2, sd: 2 },
   fx_eye: { name: 'Watching Eye', pfx: 'critters/eyeball', pfxH: 30, kind: 'shoot', fly: true, hp: 10, speed: 18, dmg: 1, sd: 2, range: 96, rate: 2.4, bolt: true },
+  fx_bat: { name: 'Glow Bat', pfx: 'critters/bat', pfxH: 26, kind: 'fly', hp: 5, speed: 52, dmg: 1, sd: 1 },
+  fx_bird: { name: 'Sky Hawk', pfx: 'critters/bird', pfxH: 24, kind: 'fly', hp: 6, speed: 46, dmg: 1, sd: 1 },
+  fx_butterfly: { name: 'Spirit Moth', pfx: 'critters/butterfly', pfxH: 22, kind: 'fly', hp: 3, speed: 26, dmg: 0.5, sd: 1 },
   fx_jelly: { name: 'Stinger Jelly', pfx: 'critters/jellyfish', pfxH: 36, kind: 'fly', hp: 10, speed: 16, dmg: 1, sd: 2 },
 });
 
 // ...and they join the waves from the second one on
 const FX_WAVES = [
   [],
-  [['fx_snake', 2]],
+  [['fx_wisp', 2]],
   [['fx_slime', 2], ['fx_wisp', 2]],
-  [['fx_frog', 3], ['fx_ghost', 1], ['fx_snake', 2]],
-  [['fx_skull', 3], ['fx_eye', 1], ['fx_slime', 2]],
-  [['fx_jelly', 2], ['fx_wisp', 3], ['fx_eye', 1], ['fx_frog', 2]],
-  [['fx_slime', 3], ['fx_ghost', 2], ['fx_skull', 3], ['fx_snake', 3]],
-  [['fx_eye', 2], ['fx_jelly', 3], ['fx_wisp', 4], ['fx_frog', 3]],
-  [['fx_ghost', 3], ['fx_skull', 4], ['fx_slime', 4], ['fx_eye', 2]],
-  [['fx_ghost', 3], ['fx_skull', 4], ['fx_jelly', 3], ['fx_eye', 3], ['fx_snake', 4]],
+  [['fx_frog', 3], ['fx_ghost', 1], ['sv_priestess', 1]],
+  [['fx_skull', 3], ['fx_eye', 1], ['fx_slime', 2], ['sv_priestess', 1]],
+  [['fx_jelly', 2], ['fx_wisp', 3], ['fx_eye', 1], ['fx_frog', 2], ['sv_priestess', 2]],
+  [['fx_slime', 3], ['fx_ghost', 2], ['fx_skull', 3], ['sv_priestess', 2]],
+  [['fx_eye', 2], ['fx_jelly', 3], ['fx_wisp', 4], ['fx_frog', 3], ['sv_priestess', 2]],
+  [['fx_ghost', 3], ['fx_skull', 4], ['fx_slime', 4], ['fx_eye', 2], ['sv_priestess', 3]],
+  [['fx_ghost', 3], ['fx_skull', 4], ['fx_jelly', 3], ['fx_eye', 3], ['sv_priestess', 3]],
 ];
 
 export const MONSTER_IDS = Object.keys(MONSTERS);

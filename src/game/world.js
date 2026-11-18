@@ -1,5 +1,5 @@
 import { fbm, hash2, hashString, smoothstep } from './rng';
-import { isArenaSeed, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, isTravelSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble, stripTravel } from './maps';
+import { isArenaSeed, isElemSeed, stripElem, isEndlessSeed, isEscapeSeed, isPitchSeed, isRumbleSeed, isTravelSeed, mapInfo, splitSeed, stripArena, stripEndless, stripEscape, stripPitch, stripRumble, stripTravel } from './maps';
 import { DREGION, KINDS, ZONE_TILE0, ZONE_TILE1, buildLayout, tierOf, zoneOf, RIFTS } from './dungeon';
 import { APOC_DECOR, APOC_PROPS, DEPOT_PROPS, APOC_TREES, FORAGE_APOC, apocSize } from './apoc';
 import { addV2Chunk, isV2Seed, stripV2 } from './v2world';
@@ -79,8 +79,9 @@ export class World {
     this.arena = theme !== 'apoc' && !waves && (isArenaSeed(seedStr) || this.pitch); // the Duel colosseum (a whole world of it); the pitch is built the same way
     this.hasArena = theme !== 'apoc' && !waves; // (Free Roam worlds have the Colosseum far off too, where the duels of a running round are fought)
     this.ac = this.arena ? { x: 0, y: 0 } : { x: ARENA_ZONE, y: ARENA_ZONE }; // its middle, in tiles
-    this.escape = theme !== 'apoc' && !waves && isEscapeSeed(seedStr); // the Escape zone: loot, zombies and a chopper
-    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(stripTravel(seedStr))))))));
+    this.escape = theme !== 'apoc' && !waves && isEscapeSeed(seedStr);
+    this.elem = theme !== 'apoc' && !waves && isElemSeed(seedStr); // the Elemental Lands: no weapons, an element and its skills // the Escape zone: loot, zombies and a chopper
+    this.seedStr = stripEndless(stripV2(stripEndless(stripArena(stripPitch(stripRumble(stripEscape(stripElem(stripTravel(seedStr)))))))));
     // Halloween: Free Roam's "haunted-" worlds and Survival's Halloween Graveyard map, dressed with the Graveyard pack
     this.hw = theme === 'apoc' ? !!mapInfo(splitSeed(this.seedStr).map).halloween : /^haunted-/.test(this.seedStr);
     this.v2 = theme !== 'apoc' && !waves && (isV2Seed(seedStr) || this.hw || this.escape); // Free Roam V2: the same world with the Modern Exteriors props on top
@@ -1128,6 +1129,7 @@ export class World {
   // boss (or a mini boss) asleep in the middle, always well away from where everyone starts. The same region always gives the
   // same answer for a seed. Returns { id, kind: 'boss' | 'mini', x, y, r } in tiles, or null.
   bossSite(brx, bry) {
+    if (this.elem) return null;
     const key = `${brx},${bry}`;
     if (this.bsites.has(key)) return this.bsites.get(key);
     let site = null;
@@ -1330,6 +1332,7 @@ export class World {
   // A monster den, if this chunk has one: a marked patch of ground where monsters wait, a few at a time, for you to come close. They
   // are in the same place every time (and on screen when you get there), unlike the ones that wander in from outside the screen.
   denAt(cx, cy) {
+    if (this.elem) return null; // (no monster dens in the Elemental Lands: the critters turn up by themselves)
     if (this.apoc || this.waveMode || this.arena || this.depot || zoneOf(cx, cy)) return null;
     const key = `${cx},${cy}`;
     if (this.denCache.has(key)) return this.denCache.get(key);
@@ -1348,6 +1351,7 @@ export class World {
   // A skeleton camp, if this chunk has one: three of them stand guard on an open patch of meadow.
   // The same chunk always gives the same answer for a seed.
   campAt(cx, cy) {
+    if (this.elem) return null;
     if (this.arena || this.escape) return null;
     if (hash2(cx, cy, this.seed + 71) > 0.2) return null;
     const tx = cx * CHUNK + 4 + Math.floor(hash2(cx, cy, this.seed + 72) * (CHUNK - 8));

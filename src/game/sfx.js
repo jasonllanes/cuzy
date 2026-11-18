@@ -33,6 +33,7 @@ function ensure() {
     master = ctx.createGain();
     master.gain.value = MASTER * volume;
     master.connect(ctx.destination);
+    loadBank();
     // one second of white noise, reused by every whoosh and crunch
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0);
@@ -110,6 +111,14 @@ const SOUNDS = {
     noise({ dur: 0.14, vol: 0.34, f0: 5200, f1: 900, q: 0.8 });
     noise({ dur: 1.8, vol: 0.55, f0: 420, f1: 55, q: 0.6, at: 0.04 });
     tone({ type: 'sawtooth', f0: 72, f1: 26, dur: 1.6, vol: 0.3, at: 0.06 });
+  },
+  zap: () => {
+    noise({ dur: 0.12, vol: 0.3, f0: 6000, f1: 1500, q: 1.5 });
+    tone({ type: 'sawtooth', f0: 1400, f1: 300, dur: 0.14, vol: 0.18 });
+  },
+  e_lightning: () => {
+    noise({ dur: 0.12, vol: 0.3, f0: 6000, f1: 1500, q: 1.5 });
+    tone({ type: 'sawtooth', f0: 1400, f1: 300, dur: 0.14, vol: 0.18 });
   },
   plasma: () => {
     tone({ type: 'sawtooth', f0: 900, f1: 220, dur: 0.16, vol: 0.2 });
@@ -199,13 +208,90 @@ const SOUNDS = {
   alarm: () => [0, 0.16].forEach((at, i) => tone({ type: 'sawtooth', f0: i ? 520 : 700, dur: 0.14, vol: 0.12, at })),
 };
 
+
+// ---- recorded sound effects (public/assets/sfx). A name listed here plays one of its recordings (a different one each time, with a tiny pitch change);
+// until they have loaded, or if one is missing, the synthesised version above is used instead. f = files, v = volume, r = pitch.
+const BANK = {
+  swing: { f: ['sword_light', 'sword_slice', 'swipe'], v: 0.7 },
+  hit: { f: ['punch', 'punch_2', 'punch_3', 'kick'], v: 0.65 },
+  hurt: { f: ['hurt'], v: 0.8 },
+  block: { f: ['sword_clash', 'sword_clash_2'], v: 0.7 },
+  throw: { f: ['throw'], v: 0.7 },
+  gun: { f: ['shot_muffled'], v: 0.9 },
+  boom: { f: ['explosion_medium', 'explosion_large'], v: 0.8 },
+  explosion: { f: ['explosion_small', 'explosion_medium', 'explosion_quick'], v: 0.7 },
+  splat: { f: ['splat_quick', 'crunch_splat', 'splat_double_quick'], v: 0.7 },
+  dash: { f: ['whoosh_2'], v: 0.6 },
+  coin: { f: ['coin', 'coins_gather_quick'], v: 0.55 },
+  pickup: { f: ['item_equip'], v: 0.6 },
+  heal: { f: ['power_up'], v: 0.6 },
+  levelup: { f: ['power_up_2'], v: 0.7 },
+  skeletonDie: { f: ['bone_snap'], v: 0.8 },
+  monsterDie: { f: ['squelching_3', 'crunch_splat'], v: 0.7 },
+  death: { f: ['lose'], v: 0.8 },
+  chest: { f: ['gem_collect'], v: 0.7 },
+  eat: { f: ['munching_food'], v: 0.6 },
+  drink: { f: ['drink_slurp'], v: 0.6 },
+  burn: { f: ['fire_lighting'], v: 0.6 },
+  recall: { f: ['ghost'], v: 0.7 },
+  // weapons
+  equip: { f: ['weapon_equip_short', 'weapon_equip'], v: 0.7 },
+  unequip: { f: ['weapon_unequip'], v: 0.6 },
+  unsheath: { f: ['sword_unsheath'], v: 0.6 },
+  wpickup: { f: ['weapon_pick_up'], v: 0.7 },
+  wdrop: { f: ['weapon_drop'], v: 0.7 },
+  upgrade: { f: ['weapon_upgrade'], v: 0.75 },
+  // the Elemental Lands: one bolt sound per element, and the rest of the skills
+  e_fire: { f: ['fire_lighting'], v: 0.6, r: 1.25 },
+  e_ice: { f: ['ice_in_water'], v: 0.7, r: 1.3 },
+  e_water: { f: ['water_drop_medium', 'water_splashing'], v: 0.7 },
+  e_air: { f: ['air_burst'], v: 0.7 },
+  e_earth: { f: ['crunch_quick', 'harsh_thud'], v: 0.7 },
+  e_arcane: { f: ['power_up_2'], v: 0.45, r: 1.6 },
+  e_nature: { f: ['elastic_twang'], v: 0.7 },
+  e_blink: { f: ['jump_square'], v: 0.5 },
+  e_block: { f: ['grow_big'], v: 0.6 },
+  e_charge: { f: ['power_up'], v: 0.5, r: 0.7 },
+  e_ult: { f: ['explosion_large'], v: 0.85 },
+};
+const bufs = {};
+let bankLoading = false;
+function loadBank() {
+  if (bankLoading) return;
+  bankLoading = true;
+  const base = import.meta.env.BASE_URL || '/';
+  const files = new Set(Object.values(BANK).flatMap((e) => e.f));
+  for (const f of files) {
+    fetch(`${base}assets/sfx/${f}.wav`)
+      .then((r) => r.arrayBuffer())
+      .then((b) => ctx.decodeAudioData(b))
+      .then((buf) => {
+        bufs[f] = buf;
+      })
+      .catch(() => {});
+  }
+}
+function playSample(name) {
+  const e = BANK[name];
+  const have = e ? e.f.filter((f) => bufs[f]) : [];
+  if (!have.length) return false;
+  const src = ctx.createBufferSource();
+  src.buffer = bufs[have[Math.floor(Math.random() * have.length)]];
+  src.playbackRate.value = (e.r || 1) * (0.94 + Math.random() * 0.12);
+  const g = ctx.createGain();
+  g.gain.value = e.v ?? 0.7;
+  src.connect(g).connect(out);
+  src.start();
+  return true;
+}
+
 const lastAt = {};
 
 export const sfx = {
   // `vol` (0..1) quietens far-away events; the same sound never fires twice within 45ms
   play(name, vol = 1) {
     const fn = SOUNDS[name];
-    if (!fn || vol <= 0.02 || !ready()) return;
+    if ((!fn && !BANK[name]) || vol <= 0.02 || !ready()) return;
     const now = performance.now();
     if (now - (lastAt[name] || 0) < 45) return;
     lastAt[name] = now;
@@ -213,7 +299,7 @@ export const sfx = {
       out = ctx.createGain();
       out.gain.value = Math.min(1, vol);
       out.connect(master);
-      fn();
+      if (!playSample(name)) fn?.();
     } catch {
       /* audio is a nicety; never let it break the game */
     }

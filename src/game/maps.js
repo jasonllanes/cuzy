@@ -53,6 +53,7 @@ export function mapNameOf(seed) {
   if (isRumbleSeed(seed)) return 'Beach Rumble Pitch';
   if (isPitchSeed(seed)) return 'Beach Ball Pitch';
   if (isEscapeSeed(seed)) return 'Escape Zone';
+  if (isElemSeed(seed)) return 'Elemental Lands';
   const { base, map } = splitSeed(seed);
   const free = FREE_MAPS.find((m) => m.seed === base);
   if (free) return free.name;
@@ -81,6 +82,10 @@ export const stripPitch = (s) => String(s).replace(/~pitch$/, '');
 export const RUMBLE_SEED = 'beachrumble-1~rumble';
 export const isRumbleSeed = (s) => /~rumble$/.test(String(s));
 export const stripRumble = (s) => String(s).replace(/~rumble$/, '');
+// The Elemental Lands: Free Roam with no weapons: you pick an element and level up its skills (an Open World map, so every biome is there)
+export const ELEM_SEED = 'mixed-808~elem';
+export const isElemSeed = (s) => /~elem$/.test(String(s));
+export const stripElem = (s) => String(s).replace(/~elem$/, '');
 // The Escape zone: an open world full of buildings to loot, zombies, and a chopper that arrives somewhere far away (Free Roam room with Escape on)
 export const ESCAPE_SEED = 'asphalt-358~esc';
 export const isEscapeSeed = (s) => /~esc$/.test(String(s));

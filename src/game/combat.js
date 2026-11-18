@@ -24,6 +24,8 @@ const DROP_LOOP = {
   hp: { id: 'pickups/potion' },
   stam: { id: 'pickups/potion', o: { palette: PAL.leaf } },
   key: { id: 'pickups/key-glint' },
+  mana: { id: 'pickups/potion', o: { palette: ['#06142a', '#0c2e5c', '#134f9e', '#1f7de0', '#4fb0ff', '#8fd4ff', '#cdeeff', '#ffffff'] } },
+  star: { id: 'pickups/power-star' },
 };
 const BEAM_TIER = { rare: PAL.ice, epic: PAL.arcane, legendary: PAL.gold };
 import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
@@ -68,7 +70,14 @@ const ESC_ZOMBIES = ['z_small', 'z_small', 'z_small', 'z_axe', 'z_runner', 'z_ar
 const ESC_FOES = { day: ESC_ZOMBIES, night: ESC_ZOMBIES, boss: ['z_armor'], mini: ['z_armor', 'z_axe'] };
 // what a zombie of the Escape zone sometimes leaves behind: [item, chance, min, max] (bullets only now and then)
 const ESC_KILL_LOOT = [['ammo', 0.14, 4, 10], ['truffle', 0.025, 1, 1], ['bandage', 0.04, 1, 1]];
-const foesAt = (world, x, y) => (world.escape ? ESC_FOES : world.mixed ? BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover : ALL_FOES);
+// The Elemental Lands: only the pixelfx critters, a different crowd by day and by night
+const ELEM_FOES = {
+  day: ['fx_slime', 'fx_frog', 'fx_butterfly', 'fx_wisp', 'fx_bird', 'fx_jelly', 'fx_slime', 'fx_frog'],
+  night: ['fx_bat', 'fx_ghost', 'fx_skull', 'fx_eye', 'fx_wisp', 'fx_bat', 'fx_ghost', 'fx_jelly'],
+  boss: ['fx_skull'],
+  mini: ['fx_eye', 'fx_ghost'],
+};
+const foesAt = (world, x, y) => (world.elem ? ELEM_FOES : world.escape ? ESC_FOES : world.mixed ? BIOME_FOES[biomeOf(world, x, y)] || BIOME_FOES.clover : ALL_FOES);
 
 // Who fights whom: monsters of different camps attack each other when they meet. A type that is in no camp stays out of it.
 const CAMPS = {
@@ -2064,7 +2073,7 @@ export class Combat {
 
     if (!this.g.wave && !this.g.inside) {
       // skeletons roam the free world only (and never come into your house, or follow you underground)
-      if (!this.g.dungeon) {
+      if (!this.g.dungeon && !this.g.elem) {
         this.updateSpawns(dt);
         this.updateCamps(dt);
         this.updateDens(dt);
@@ -2208,12 +2217,13 @@ export class Combat {
       const night = this.g.darkness();
       const cap = night > 0.5 ? 5 : night > 0.15 ? 3 : 2;
       if (this.g.escape) this.updateEscape(3 + Math.random() * 3);
+      else if (this.g.elem) this.updateElemSpawns();
       else {
         if (!this.g.dungeon && this.wilds.filter((w) => w.state !== 'dead').length < cap) this.spawnWild(night > 0.15);
         if (!this.g.dungeon && !this.g.wave && !this.g.world.depot) this.updateEvents(night);
       }
     }
-    if (!this.g.dungeon) this.updateBossZones(dt);
+    if (!this.g.dungeon && !this.g.elem) this.updateBossZones(dt);
     this.wilds = this.wilds.filter((w) => this.updateWild(w, dt));
     if (this.wildQ?.length) this.wilds.push(...this.wildQ.splice(0));
     this.updateWildShots(dt);
@@ -2387,6 +2397,41 @@ export class Combat {
       this.wilds.push(this.makeWild(type, x, y, rollMonsterLevel(this.dayLevel())));
       return;
     }
+  }
+
+  // The Elemental Lands: the critters turn up all the time, now and then two at once, close enough to see, each with a spawn effect
+  updateElemSpawns() {
+    const g = this.g;
+    if (g.dead || g.inside || g.dungeon || !g.elem?.el) return;
+    const alive = this.wilds.filter((w) => w.state !== 'dead').length;
+    const cap = Math.min(22, 9 + g.level);
+    if (alive >= cap) return;
+    const night = g.darkness() > 0.15;
+    const n = Math.random() < 0.4 ? 2 : 1;
+    for (let k = 0; k < n; k++) this.spawnElemMob(night);
+  }
+
+  spawnElemMob(night) {
+    const { world, player: p } = this.g;
+    const foes = ELEM_FOES;
+    for (let i = 0; i < 14; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const d = 120 + Math.random() * 110;
+      const x = p.x + Math.cos(ang) * d;
+      const y = p.y + Math.sin(ang) * d;
+      const type = pickOf(night ? foes.night : foes.day);
+      const flyer = MONSTERS[type].kind === 'fly' || MONSTERS[type].fly;
+      const tx = Math.floor(x / 16);
+      const ty = Math.floor(y / 16);
+      if (!flyer && (world.type(tx, ty) === WATER || world.isCleared(tx, ty) || world.isBlocked(x - 4, y - 4, 8, 4))) continue;
+      if (Math.hypot(x - this.g.home.x, y - this.g.home.y) < 70) continue;
+      const w = this.makeWild(type, x, y, rollMonsterLevel(Math.max(1, Math.round(this.g.level * 0.6))));
+      w.cd = 1.4; // (it takes a moment to wake up)
+      this.wilds.push(w);
+      this.g.pfx?.spawn(pickOf(['spawn/spawn-portal', 'spawn/summon-rise', 'spawn/egg-hatch']), x, y + 4, { scale: 0.4, seed: 1 + Math.floor(Math.random() * 50) });
+      return true;
+    }
+    return false;
   }
 
   // A chest (with a weapon in it) appears where a mini boss or a boss fell. `rank`: 2 = red and gold, 3 = jewelled.
@@ -2829,9 +2874,10 @@ export class Combat {
       if (quiet) return;
       if (!this.g.wave && !this.g.dungeon && !this.g.escape) {
         const big = w.nightBoss || w.miniBoss || def.boss;
-        if (big || Math.random() < 0.025) {
+        if (!this.g.elem && (big || Math.random() < 0.025)) {
           const wid = this.g.pickWeapon(w.nightBoss || def.boss ? 3 : w.miniBoss ? 2 : 0);
           if (wid) this.drops.push({ x: w.x, y: w.y - 4, z: 8, vx: 14, vy: 6, vz: 120, fly: true, burst: true, id: 'weapon', wid, qty: 1, age: 0, nopick: 0.5 }); // (a weapon falls)
+          sfx.play('wdrop', 0.8);
         }
       }
       this.kills++;
@@ -2848,7 +2894,8 @@ export class Combat {
         this.shareCoins(w.x, w.y, 24 + Math.floor(Math.random() * 14), 5);
         for (const [id, qty] of [['gem', 2], ['gold', 3]]) this.drops.push({ x: w.x + (Math.random() - 0.5) * 16, y: w.y + (Math.random() - 0.5) * 8, id, qty, age: 0 });
       }
-      for (const [id, chance, min, max] of w.minionOf ? [] : this.g.escape ? ESC_KILL_LOOT : def.crab ? CRAB_LOOT : WILD_LOOT) {
+      if (this.g.elem) this.g.elem.onMobDie(w, def);
+      for (const [id, chance, min, max] of w.minionOf || this.g.elem ? [] : this.g.escape ? ESC_KILL_LOOT : def.crab ? CRAB_LOOT : WILD_LOOT) {
         if (Math.random() < chance) {
           const qty = min + Math.floor(Math.random() * (max - min + 1)) + (id === 'coin' ? Math.floor((w.lv || 1) / 3) : 0); // (higher levels pay more)
           if (id === 'coin' && this.g.mp) this.shareCoins(w.x, w.y, qty, 1);
@@ -3327,6 +3374,7 @@ export class Combat {
       return;
     }
     this.cancelRecall('Recall cancelled: you got hit.');
+    this.g.elem?.onHurt();
     sfx.play('hurt');
     this.hp -= n;
     this.invuln = invuln;
@@ -3583,6 +3631,20 @@ export class Combat {
   updateDrop(d, dt) {
     if (!!d.ins !== !!this.g.inside) return true; // things on your house floor wait there until you are in the house
     d.age += dt;
+    if (d.em) {
+      // an Elemental Lands pickup (mana potion, power star): walk into it and its power is yours
+      const pp = this.g.player;
+      const dd = this.g.dead ? 1e6 : Math.hypot(pp.x - d.x, pp.y - 4 - d.y);
+      if (dd < 90 && d.age > 0.4) {
+        d.x += ((pp.x - d.x) / (dd || 1)) * 110 * dt;
+        d.y += ((pp.y - 4 - d.y) / (dd || 1)) * 110 * dt;
+      }
+      if (dd < 10 && d.age > 0.4) {
+        this.g.elem?.pickup(d.em);
+        return false;
+      }
+      return d.age < 60;
+    }
     if (d.fly) {
       // bursting out of a chest: up, out and down with one small bounce
       d.x += d.vx * dt;
@@ -3630,6 +3692,7 @@ export class Combat {
       this.magnet(d, dx, dy, dist, dt);
       if (dist < 10) {
         this.g.gainWeapon(d.wid);
+        sfx.play('wpickup');
         return false;
       }
       return true;
@@ -4063,6 +4126,7 @@ export class Combat {
         if (beam) drawBaked(ctx, beam, d.x, d.y + 2, t + d.x * 0.1, false, 0.8);
       }
       const b = loop && !d.wid ? bakedLoop(loop.id, loop.o || {}, 15) : null;
+      if (d.em && !b) return; // (its picture is still loading)
       if (b) {
         drawBaked(ctx, b, d.x, d.y - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 0.8), t + d.x * 0.07);
         return;

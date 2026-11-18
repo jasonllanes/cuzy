@@ -10,7 +10,7 @@
 // It looks exactly like Net (game/net.js) from the outside, so the game does not care which one it has.
 
 import { TEAMS, TEAM_COUNTS } from './teams.js';
-import { ARENA_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, seedForMode, seedWithMap, withRoll } from './maps.js';
+import { ARENA_SEED, ELEM_SEED, ESCAPE_SEED, PITCH_SEED, RUMBLE_SEED, seedForMode, seedWithMap, withRoll } from './maps.js';
 
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to keep codes easy to read out loud
 const HOURS_PER_SECOND = 24 / 360; // keep in step with the client's day length
@@ -38,7 +38,7 @@ const cleanMins = (v) => (Number.isFinite(Number(v)) ? Math.min(10, Math.max(1, 
 const newId = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-3);
 const newCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins', 'private'];
+const CFG_KEYS = ['name', 'seed', 'max', 'mode', 'difficulty', 'pvp', 'winBy', 'target', 'allowLate', 'allowThrow', 'allowMelee', 'allowCheats', 'streakMonsters', 'teams', 'startMoney', 'startWood', 'maxStats', 'waveStart', 'allowVisit', 'waves', 'duel', 'bet', 'duelMins', 'fighters', 'duelPick', 'duelEvery', 'soccer', 'rumble', 'matchMins', 'escape', 'escapeMins', 'extractMins', 'private', 'elem'];
 const pickCfg = (room) => Object.fromEntries(CFG_KEYS.map((k) => [k, room[k]]));
 
 function friendly(error) {
@@ -344,7 +344,7 @@ export class SupaNet {
     if (!this.sb) throw new Error(this.offlineText);
   }
 
-  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, rumble, matchMins, escape, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, maxStats, isPrivate, player }) {
+  async create({ name, seed, max, pvp, mode, difficulty, winBy, allowLate, allowThrow, allowMelee, allowCheats, allowVisit, waves, duel, soccer, rumble, matchMins, escape, elem, escapeMins, extractMins, duelEvery, bet, duelMins, streakMonsters, teams, target, startMoney, startWood, maxStats, isPrivate, player }) {
     this.stopLobby();
     await this.leave();
     if (!this.sb) await this.connect();
@@ -376,6 +376,7 @@ export class SupaNet {
       duel: false, // a Free Roam 1v1 in the colosseum, against the clock (kept in the channel)
       bet: cleanBet(bet), // the players who are not in a duel may bet on who wins it (1 = on)
       duelMins: cleanMins(duelMins),
+      elem: false, // the Elemental Lands: no weapons, an element and its skills (the seed says so too)
       escape: false, // the Escape zone: loot, zombies and a chopper to find (kept in the channel)
       escapeMins: cleanEsc(escapeMins, 3, 30, 10), // minutes until the chopper lands
       extractMins: cleanEsc(extractMins, 2, 15, 5), // minutes the chopper waits
@@ -400,6 +401,10 @@ export class SupaNet {
     if (free && escape === true) {
       this.cfg = cfg;
       this.setEscape(true);
+    }
+    if (free && elem === true && !escape) {
+      this.cfg = cfg;
+      this.setElem(true);
     }
     const startHour = mode === 'survival' ? 17.3 : cfg.escape ? 16.5 : START_HOUR; // Survival begins at dusk (and the Escape zone a little before)
     const t0 = Date.now();
@@ -1038,6 +1043,7 @@ export class SupaNet {
       case 'fx':
         if (m.kind === 'swing') this.bcast({ t: 'fx', id: this.me, kind: 'swing', a: num(m.a), w: clean(m.w, 12) });
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
+        else if (m.kind === 'pfx') this.bcast({ t: 'fx', id: this.me, kind: 'pfx', fid: /^[a-z]+\/[a-z-]+$/.test(String(m.fid)) ? String(m.fid) : '', x: num(m.x), y: num(m.y), s: Math.max(0.1, Math.min(2, num(m.s) || 1)), a: num(m.a) });
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', ...(m.it === 'wood' ? { it: 'wood' } : {}), lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });
         else if (m.kind === 'flame') this.bcast({ t: 'fx', id: this.me, kind: 'flame', x: num(m.x), y: num(m.y), a: num(m.a) });
@@ -1432,6 +1438,7 @@ export class SupaNet {
         if (cfg.duel) this.setDuel(false);
         if (cfg.soccer) this.setSoccer(false);
         if (cfg.escape) this.setEscape(false);
+        if (cfg.elem) this.setElem(false);
         cfg.mode = m.mode;
         cfg.seed = seedForMode(cfg.seed, m.mode);
         this.startHour = m.mode === 'survival' ? 17.3 : START_HOUR;
@@ -1445,7 +1452,14 @@ export class SupaNet {
         }
         this.reassignAll();
       }
+      if (cfg.mode === 'free' && typeof m.elem === 'boolean' && m.elem !== !!cfg.elem) {
+        if (m.elem && cfg.duel) this.setDuel(false);
+        if (m.elem && cfg.soccer) this.setSoccer(false);
+        if (m.elem && cfg.escape) this.setEscape(false);
+        this.setElem(m.elem);
+      }
       if (cfg.mode === 'free' && typeof m.escape === 'boolean' && m.escape !== !!cfg.escape) {
+        if (m.escape && cfg.elem) this.setElem(false);
         if (m.escape && cfg.duel) this.setDuel(false);
         if (m.escape && cfg.soccer) this.setSoccer(false);
         this.setEscape(m.escape);
@@ -1456,12 +1470,14 @@ export class SupaNet {
       }
       if (cfg.mode === 'free' && typeof m.duel === 'boolean' && m.duel !== !!cfg.duel) {
         if (m.duel && cfg.escape) this.setEscape(false);
+        if (m.duel && cfg.elem) this.setElem(false);
         if (m.duel && cfg.soccer) this.setSoccer(false);
         this.setDuel(m.duel);
       }
       if (cfg.mode === 'free' && typeof m.soccer === 'boolean' && m.soccer !== !!cfg.soccer) {
         if (m.soccer && cfg.duel) this.setDuel(false);
         if (m.soccer && cfg.escape) this.setEscape(false);
+        if (m.soccer && cfg.elem) this.setElem(false);
         this.setSoccer(m.soccer);
       }
       if (cfg.soccer && typeof m.rumble === 'boolean' && m.rumble !== !!cfg.rumble && !this.started) {
@@ -1548,6 +1564,20 @@ export class SupaNet {
       const p = this.preEscape || {};
       Object.assign(cfg, { escape: false, seed: p.seed && p.seed !== ESCAPE_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel'), teams: p.teams || 0, duelEvery: p.duelEvery || 0, startMoney: p.startMoney || 0, startWood: p.startWood || 0 });
       this.startHour = START_HOUR;
+      this.reassignAll();
+    }
+  }
+
+  // The Elemental Lands: Free Roam where everybody picks an element. No shop weapons, and everyone starts from nothing.
+  setElem(on) {
+    const cfg = this.cfg;
+    if (on) {
+      this.preElem = { seed: cfg.seed, pvp: cfg.pvp, winBy: cfg.winBy, target: cfg.target, teams: cfg.teams, maxStats: cfg.maxStats, startMoney: cfg.startMoney };
+      Object.assign(cfg, { elem: true, seed: ELEM_SEED, pvp: false, teams: 0, duelEvery: 0, maxStats: false, startMoney: 0, startWood: 0 });
+      this.reassignAll();
+    } else {
+      const p = this.preElem || {};
+      Object.assign(cfg, { elem: false, seed: p.seed && p.seed !== ELEM_SEED ? p.seed : seedForMode('sunny-meadow-101', cfg.mode), pvp: p.pvp ?? true, winBy: p.winBy || 'duel', target: p.target || defaultTarget('duel'), teams: p.teams || 0, maxStats: p.maxStats !== false, startMoney: p.startMoney || 0 });
       this.reassignAll();
     }
   }

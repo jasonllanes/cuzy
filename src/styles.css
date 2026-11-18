@@ -2037,3 +2037,62 @@ button.team-slot:hover:not(:disabled) { background: #fff; border-style: solid; }
 .air-plan-svg { position: absolute; inset: 0; }
 .air-plan-bar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; text-align: center; padding: 10px 16px; background: var(--paper); max-width: min(94vw, 560px); }
 .air-plan-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+
+/* the Elemental Lands */
+.elem-pick { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; background: rgba(8, 10, 24, 0.55); padding: 12px; overflow: auto; }
+.elem-pick-card { width: min(94vw, 640px); max-height: 92vh; overflow: auto; display: grid; gap: 10px; background: var(--paper); }
+.elem-pick-card h2 { margin: 0; }
+.elem-pick-card h2 small { font-size: 0.55em; font-weight: 600; opacity: 0.7; display: block; }
+.elem-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.elem-tile { display: grid; justify-items: center; gap: 2px; padding: 8px 4px; border: 3px solid transparent; border-radius: 12px; background: rgba(0, 0, 0, 0.06); cursor: pointer; font: inherit; }
+.elem-tile.on { border-color: var(--ec); background: color-mix(in srgb, var(--ec) 22%, transparent); }
+.elem-ico { font-size: 28px; }
+.elem-detail { border-left: 5px solid var(--ec); padding-left: 10px; }
+.elem-detail h3, .elem-detail p { margin: 0 0 4px; }
+.elem-detail ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 13px; }
+kbd { display: inline-block; min-width: 34px; text-align: center; padding: 1px 5px; border-radius: 6px; background: #2b2f45; color: #fff; font: 700 11px/1.5 monospace; }
+.elem-bar { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 60; display: grid; gap: 5px; justify-items: center; pointer-events: none; max-width: 96vw; }
+.elem-mana { position: relative; width: min(420px, 90vw); height: 20px; border-radius: 10px; background: rgba(8, 14, 40, 0.75); border: 2px solid #8fd0ff; overflow: hidden; }
+.elem-mana-fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#5fb8ff, #2a6fe0); transition: width 0.12s; }
+.elem-mana b { position: relative; display: block; text-align: center; font-size: 12px; line-height: 16px; color: #fff; text-shadow: 0 1px 2px #000; }
+.elem-bar.charging .elem-mana { box-shadow: 0 0 14px 3px #7ad0ff; }
+.elem-skills { display: flex; gap: 5px; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
+.elem-skill { position: relative; overflow: hidden; display: grid; justify-items: center; gap: 1px; width: 84px; padding: 4px 3px 5px; border-radius: 10px; border: 3px solid #555a78; background: rgba(15, 18, 40, 0.82); color: #fff; font: inherit; cursor: pointer; }
+.elem-skill b { font-size: 11px; line-height: 1.1; text-align: center; }
+.elem-skill small { font-size: 10px; opacity: 0.8; }
+.elem-skill.ready { border-color: var(--ec, #ffd24a); }
+.elem-skill.pts.ready { border-color: #ffd24a; animation: elemPulse 1.2s infinite; }
+.elem-skill.locked { opacity: 0.55; }
+.elem-skill.nomana b { color: #ff9a9a; }
+.elem-skill i { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.55); pointer-events: none; }
+@keyframes elemPulse { 50% { box-shadow: 0 0 10px 2px #ffd24a; } }
+.elem-up { display: grid; gap: 6px; }
+.elem-up-row { display: grid; grid-template-columns: 42px 1fr auto; gap: 8px; align-items: center; }
+.elem-up-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 640px) { .elem-skill { width: 62px; } .elem-skill b { font-size: 9px; } }
+
+/* picker + tutorial beside it, previews, HP and mana */
+.elem-pick-wrap { display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: wrap; max-width: 100%; }
+.elem-pick-wrap > .elem-pick-card { width: min(94vw, 520px); }
+.elem-tut { width: min(94vw, 480px); max-height: 92vh; overflow: auto; display: grid; gap: 8px; background: var(--paper); border-left: 6px solid var(--ec); animation: elemSlide 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.elem-tut h3 { margin: 0; }
+.elem-tut p { margin: 0; font-size: 13px; }
+.elem-tut-rows { display: grid; gap: 6px; }
+.elem-tut-row { display: grid; grid-template-columns: 150px 1fr; gap: 8px; align-items: center; padding: 4px; border-radius: 10px; background: rgba(0, 0, 0, 0.05); }
+.elem-tut-row small { display: block; font-size: 11px; line-height: 1.25; }
+.elem-how { opacity: 0.75; margin-top: 2px; }
+.elem-prev { width: 150px; height: 96px; image-rendering: pixelated; border-radius: 8px; background: linear-gradient(#2b2f4d, #3d3556); }
+.elem-showcase { display: flex; gap: 10px; align-items: center; }
+.elem-showcase .elem-prev { width: 200px; height: 110px; flex: none; }
+.elem-tilefx { width: 64px; height: 40px; image-rendering: pixelated; }
+.elem-tile { background: linear-gradient(#2b2f4d, #3d3556); color: #fff; }
+.elem-tile.on { background: color-mix(in srgb, var(--ec) 40%, #2b2f4d); }
+@keyframes elemSlide { from { opacity: 0; transform: translateX(-40px) scale(0.96); } to { opacity: 1; transform: none; } }
+.elem-bars { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; pointer-events: auto; }
+.elem-hp { position: relative; width: min(220px, 44vw); height: 20px; border-radius: 10px; background: rgba(40, 8, 16, 0.75); border: 2px solid #ff8fa3; overflow: hidden; }
+.elem-hp-fill { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#ff7a8f, #d8344f); transition: width 0.12s; }
+.elem-hp b { position: relative; display: block; text-align: center; font-size: 12px; line-height: 16px; color: #fff; text-shadow: 0 1px 2px #000; }
+.elem-bars .elem-mana { width: min(220px, 44vw); }
+.elem-recharge { cursor: pointer; border: 2px solid #8fd0ff; border-radius: 10px; background: rgba(8, 14, 40, 0.8); color: #fff; font: 700 12px/1 inherit; padding: 4px 8px; user-select: none; touch-action: none; }
+.elem-recharge.on { background: #2a6fe0; box-shadow: 0 0 12px 2px #7ad0ff; }
+@media (max-width: 640px) { .elem-tut-row { grid-template-columns: 110px 1fr; } .elem-prev { width: 110px; height: 70px; } }

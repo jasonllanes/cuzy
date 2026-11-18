@@ -597,12 +597,25 @@ export class WaveSim {
     m.dirv = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 2 : 3) : dy >= 0 ? 0 : 1;
 
     if (def.summon && m.state !== 'dead') this.wizardSummon(m, def, dt);
+    if (def.heals && m.state !== 'dead') {
+      // the Priestess: now and then she heals every hurt monster close to her
+      m.healT = (m.healT ?? 3) - dt;
+      if (m.healT <= 0) {
+        const hurt = this.monsters.filter((q) => q !== m && q.state !== 'dead' && q.hp < q.max * 0.8 && Math.hypot(q.x - m.x, q.y - m.y) < 130);
+        if (hurt.length) {
+          m.healT = 4.5;
+          m.atk = 0.5;
+          for (const q of hurt) q.hp = Math.min(q.max, q.hp + q.max * 0.3);
+          this.emit({ type: 'mheal', x: Math.round(m.x), y: Math.round(m.y), pts: hurt.slice(0, 8).map((q) => [Math.round(q.x), Math.round(q.y)]) });
+        } else m.healT = 1.5;
+      }
+    }
     if (def.kind === 'shoot') {
       const inRange = dist <= def.range;
       if (!inRange) this.step(m, def, (dx / dist) * speed * dt, (dy / dist) * speed * dt);
       else if (dist < def.range * 0.5) this.step(m, def, (-dx / dist) * speed * 0.6 * dt, (-dy / dist) * speed * 0.6 * dt);
       const houseNear = distToRect(m.x, m.y, this.house) < def.range;
-      if (m.cd <= 0 && (inRange || (kind === 'house' && houseNear))) {
+      if (m.cd <= 0 && !def.heals && (inRange || (kind === 'house' && houseNear))) { // (a healer does not shoot)
         const sx = kind === 'house' ? this.center.x - m.x : dx;
         const sy = kind === 'house' ? this.center.y - m.y : dy;
         const sl = Math.hypot(sx, sy) || 1;

@@ -11,6 +11,7 @@ import IntroScene from './IntroScene';
 import OpeningScene from './OpeningScene';
 import EvacScene from './EvacScene';
 import AirPlanOverlay from './AirPlanOverlay';
+import ElementHud from './ElementHud';
 import { AIR_SUPPORT } from '../game/upgrades';
 import TravelScene from './TravelScene';
 import GameOverScene from './GameOverScene';
@@ -609,6 +610,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         setSelected(Number(digit[1]) - 1);
         return;
       }
+      if (gameRef.current?.elem && ['KeyE', 'KeyQ', 'KeyX', 'KeyR', 'KeyK', 'KeyC'].includes(e.code)) return; // (the element's own skills)
       if ((!waves || survival) && e.code === 'KeyE' && !e.repeat && !modal) {
         gameRef.current?.useSupply('stam'); // E stamina, Q health
         return;
@@ -881,7 +883,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         <div className="stamina-track"><div className="stamina-fill" style={{ width: `${hud.stamina * 100}%` }} /></div>
       </div>
       {mobile && <TouchControls game={gameRef.current} hud={hud} survival={survival} waves={waves} onChat={() => setChatOpen(true)} onShop={() => setUpgOpen(true)} onSupply={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
-      {!mobile && <div className="hud hud-help">{waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
+      {!mobile && <div className="hud hud-help">{hud.elem ? <>WASD move · Click bolt · Space tap dash · hold C (or Space) to recharge mana · R block · Q / E element skills · X ultimate · K skills · F pick up · M map</> : waves ? <>WASD move · Shift sprint · Click slash · Space dash · R shield · Right-click {survival ? 'shoot or throw the selected item' : 'throw'} · F pick up · Q/E heal & stamina · T turn wall · H recall · 1-9/wheel select · Tab switch melee · B buy · M map</> : <>WASD move · Shift sprint · Click attack · Space dash · R shield/invisibility · Right-click throw · F pick up · Q health · E stamina · H recall · 1-9/wheel select · Tab weapon · B buy · M map</>}</div>}
       {(hud.hidden || hud.inWater) && (
         <div className="hud status-pill panel small">
           {hud.hidden ? '🏠 Hiding · nobody can see you' : '🌊 Wading · slow going'}
@@ -899,7 +901,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
         {hud.recallCd > 0 && <b>{Math.ceil(hud.recallCd)}s</b>}
         <i className="recall-cd" style={{ width: `${Math.min(100, (hud.recallCd / RECALL_CD) * 100)}%` }} />
       </button>
-      <div className={`hud skills left ${survival ? 'with-gun' : ''}`}>
+      {!hud.elem && <div className={`hud skills left ${survival ? 'with-gun' : ''}`}>
         {(waves || hud.util === 'shield' || !hud.util) && (
         <button
           className={`skill ${hud.shieldT > 0 ? 'active' : ''} ${hud.shieldCd > 0 ? 'cooling' : 'ready'}`}
@@ -957,14 +959,14 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <kbd>Tab</kbd>
           </button>
         )}
-      </div>
-      <div className="hud skills right">
+      </div>}
+      {!hud.elem && <div className="hud skills right">
         <div className={`skill dash-skill ${hud.dashCd > 0 ? 'cooling' : 'ready'}`} title={hud.activeSkill ? (waves ? 'Press Space (hold it to charge) to dash' : 'Press Space (hold it to charge) or hold left click, then release, to use your sword skill') : 'Sword skill: Dash unlocks at level 6, Spiral Sword at level 8'}>
           <span className="skill-icon">{hud.activeSkill === 'grapple' ? '🪝' : hud.activeSkill === 'dash' ? '💨' : '🔒'}</span>
           <small>{hud.activeSkill ? (waves ? 'hold click' : 'Space') : 'locked'}</small>
           <span className="skill-cd" style={{ height: `${Math.min(100, (hud.dashCd / (hud.activeSkill === 'grapple' ? 1.5 : 1.2)) * 100)}%` }} />
         </div>
-      </div>
+      </div>}
       {(waves || hud.gunSel) && (
         <div className={`hud throw-meter ${survival || hud.gunSel ? (hud.reloading ? 'locked' : '') : hud.tLocked ? 'locked' : ''}`}>
           <span>{survival || hud.gunSel ? (hud.reloading ? '🔄 Reloading…' : `${GUNS[hud.gun]?.icon || '🔫'} ${hud.ammo ?? 0} / ${hud.gunMag || GUNS[hud.gun]?.mag || 12}${hud.gunSel ? ` · 🎒 ${hud.bullets}` : ''}`) : hud.tLocked ? 'Catching your arm…' : '🪨 Throw'}</span>
@@ -1058,7 +1060,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           </div>
         </div>
       )}
-      {(!waves || survival) && <SupplyBar keys={['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
+      {(!waves || survival) && !hud.elem && <SupplyBar keys={['Q', 'E']} cds={hud.cds} supplies={hud.supplies || { hp: 0, stam: 0 }} consumables={hud.consumables} open={supplyOpen} onOpen={(k) => setSupplyOpen((o) => (o === k ? null : k))} />}
       {supplyOpen && (!waves || survival) && <SupplyMenu kind={supplyOpen} hud={hud} game={gameRef.current} onClose={() => setSupplyOpen(null)} />}
       <CompassPanel compass={hud.compass} />
       {hud.escape && (
@@ -1165,7 +1167,8 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
           <span>{banner.sub}</span>
         </div>
       )}
-      <Hotbar
+      {hud.elem && <ElementHud hud={hud} game={gameRef.current} />}
+      {!hud.elem && <Hotbar
         slots={inventory}
         selected={selected}
         onSelect={setSelected}
@@ -1186,7 +1189,7 @@ export default function GameView({ assets, profile, net, session, onExit, onRoun
             <small>{GUNS[hud.gun].name}</small>
           </button>
         )}
-      </Hotbar>
+      </Hotbar>}
       {hud.celeb && (
         <div key="round-flash" className="levelup-flash round-flash" aria-hidden="true">
           <span className="levelup-glow" />
