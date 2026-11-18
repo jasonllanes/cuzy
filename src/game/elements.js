@@ -9,6 +9,10 @@ import { sfx } from './sfx';
 
 const AIR_PAL = ['#10303a', '#1d5a66', '#2f8c94', '#5cc6c0', '#9ae6dc', '#d2fbf2', '#effffa', '#ffffff'];
 const TAU = Math.PI * 2;
+const hexRgb = (h) => {
+  const n = parseInt(String(h).slice(1), 16) || 0xff5050;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
 const rnd = (a, b) => a + Math.random() * (b - a);
 const seed = () => 1 + Math.floor(Math.random() * 50);
 
@@ -27,7 +31,7 @@ export const ELEMENTS = {
   earth: {
     name: 'Earth', icon: '🪨', color: '#b08a58', pal: PAL.earth, blurb: 'Stone and stun. Slow to hurt, hard to stop.',
     skills: {
-      shoot: { name: 'Rock Throw', desc: 'Hurls a boulder that cracks on impact.', kind: 'proj', dmg: 1.7, speed: 200, r: 9, proj: { id: 'projectiles/energy-disc', o: { palette: PAL.earth }, k: 0.5 }, hitFx: ['impacts/hit-spark', 0.5] },
+      shoot: { name: 'Rock Throw', desc: 'Hurls a boulder that cracks on impact.', kind: 'proj', dmg: 1.7, speed: 200, r: 9, proj: { id: 'projectiles/energy-disc', o: { palette: PAL.earth }, k: 0.28 }, hitFx: ['impacts/hit-spark', 0.5] },
       dash: { name: 'Stone Rush', desc: 'Charge forward in a shower of rubble, knocking foes aside.', kind: 'dash', dist: 80, dur: 0.2, dmg: 2, trail: 'moves/earth-stomp', trailScale: 0.35, stun: 0.6 },
       block: { name: 'Stone Skin', desc: 'Stone wraps around you: nothing gets through for a moment.', kind: 'block', dur: 2.2, fx: 'holy/divine-shield', fxO: { palette: PAL.earth } },
       a: { name: 'Earth Spikes', desc: 'A line of spikes bursts from the ground, hurting and stunning.', kind: 'line', len: 150, step: 22, dmg: 3, stun: 1.2, w: 16, fx: 'nature/earth-spike', fxScale: 0.5 },
@@ -38,8 +42,8 @@ export const ELEMENTS = {
   fire: {
     name: 'Fire', icon: '🔥', color: '#ff7a2a', pal: PAL.fire, blurb: 'Burn everything. Big damage, burning over time.',
     skills: {
-      shoot: { name: 'Fireball', desc: 'A fireball that burns what it hits.', kind: 'proj', dmg: 1.9, speed: 230, r: 9, burn: 3, proj: { id: 'fire/fireball', k: 0.5 }, hitFx: ['explosions/small-explosion', 0.4] },
-      dash: { name: 'Flame Dash', desc: 'Rocket forward on a trail of fire that scorches foes.', kind: 'dash', dist: 100, dur: 0.18, dmg: 2.5, trail: 'fire/spirit-flame', trailScale: 0.4, burn: 3 },
+      shoot: { name: 'Fireball', desc: 'A fireball that burns what it hits.', kind: 'proj', dmg: 1.9, speed: 230, r: 9, burn: 3, proj: { id: 'fire/fireball', k: 0.26 }, hitFx: ['explosions/small-explosion', 0.4] },
+      dash: { name: 'Flame Dash', desc: 'Rocket forward on a trail of fire that scorches foes.', kind: 'dash', dist: 100, dur: 0.18, dmg: 2.5, trail: 'fire/spirit-flame', trailO: { palette: PAL.fire }, trailScale: 0.4, burn: 3 },
       block: { name: 'Flame Barrier', desc: 'A ring of fire guards you.', kind: 'block', dur: 2.2, fx: 'fire/fire-ring', fxO: {}, fxScale: 0.5 },
       a: { name: 'Fire Breath', desc: 'A cone of flame in front of you.', kind: 'cone', r: 90, half: 0.65, dmg: 4, burn: 4, kb: 40, fx: [['fire/fire-breath', 0.7]] },
       b: { name: 'Flame Pillar', desc: 'A pillar of fire erupts where you aim.', kind: 'point', range: 220, delay: 0.45, r: 36, dmg: 6, burn: 4, fx: [['fire/flame-pillar', 0.7]] },
@@ -49,7 +53,7 @@ export const ELEMENTS = {
   ice: {
     name: 'Ice', icon: '❄️', color: '#7fd4ff', pal: PAL.ice, blurb: 'Freeze and shatter. Control the crowd.',
     skills: {
-      shoot: { name: 'Ice Lance', desc: 'A piercing lance that slows what it hits.', kind: 'proj', dmg: 1.6, speed: 260, r: 8, pierce: true, slow: 2, proj: { id: 'ice/ice-lance', k: 0.5 }, hitFx: ['ice/ice-shatter', 0.5] },
+      shoot: { name: 'Ice Lance', desc: 'A piercing lance that slows what it hits.', kind: 'proj', dmg: 1.6, speed: 260, r: 8, pierce: true, slow: 2, proj: { id: 'ice/ice-lance', k: 0.24 }, hitFx: ['ice/ice-shatter', 0.5] },
       dash: { name: 'Ice Slide', desc: 'Skate forward leaving frost behind.', kind: 'dash', dist: 100, dur: 0.2, dmg: 1.5, trail: 'ice/snowflake-burst', trailScale: 0.35, slow: 2.5 },
       block: { name: 'Ice Armor', desc: 'Crystal armor takes every blow.', kind: 'block', dur: 2.4, fx: 'ice/ice-crystal', fxO: {}, fxScale: 0.5 },
       a: { name: 'Frost Nova', desc: 'A freezing ring that locks everything nearby in ice.', kind: 'nova', r: 85, dmg: 3, stun: 2.2, fx: [['ice/frost-nova', 0.7]] },
@@ -60,7 +64,7 @@ export const ELEMENTS = {
   lightning: {
     name: 'Lightning', icon: '⚡', color: '#ffe84a', pal: PAL.electric, blurb: 'Fast and sharp: chains, blinks and stuns.',
     skills: {
-      shoot: { name: 'Spark Bolt', desc: 'A fast ball of lightning that zaps on impact.', kind: 'proj', dmg: 1.6, speed: 300, r: 8, proj: { id: 'lightning/ball-lightning', k: 0.5 }, hitFx: ['lightning/zap-hit', 0.5] },
+      shoot: { name: 'Spark Bolt', desc: 'A fast ball of lightning that zaps on impact.', kind: 'proj', dmg: 1.6, speed: 300, r: 8, proj: { id: 'lightning/ball-lightning', k: 0.22, mid: true }, hitFx: ['lightning/zap-hit', 0.5] },
       dash: { name: 'Lightning Step', desc: 'Blink along the lightning: zaps everything on the way.', kind: 'dash', dist: 110, dur: 0, dmg: 2.5, blink: true, trail: 'lightning/zap-hit', trailScale: 0.5, endFx: 'lightning/lightning-strike' },
       block: { name: 'Static Field', desc: 'A crackling field blocks everything.', kind: 'block', dur: 2.2, fx: 'lightning/electrified', fxO: {}, fxScale: 0.5 },
       a: { name: 'Chain Lightning', desc: 'Jumps from foe to foe, stunning each.', kind: 'chain', n: 5, reach: 150, dmg: 3.5, stun: 0.9, fx: 'lightning/chain-lightning' },
@@ -71,7 +75,7 @@ export const ELEMENTS = {
   water: {
     name: 'Water', icon: '💧', color: '#4fb0ff', pal: PAL.water, blurb: 'Heal yourself, push foes around.',
     skills: {
-      shoot: { name: 'Water Orb', desc: 'A rolling orb of water.', kind: 'proj', dmg: 1.7, speed: 210, r: 9, kb: 30, proj: { id: 'water/water-orb', k: 0.5 }, hitFx: ['water/splash', 0.5] },
+      shoot: { name: 'Water Orb', desc: 'A rolling orb of water.', kind: 'proj', dmg: 1.7, speed: 210, r: 9, kb: 30, proj: { id: 'water/water-orb', k: 0.24, mid: true }, hitFx: ['water/splash', 0.5] },
       dash: { name: 'Wave Rush', desc: 'Ride a wave forward and wash foes aside.', kind: 'dash', dist: 100, dur: 0.2, dmg: 1.5, trail: 'water/splash', trailScale: 0.4, slow: 1.5 },
       block: { name: 'Bubble', desc: 'A bubble swallows every blow.', kind: 'block', dur: 2.4, fx: 'water/bubbles', fxO: {}, fxScale: 0.5 },
       a: { name: 'Healing Spring', desc: 'A spring heals you (a third of your health).', kind: 'heal', pct: 0.34, fx: [['holy/heal', 0.7], ['water/fountain', 0.5]] },
@@ -82,7 +86,7 @@ export const ELEMENTS = {
   air: {
     name: 'Air', icon: '🌪️', color: '#a9f0e4', pal: AIR_PAL, blurb: 'Fastest of all: tornadoes, gusts and speed.',
     skills: {
-      shoot: { name: 'Air Slash', desc: 'A razor of wind that cuts through foes.', kind: 'proj', dmg: 1.5, speed: 280, r: 9, pierce: true, proj: { id: 'projectiles/energy-disc', o: { palette: AIR_PAL }, k: 0.5 }, hitFx: ['impacts/hit-spark', 0.4] },
+      shoot: { name: 'Air Slash', desc: 'A razor of wind that cuts through foes.', kind: 'proj', dmg: 1.5, speed: 280, r: 9, pierce: true, proj: { id: 'projectiles/energy-disc', o: { palette: AIR_PAL }, k: 0.28 }, hitFx: ['impacts/hit-spark', 0.4] },
       dash: { name: 'Gust Dash', desc: 'The longest dash: you ride the wind.', kind: 'dash', dist: 130, dur: 0.2, dmg: 1, trail: 'weather/clouds', trailScale: 0.25, trailO: { palette: AIR_PAL } },
       block: { name: 'Wind Wall', desc: 'A wall of wind turns everything away.', kind: 'block', dur: 2.2, fx: 'holy/divine-shield', fxO: { palette: AIR_PAL } },
       a: { name: 'Tornado', desc: 'A tornado at your aim that sucks foes in and hurts them.', kind: 'zone', range: 190, r: 60, dur: 4, tick: 0.35, dmg: 2.2, pull: 60, fx: 'nature/tornado', fxScale: 0.55 },
@@ -93,7 +97,7 @@ export const ELEMENTS = {
   arcane: {
     name: 'Arcane', icon: '🔮', color: '#c27cff', pal: PAL.arcane, blurb: 'Blink, stop time, call down stars.',
     skills: {
-      shoot: { name: 'Arcane Orb', desc: 'A slow orb that hits hard.', kind: 'proj', dmg: 2.3, speed: 190, r: 10, proj: { id: 'arcane/arcane-orb', k: 0.5 }, hitFx: ['arcane/mana-burst', 0.4] },
+      shoot: { name: 'Arcane Orb', desc: 'A slow orb that hits hard.', kind: 'proj', dmg: 2.3, speed: 190, r: 10, proj: { id: 'arcane/arcane-orb', k: 0.22, mid: true }, hitFx: ['arcane/mana-burst', 0.4] },
       dash: { name: 'Blink', desc: 'Vanish and appear a few steps ahead.', kind: 'dash', dist: 120, dur: 0, dmg: 0, blink: true, startFx: 'arcane/blink-out', endFx: 'arcane/blink-in' },
       block: { name: 'Mana Ward', desc: 'A rune ward that holds everything back.', kind: 'block', dur: 2.4, fx: 'holy/divine-shield', fxO: { palette: PAL.arcane } },
       a: { name: 'Arcane Missiles', desc: 'Five homing missiles for the nearest foes.', kind: 'chain', n: 5, reach: 190, dmg: 2.2, fx: 'arcane/arcane-missiles', spark: 'arcane/mana-burst' },
@@ -104,7 +108,7 @@ export const ELEMENTS = {
   nature: {
     name: 'Nature', icon: '🌿', color: '#6ccf5a', pal: PAL.leaf, blurb: 'Heal, root and poison. The healer of the group.',
     skills: {
-      shoot: { name: 'Thorn Shot', desc: 'A thorn that poisons.', kind: 'proj', dmg: 1.6, speed: 260, r: 8, burn: 3, proj: { id: 'projectiles/arrow', o: { palette: PAL.leaf }, k: 0.5 }, hitFx: ['nature/spore-burst', 0.4] },
+      shoot: { name: 'Thorn Shot', desc: 'A thorn that poisons.', kind: 'proj', dmg: 1.6, speed: 260, r: 8, burn: 3, proj: { id: 'projectiles/arrow', o: { palette: PAL.leaf }, k: 0.3 }, hitFx: ['nature/spore-burst', 0.4] },
       dash: { name: 'Vine Dash', desc: 'Vines whip you forward.', kind: 'dash', dist: 95, dur: 0.2, dmg: 1.5, trail: 'nature/vine-whip', trailScale: 0.4, slow: 1.5 },
       block: { name: 'Bark Skin', desc: 'Your skin turns to bark.', kind: 'block', dur: 2.4, fx: 'holy/divine-shield', fxO: { palette: PAL.leaf } },
       a: { name: 'Healing Bloom', desc: 'A flower blooms and heals you (40% of your health).', kind: 'heal', pct: 0.4, fx: [['nature/healing-bloom', 0.7], ['holy/heal', 0.6]] },
@@ -113,6 +117,19 @@ export const ELEMENTS = {
     },
   },
 };
+// the skill pictures (public/assets/skillicons): pixel icons from the Clockwork Raven pack and the Spells/Buffs packs
+export const SKILL_ICONS = {
+  fire: { shoot: 'cw0', dash: 'cw9', block: 'cw15', a: 'cw5', b: 'cw14', ult: 'cw3' },
+  ice: { shoot: 'cw56', dash: 'cw57', block: 'cw63', a: 'cw60', b: 'cw69', ult: 'cw70' },
+  lightning: { shoot: 'cw128', dash: 'cw129', block: 'cw143', a: 'cw133', b: 'cw131', ult: 'cw134' },
+  earth: { shoot: 'cw208', dash: 'cw217', block: 'cw223', a: 'cw222', b: 'cw213', ult: 'cw214' },
+  water: { shoot: 'water_spell', dash: 'cw57', block: 'cw63', a: 'healing_spell', b: 'cw73', ult: 'cw59' },
+  air: { shoot: 'cw266', dash: 'cw267', block: 'cw271', a: 'cw270', b: 'cw263', ult: 'cw262' },
+  arcane: { shoot: 'cw120', dash: 'cw121', block: 'cw127', a: 'cw114', b: 'cw175', ult: 'cw115' },
+  nature: { shoot: 'cw88', dash: 'cw89', block: 'cw95', a: 'healing_spell', b: 'cw198', ult: 'cw86' },
+};
+export const PASS_ICONS = { pool: 'mana_replenish', focus: 'regeneration' };
+export const iconUrl = (n) => `${import.meta.env.BASE_URL}assets/skillicons/${n}.png`;
 export const ELEMENT_IDS = Object.keys(ELEMENTS);
 
 export class ElementSystem {
@@ -129,6 +146,9 @@ export class ElementSystem {
     this.projs = [];
     this.zones = [];
     this.q = [];
+    this.teles = []; // warning marks on the ground (my own)
+    this.remoteTeles = []; // and other players' ones, so you can dodge them
+    this.castT = 0;
     this.burns = new Map();
     this.dashS = null;
     this.charging = false;
@@ -157,7 +177,28 @@ export class ElementSystem {
   }
 
   level(k) {
-    return this.lv[k] || (k === 'shoot' || k === 'dash' || k === 'block' ? 1 : 0);
+    return this.lv[k] ?? (k === 'shoot' || k === 'dash' || k === 'block' ? 1 : 0);
+  }
+
+  // take one level back off a skill and get the point again (the three starting skills keep their first level, which was free)
+  downgrade(k) {
+    const g = this.g;
+    if (!this.el) return false;
+    if (k === 'pool' || k === 'focus') {
+      if (this.pass[k] < 1) return false;
+      this.pass[k]--;
+      this.spent = Math.max(0, this.spent - 1);
+      this.mana = Math.min(this.maxMana(), this.mana);
+    } else {
+      const min = k === 'shoot' || k === 'dash' || k === 'block' ? 1 : 0;
+      if (!SKILL_KEYS.includes(k) || this.level(k) <= min) return false;
+      this.lv[k] = this.level(k) - 1;
+      this.spent = Math.max(0, this.spent - 1);
+    }
+    sfx.play('click', 0.6);
+    g.save?.();
+    g.emitHud();
+    return true;
   }
 
   mult(k) {
@@ -253,6 +294,7 @@ export class ElementSystem {
         ? SKILL_KEYS.map((k) => ({
             k,
             key: SKILL_LABEL[k],
+            ico: SKILL_ICONS[this.el][k],
             name: d.skills[k].name,
             desc: d.skills[k].desc,
             lv: this.level(k),
@@ -350,11 +392,120 @@ export class ElementSystem {
     const [cx, cy] = g.combat.center();
     const a = this.aimAngle([cx, cy]);
     g.combat.faceAim(a);
-    this.run(spec, k, m, cx, cy, a);
+    const wind = this.windOf(spec, k);
+    if (wind > 0) {
+      // the big skills take a moment: a mark on the ground shows everybody where it will land (and you move slowly while you gather it)
+      const pt = spec.kind === 'rain' ? this.cursorPoint(spec.range || 220, cx, cy) : null;
+      this.windTele(spec, wind, a, pt);
+      this.castT = wind;
+      this.later(wind, () => {
+        if (g.dead) return;
+        const [x2, y2] = g.combat.center();
+        this.run(spec, k, m, x2, y2, a, pt);
+      });
+    } else this.run(spec, k, m, cx, cy, a);
     return true;
   }
 
-  run(s, k, m, cx, cy, a) {
+  windOf(s, k) {
+    if (s.kind === 'nova') return k === 'ult' ? 0.7 : 0.35;
+    if (s.kind === 'cone') return 0.3;
+    if (s.kind === 'line') return 0.35;
+    if (s.kind === 'combo' || s.kind === 'rain') return 0.7;
+    return 0;
+  }
+
+  windTele(s, wind, a, pt) {
+    const first = s.kind === 'combo' ? s.parts[0] : s;
+    if (s.kind === 'rain') this.addTele({ k: 'c', x: pt.x, y: pt.y, r: s.rad, d: wind });
+    else if (first.kind === 'cone') this.addTele({ k: 'k', r: first.r, a, h: first.half, d: wind, f: 1 });
+    else if (first.kind === 'line') this.addTele({ k: 'l', l: first.len, w: first.w, a, d: wind, f: 1 });
+    else this.addTele({ k: 'c', r: first.r, d: wind, f: 1 });
+  }
+
+  // a warning mark: k = c (circle) | k (cone) | l (line); f = it moves with whoever cast it; d = how long it shows
+  addTele(o) {
+    const g = this.g;
+    const p = g.player;
+    const T = { grow: true, ...o, x: o.x ?? p.x, y: o.y ?? p.y - 4, t: 0, c: this.def().color };
+    this.teles.push(T);
+    if (g.mp) g.mp.net.send({ t: 'fx', kind: 'tele', k: T.k, x: Math.round(T.x), y: Math.round(T.y), r: T.r || 0, a: T.a || 0, h: T.h || 0, l: T.l || 0, w: T.w || 0, d: T.d, f: T.f ? 1 : 0, gr: T.grow ? 1 : 0, c: T.c });
+  }
+
+  addRemoteTele(m, src) {
+    if (!['c', 'k', 'l'].includes(m.k) || !(m.d > 0)) return;
+    this.remoteTeles.push({ k: m.k, x: m.x, y: m.y, r: Math.min(260, m.r || 0), a: m.a || 0, h: m.h || 0, l: Math.min(300, m.l || 0), w: Math.min(60, m.w || 0), d: Math.min(12, m.d), f: !!m.f, grow: !!m.gr, c: m.c, src, t: 0 });
+    if (this.remoteTeles.length > 40) this.remoteTeles.shift();
+  }
+
+  updateTeles(dt) {
+    const g = this.g;
+    for (const T of this.teles) {
+      T.t += dt;
+      if (T.f) {
+        T.x = g.player.x;
+        T.y = g.player.y - 4;
+      }
+    }
+    this.teles = this.teles.filter((T) => T.t < T.d + 0.15);
+    for (const T of this.remoteTeles) {
+      T.t += dt;
+      const r = T.f && T.src ? g.remotes.get(T.src) : null;
+      if (r) {
+        T.x = r.x;
+        T.y = r.y - 4;
+      }
+    }
+    this.remoteTeles = this.remoteTeles.filter((T) => T.t < T.d + 0.15);
+  }
+
+  drawTeles(ctx, t) {
+    for (const T of [...this.teles, ...this.remoteTeles]) {
+      const [r, gg, b] = hexRgb(T.c);
+      const p = Math.min(1, T.t / T.d);
+      const fade = T.t > T.d ? Math.max(0, 1 - (T.t - T.d) / 0.15) : 1;
+      const pulse = 0.65 + 0.35 * Math.sin(t * 12);
+      ctx.save();
+      ctx.translate(Math.round(T.x), Math.round(T.y + 4));
+      ctx.globalAlpha = fade;
+      ctx.scale(1, 0.85);
+      ctx.fillStyle = `rgba(${r},${gg},${b},0.16)`;
+      ctx.strokeStyle = `rgba(255,255,255,${0.55 * pulse + 0.25})`;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      const shape = (sc) => {
+        ctx.beginPath();
+        if (T.k === 'c') ctx.arc(0, 0, T.r * sc, 0, TAU);
+        else if (T.k === 'k') {
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, T.r * sc, T.a - T.h, T.a + T.h);
+          ctx.closePath();
+        } else {
+          const ca = Math.cos(T.a);
+          const sa = Math.sin(T.a);
+          const L = T.l * sc;
+          ctx.moveTo(-sa * T.w, ca * T.w);
+          ctx.lineTo(ca * L - sa * T.w, sa * L + ca * T.w);
+          ctx.lineTo(ca * L + sa * T.w, sa * L - ca * T.w);
+          ctx.lineTo(sa * T.w, -ca * T.w);
+          ctx.closePath();
+        }
+      };
+      shape(1);
+      ctx.fill();
+      ctx.stroke();
+      if (T.grow) {
+        // the inner shape fills up as the skill gets ready: when it is full, it lands
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(${r},${gg},${b},${0.2 + 0.22 * pulse})`;
+        shape(p);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  run(s, k, m, cx, cy, a, pt) {
     const g = this.g;
     const p = g.player;
     const kind = s.kind;
@@ -383,7 +534,8 @@ export class ElementSystem {
     } else if (kind === 'chain') {
       this.chain(s, m, cx, cy, a);
     } else if (kind === 'point') {
-      const t = this.cursorPoint(s.range, cx, cy);
+      const t = pt || this.cursorPoint(s.range, cx, cy);
+      this.addTele({ k: 'c', x: t.x, y: t.y, r: s.r, d: s.delay });
       this.vis(s.fx[0][0], t.x, t.y + 4, { scale: s.fx[0][1] * 0.6, noNet: false });
       this.later(s.delay, () => {
         for (const [id, sc] of s.fx) this.vis(id, t.x, t.y + 6, { scale: sc });
@@ -391,12 +543,12 @@ export class ElementSystem {
         sfx.play('explosion', 0.4);
       });
     } else if (kind === 'rain') {
-      const t = this.cursorPoint(s.range || 220, cx, cy);
+      const t = pt || this.cursorPoint(s.range || 220, cx, cy);
       this.rain(s, m, t);
     } else if (kind === 'zone') {
       this.zone(s, m, cx, cy);
     } else if (kind === 'combo') {
-      s.parts.forEach((part, i) => this.later(i * 0.45, () => this.run(part, k, m, cx, cy, a)));
+      s.parts.forEach((part, i) => this.later(i * 0.45, () => this.run(part, k, m, cx, cy, a, pt)));
     }
     if (kind === 'nova' || kind === 'cone' || kind === 'zone' || kind === 'rain' || kind === 'combo') sfx.play(k === 'ult' ? 'e_ult' : 'explosion', k === 'ult' ? 0.9 : 0.5);
   }
@@ -509,6 +661,7 @@ export class ElementSystem {
       const x = t.x + rnd(-s.rad, s.rad) * 0.9;
       const y = t.y + rnd(-s.rad, s.rad) * 0.6;
       this.later(i * s.gap, () => {
+        this.addTele({ k: 'c', x, y, r: s.r, d: 0.4 });
         for (const [id, sc] of s.fx) this.vis(id, x, y + 8, { scale: sc });
         this.later(0.35, () => {
           if (s.boom) this.vis(s.boom, x, y + 4, { scale: 0.55 });
@@ -522,6 +675,7 @@ export class ElementSystem {
     const g = this.g;
     const t = s.self ? { x: g.player.x, y: g.player.y - 4 } : this.cursorPoint(s.range, cx, cy);
     const z = { s, m, x: t.x, y: t.y, t: 0, dur: s.dur, acc: 0 };
+    this.addTele({ k: 'c', x: t.x, y: t.y, r: s.r, d: s.dur, f: s.self ? 1 : 0, grow: false });
     this.zones.push(z);
     const follow = s.self ? () => ({ x: g.player.x, y: g.player.y + 4 }) : null;
     g.pfx.spawn(s.fx, t.x, t.y + 6, { scale: s.fxScale || 0.7, life: s.dur, follow, seed: seed(), ...(s.fxO || {}) });
@@ -601,7 +755,7 @@ export class ElementSystem {
   }
 
   speedMul() {
-    return this.haste > 0 ? 1.45 : 1;
+    return (this.haste > 0 ? 1.45 : 1) * (this.castT > 0 ? 0.45 : 1);
   }
 
   // taking a hit breaks your concentration
@@ -618,12 +772,12 @@ export class ElementSystem {
     if (kind === 'mana') {
       this.mana = Math.min(this.maxMana(), this.mana + 30);
       g.combat.addFloater({ x: p.x, y: p.y - 40, text: '+30 mana', color: '#7aa8ff', t: 0 });
-      g.pfx.spawn('pickups/collect-burst', p.x, p.y - 4, {});
+      g.pfx.spawn('pickups/collect-burst', p.x, p.y - 4, { scale: 0.45 });
     } else if (kind === 'star') {
       this.mana = this.maxMana();
       this.empower = 10;
       g.combat.addFloater({ x: p.x, y: p.y - 44, text: 'POWER!', color: '#ffe36b', t: 0, big: true });
-      g.pfx.spawn('pickups/collect-burst', p.x, p.y - 4, { scale: 1.3 });
+      g.pfx.spawn('pickups/collect-burst', p.x, p.y - 4, { scale: 0.7 });
       g.pfx.spawn('holy/sunburst', p.x, p.y + 4, { scale: 0.45, seed: seed() });
       g.onToast?.('⭐ Power star! Full mana and 1.5x damage for 10 seconds, skills cost nothing.');
     }
@@ -646,6 +800,8 @@ export class ElementSystem {
     this.projs.length = 0;
     this.zones.length = 0;
     this.q.length = 0;
+    this.teles.length = 0;
+    this.castT = 0;
     this.dashS = null;
     this.empower = 0;
     this.haste = 0;
@@ -662,11 +818,13 @@ export class ElementSystem {
   // ---------- every frame ----------
   update(dt) {
     const g = this.g;
+    this.updateTeles(dt);
     if (!this.el) {
       g.paused = true; // (nothing moves until you have picked an element)
       return;
     }
     const p = g.player;
+    this.castT = Math.max(0, this.castT - dt);
     for (const k in this.cd) this.cd[k] = Math.max(0, this.cd[k] - dt);
     if (this.empower > 0) this.empower = Math.max(0, this.empower - dt);
     if (this.haste > 0) this.haste = Math.max(0, this.haste - dt);
@@ -819,6 +977,7 @@ export class ElementSystem {
 
   // ---------- drawing ----------
   draw(ctx, t) {
+    this.drawTeles(ctx, t);
     if (!this.el) return;
     for (const b of this.projs) {
       const bk = bakedLoop(b.s.proj.id, b.s.proj.o || {}, 15);
@@ -826,7 +985,10 @@ export class ElementSystem {
       ctx.save();
       ctx.translate(Math.round(b.x), Math.round(b.y));
       ctx.rotate(b.a);
-      drawBaked(ctx, bk, 0, 0, t + b.x * 0.01, false, 1, b.s.proj.k || 0.5);
+      const kk = b.s.proj.k || 0.3;
+      // (round ones are centred on the bolt; the streaks are drawn from their bright head so the tail trails behind)
+      if (b.s.proj.mid) drawBaked(ctx, bk, (bk.ox - bk.W / 2) * kk, (bk.oy - bk.H / 2) * kk, t + b.x * 0.01, false, 1, kk);
+      else drawBaked(ctx, bk, 0, 0, t + b.x * 0.01, false, 1, kk);
       ctx.restore();
     }
   }

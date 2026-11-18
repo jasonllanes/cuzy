@@ -17,15 +17,16 @@ const SPELL_LOOK = {
 
 // which pixelfx loop a dropped item is drawn as, and the colour of the light beam over a rare one
 const DROP_LOOP = {
-  coin: { id: 'pickups/coin-spin' },
-  gem: { id: 'pickups/gem-spin' },
-  heart: { id: 'pickups/heart-pickup' },
-  hppack: { id: 'pickups/heart-pickup' },
-  hp: { id: 'pickups/potion' },
-  stam: { id: 'pickups/potion', o: { palette: PAL.leaf } },
-  key: { id: 'pickups/key-glint' },
-  mana: { id: 'pickups/potion', o: { palette: ['#06142a', '#0c2e5c', '#134f9e', '#1f7de0', '#4fb0ff', '#8fd4ff', '#cdeeff', '#ffffff'] } },
-  star: { id: 'pickups/power-star' },
+// (k = how big it is drawn: pickups are small things on the ground)
+  coin: { id: 'pickups/coin-spin', k: 0.34 },
+  gem: { id: 'pickups/gem-spin', k: 0.34 },
+  heart: { id: 'pickups/heart-pickup', k: 0.36 },
+  hppack: { id: 'pickups/heart-pickup', k: 0.36 },
+  hp: { id: 'pickups/potion', k: 0.32 },
+  stam: { id: 'pickups/potion', o: { palette: PAL.leaf }, k: 0.32 },
+  key: { id: 'pickups/key-glint', k: 0.4 },
+  mana: { id: 'pickups/potion', k: 0.32, o: { palette: ['#06142a', '#0c2e5c', '#134f9e', '#1f7de0', '#4fb0ff', '#8fd4ff', '#cdeeff', '#ffffff'] } },
+  star: { id: 'pickups/power-star', k: 0.34 },
 };
 const BEAM_TIER = { rare: PAL.ice, epic: PAL.arcane, legendary: PAL.gold };
 import { ITEMS, RARITIES, breaksOnImpact, iconOf, rarityOf, throwDamage, throwStats } from './items';
@@ -463,7 +464,7 @@ export class Combat {
   }
 
   attack() {
-    if (!this.allowed('melee')) return;
+    if (this.g.elem || !this.allowed('melee')) return; // (no weapons in the Elemental Lands)
     if (!this.canFight()) {
       this.warnIndoors();
       return;
@@ -853,7 +854,7 @@ export class Combat {
 
   skillKeyDown() {
     if (this.skillHold) return;
-    if (!this.allowed('melee')) return;
+    if (this.g.elem || !this.allowed('melee')) return; // (no weapons in the Elemental Lands)
     if (!this.canFight()) {
       this.warnIndoors();
       return;
@@ -922,7 +923,7 @@ export class Combat {
   // ---------- dash (hold + release left click) ----------
 
   holdStart() {
-    if (!this.allowed('melee')) return;
+    if (this.g.elem || !this.allowed('melee')) return; // (no weapons in the Elemental Lands)
     if (!this.canFight()) {
       this.warnIndoors();
       return;
@@ -4063,7 +4064,7 @@ export class Combat {
       } else if (f.text === 'CRIT!') {
         if (pfx.spawn('ui/crit-number', f.x, f.y + 34, { text: 'CRIT', label: '', scale: 0.5, seed: 1 + Math.floor(Math.random() * 50) })) return;
       } else if (/^\+\d+ (?!XP)/.test(f.text) && f.y > this.g.player.y - 40 && f.y < this.g.player.y - 28) {
-        pfx.spawn('pickups/collect-burst', f.x, f.y + 34, {});
+        pfx.spawn('pickups/collect-burst', f.x, f.y + 34, { scale: 0.45 });
       }
     }
     this.floaters.push(f);
@@ -4123,12 +4124,12 @@ export class Combat {
       const tier = !d.wid && ITEMS[d.id] ? rarityOf(d.id) : d.wid ? weaponRarity(weaponById(d.wid)) : 'common';
       if (BEAM_TIER[tier]) {
         const beam = bakedLoop('pickups/loot-beam', { palette: BEAM_TIER[tier] }, 12);
-        if (beam) drawBaked(ctx, beam, d.x, d.y + 2, t + d.x * 0.1, false, 0.8);
+        if (beam) drawBaked(ctx, beam, d.x, d.y + 2, t + d.x * 0.1, false, 0.8, 0.5);
       }
       const b = loop && !d.wid ? bakedLoop(loop.id, loop.o || {}, 15) : null;
       if (d.em && !b) return; // (its picture is still loading)
       if (b) {
-        drawBaked(ctx, b, d.x, d.y - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 0.8), t + d.x * 0.07);
+        drawBaked(ctx, b, d.x, d.y - (d.z || 0) + (d.fly ? 0 : Math.sin(t * 4 + d.x) * 0.8), t + d.x * 0.07, false, 1, loop.k || 0.4);
         return;
       }
     }

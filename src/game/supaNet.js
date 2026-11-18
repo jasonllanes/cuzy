@@ -1043,6 +1043,7 @@ export class SupaNet {
       case 'fx':
         if (m.kind === 'swing') this.bcast({ t: 'fx', id: this.me, kind: 'swing', a: num(m.a), w: clean(m.w, 12) });
         else if (m.kind === 'shield') this.bcast({ t: 'fx', id: this.me, kind: 'shield' });
+        else if (m.kind === 'tele') this.bcast({ t: 'fx', id: this.me, kind: 'tele', k: ['c', 'k', 'l'].includes(m.k) ? m.k : 'c', x: num(m.x), y: num(m.y), r: num(m.r), a: num(m.a), h: num(m.h), l: num(m.l), w: num(m.w), d: num(m.d), f: m.f ? 1 : 0, gr: m.gr ? 1 : 0, c: /^#[0-9a-f]{6}$/i.test(String(m.c)) ? String(m.c) : '#ff5050' });
         else if (m.kind === 'pfx') this.bcast({ t: 'fx', id: this.me, kind: 'pfx', fid: /^[a-z]+\/[a-z-]+$/.test(String(m.fid)) ? String(m.fid) : '', x: num(m.x), y: num(m.y), s: Math.max(0.1, Math.min(2, num(m.s) || 1)), a: num(m.a) });
         else if (m.kind === 'loot') this.bcast({ t: 'fx', id: this.me, kind: 'loot', ...(m.it === 'wood' ? { it: 'wood' } : {}), lid: clean(m.lid, 40), x: num(m.x), y: num(m.y), qty: Math.max(1, Math.min(99999, Math.round(Number(m.qty)) || 1)) });
         else if (m.kind === 'grab') this.bcast({ t: 'fx', id: this.me, kind: 'grab', lid: clean(m.lid, 40) });

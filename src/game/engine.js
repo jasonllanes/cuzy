@@ -3708,7 +3708,7 @@ export class Game {
     const y = Math.round(m.y);
     const dead = m.state === 'dead';
     const flyer = def.kind === 'fly' || def.fly;
-    const K = def.pfxK ?? 0.5; // (the critters are drawn bigger than our sprites: half size fits)
+    const K = def.pfxK ?? 0.36; // (the critters are drawn bigger than our sprites: about a third of their size fits)
     const H = (def.pfxH || 28) * K;
     ctx.fillStyle = 'rgba(30,20,30,0.28)';
     ctx.beginPath();
@@ -4588,6 +4588,8 @@ export class Game {
       // the server sends everyone back to the waiting room once the cheering is over
       this.celebrate(m.id, m.name, 6.9, 'Back to the room in a moment…');
       if (m.team !== undefined && m.team !== null && this.celeb) this.celeb.team = m.team; // a team won: everyone on it shares the cheer
+    } else if (m.t === 'fx' && m.kind === 'tele') {
+      this.elem?.addRemoteTele(m, m.id); // another hero's warning mark: so you can step out of it
     } else if (m.t === 'fx' && m.kind === 'pfx') {
       if (typeof m.fid === 'string' && Number.isFinite(m.x) && Number.isFinite(m.y)) this.pfx.spawn(m.fid, m.x, m.y, { scale: Math.min(2, m.s || 1), angle: m.a || 0, seed: 1 + Math.floor(Math.random() * 50) });
     } else if (m.t === 'fx' && m.kind === 'shield') {
